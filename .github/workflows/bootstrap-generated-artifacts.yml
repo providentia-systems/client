@@ -71,9 +71,10 @@ jobs:
             lib/core/database/app_database.dart drift_schemas/
 
       - name: Compile the web database worker
-        run: >-
-          dart compile js -O4
-          -o web/drift_worker.dart.js web/drift_worker.dart
+        run: |
+          dart compile js -O4 \
+            -o web/drift_worker.dart.js web/drift_worker.dart
+          rm -f web/drift_worker.dart.js.deps
 
       - name: Verify the pinned WebAssembly asset
         run: |
