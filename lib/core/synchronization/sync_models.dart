@@ -295,3 +295,9 @@ final class AuthorizationSyncException implements Exception {
 
   final String safeMessage;
 }
+
+final class ResyncRequiredSyncException implements Exception {
+  const ResyncRequiredSyncException(this.safeMessage);
+
+  final String safeMessage;
+}

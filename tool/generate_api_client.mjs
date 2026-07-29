@@ -128,9 +128,9 @@ function validateContract(document) {
   }
   if (
     document.info?.title !== 'Providentia API' ||
-    document.info?.version !== '1.2.0'
+    document.info?.version !== '1.3.0'
   ) {
-    throw new Error('Unexpected API title.');
+    throw new Error('Unexpected API identity or version.');
   }
 
   const expectedOperations = new Map([

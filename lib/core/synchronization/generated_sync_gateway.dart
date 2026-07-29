@@ -198,6 +198,10 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
       if (error.statusCode == 403) {
         throw AuthorizationSyncException(_safeProblem(error));
       }
+      if (error.statusCode == 410 &&
+          error.problem.type.endsWith('/sync_resync_required')) {
+        throw ResyncRequiredSyncException(_safeProblem(error));
+      }
       throw RetryableSyncException(_safeProblem(error));
     }
   }

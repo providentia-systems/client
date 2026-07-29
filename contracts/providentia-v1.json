@@ -2,9 +2,9 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Providentia API",
-    "version": "1.2.0",
-    "summary": "Authoritative Phase 2 and Phase 4 contract",
-    "description": "Identity, multi-home tenancy, published global catalog reads, and home-scoped offline synchronization."
+    "version": "1.3.0",
+    "summary": "Authoritative implemented Phase 2/4 increment contract",
+    "description": "Bounded identity, multi-home tenancy, published global catalog reads, and home-scoped offline synchronization prototype."
   },
   "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
   "servers": [{"url": "/"}],
@@ -20,7 +20,7 @@
         "security": [],
         "tags": ["Identity"],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RegisterRequest"}}}},
-        "responses": {"201": {"description": "Account created and verification sent", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RegisterResponse"}}}}, "409": {"$ref": "#/components/responses/Problem"}, "422": {"$ref": "#/components/responses/Problem"}}
+        "responses": {"202": {"description": "Generic accepted response whether the account is new or already exists", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RegisterResponse"}}}}, "422": {"$ref": "#/components/responses/Problem"}}
       }
     },
     "/api/v1/auth/verify-email": {
@@ -171,7 +171,7 @@
       "ReadinessStatus": {"type": "object", "required": ["status", "checks"], "properties": {"status": {"enum": ["ready", "not_ready"]}, "checks": {"type": "object"}}},
       "SystemInfo": {"type": "object", "required": ["product", "apiVersion", "applicationVersion", "environment", "runtime", "databaseDriver", "queueAdapter", "queueBroker"], "properties": {"product": {"const": "Providentia"}, "apiVersion": {"const": "v1"}, "applicationVersion": {"type": "string"}, "environment": {"type": "string"}, "runtime": {"type": "string"}, "databaseDriver": {"type": "string"}, "queueAdapter": {"const": "enqueue-redis"}, "queueBroker": {"enum": ["redis-compatible", "unknown"]}}},
       "RegisterRequest": {"type": "object", "additionalProperties": false, "required": ["email", "password", "displayName"], "properties": {"email": {"type": "string", "format": "email"}, "password": {"type": "string", "minLength": 12, "maxLength": 1024}, "displayName": {"type": "string", "minLength": 1, "maxLength": 120}, "locale": {"type": "string"}, "timezone": {"type": "string"}}},
-      "RegisterResponse": {"type": "object", "additionalProperties": false, "required": ["userId", "verificationRequired"], "properties": {"userId": {"type": "string", "format": "uuid"}, "verificationRequired": {"const": true}}},
+      "RegisterResponse": {"type": "object", "additionalProperties": false, "required": ["accepted", "verificationRequired"], "properties": {"accepted": {"const": true}, "verificationRequired": {"const": true}, "developmentVerificationToken": {"type": "string", "writeOnly": true, "description": "Present only in an explicitly enabled non-production development profile."}}},
       "EmailRequest": {"type": "object", "additionalProperties": false, "required": ["email"], "properties": {"email": {"type": "string", "format": "email"}}},
       "TokenRequest": {"type": "object", "additionalProperties": false, "required": ["token"], "properties": {"token": {"type": "string", "minLength": 40}}},
       "LoginRequest": {"type": "object", "additionalProperties": false, "required": ["email", "password", "deviceId", "deviceName", "platform"], "properties": {"email": {"type": "string", "format": "email"}, "password": {"type": "string"}, "deviceId": {"type": "string", "format": "uuid"}, "deviceName": {"type": "string"}, "platform": {"type": "string"}, "transport": {"enum": ["native", "web"], "default": "native"}}},
@@ -182,7 +182,28 @@
       "Home": {"type": "object", "required": ["id", "name", "revision"], "properties": {"id": {"type": "string", "format": "uuid"}, "name": {"type": "string"}, "defaultLocale": {"type": "string"}, "defaultCurrency": {"type": "string"}, "defaultTimezone": {"type": "string"}, "role": {"$ref": "#/components/schemas/HomeRole"}, "revision": {"type": "integer"}}},
       "HomeMembership": {"type": "object", "required": ["userId", "role", "revision"], "properties": {"userId": {"type": "string", "format": "uuid"}, "displayName": {"type": "string"}, "role": {"$ref": "#/components/schemas/HomeRole"}, "revision": {"type": "integer"}}},
       "InvitationCreated": {"type": "object", "additionalProperties": false, "required": ["invitationId", "expiresAt", "delivery"], "properties": {"invitationId": {"type": "string", "format": "uuid"}, "expiresAt": {"type": "string", "format": "date-time"}, "delivery": {"const": "transactional-email"}}},
-      "SyncOperation": {"type": "object", "additionalProperties": false, "required": ["operationId", "entityType", "entityId", "operationType", "clientTimestamp", "payloadSchemaVersion", "payload"], "properties": {"operationId": {"type": "string", "format": "uuid"}, "entityType": {"enum": ["home-preference", "private-note"]}, "entityId": {"type": "string", "format": "uuid"}, "operationType": {"enum": ["put", "delete"]}, "baseRevision": {"type": ["integer", "null"], "minimum": 0}, "clientTimestamp": {"type": "string", "format": "date-time"}, "payloadSchemaVersion": {"const": 1}, "payload": {"type": "object", "maxProperties": 128}}},
+      "SyncPrivateNotePayload": {"type": "object", "additionalProperties": false, "required": ["body"], "properties": {"title": {"type": "string", "maxLength": 120}, "body": {"type": "string", "minLength": 1, "maxLength": 4000}}},
+      "SyncHomePreferencePayload": {"type": "object", "additionalProperties": false, "minProperties": 1, "properties": {"defaultLocale": {"type": "string", "pattern": "^[a-z]{2,3}(?:-[A-Z]{2})?$"}, "defaultCurrency": {"type": "string", "pattern": "^[A-Z]{3}$"}, "defaultTimezone": {"type": "string", "minLength": 1, "maxLength": 64}, "measurementSystem": {"enum": ["metric", "imperial"]}}},
+      "SyncOperation": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["operationId", "entityType", "entityId", "operationType", "clientTimestamp", "payloadSchemaVersion", "payload"],
+        "properties": {
+          "operationId": {"type": "string", "format": "uuid"},
+          "entityType": {"enum": ["home-preference", "private-note"]},
+          "entityId": {"type": "string", "format": "uuid"},
+          "operationType": {"enum": ["put", "delete"]},
+          "baseRevision": {"type": ["integer", "null"], "minimum": 0},
+          "clientTimestamp": {"type": "string", "format": "date-time"},
+          "payloadSchemaVersion": {"const": 1},
+          "payload": {"type": "object"}
+        },
+        "allOf": [
+          {"if": {"properties": {"operationType": {"const": "delete"}}, "required": ["operationType"]}, "then": {"properties": {"payload": {"type": "object", "maxProperties": 0}}}},
+          {"if": {"properties": {"operationType": {"const": "put"}, "entityType": {"const": "private-note"}}, "required": ["operationType", "entityType"]}, "then": {"properties": {"payload": {"$ref": "#/components/schemas/SyncPrivateNotePayload"}}}},
+          {"if": {"properties": {"operationType": {"const": "put"}, "entityType": {"const": "home-preference"}}, "required": ["operationType", "entityType"]}, "then": {"properties": {"payload": {"$ref": "#/components/schemas/SyncHomePreferencePayload"}}}}
+        ]
+      },
       "SyncPushRequest": {"type": "object", "additionalProperties": false, "required": ["protocolVersion", "batchId", "deviceId", "operations"], "properties": {"protocolVersion": {"const": 1}, "batchId": {"type": "string", "format": "uuid"}, "deviceId": {"type": "string", "format": "uuid"}, "lastPulledCursor": {"type": ["string", "null"]}, "operations": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"$ref": "#/components/schemas/SyncOperation"}}}},
       "SyncOperationResult": {"type": "object", "required": ["operationId", "status"], "properties": {"operationId": {"type": "string", "format": "uuid"}, "status": {"enum": ["accepted", "conflict", "validation_error", "authorization_failure", "retryable_failure"]}, "entityType": {"type": "string"}, "entityId": {"type": "string", "format": "uuid"}, "revision": {"type": "integer"}, "changeCursor": {"type": "string"}, "representation": {"type": "object"}, "conflict": {"type": "object"}, "detail": {"type": "string"}}},
       "SyncPushResponse": {"type": "object", "required": ["protocolVersion", "batchId", "requestId", "serverTime", "results", "highWaterCursor"], "properties": {"protocolVersion": {"const": 1}, "batchId": {"type": "string", "format": "uuid"}, "requestId": {"type": "string"}, "serverTime": {"type": "string", "format": "date-time"}, "results": {"type": "array", "items": {"$ref": "#/components/schemas/SyncOperationResult"}}, "highWaterCursor": {"type": "string"}}},

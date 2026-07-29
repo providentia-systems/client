@@ -241,6 +241,60 @@ void main() {
       ClientOperationState.blockedValidation.storageValue,
     );
   });
+
+  test(
+    'resync atomically replaces cache and reapplies unacknowledged intent',
+    () async {
+      await repository.applyPullPage(
+        homeId: 'home-1',
+        page: _page(
+          changes: <RemoteChange>[
+            _change(entityId: 'stale-record', revision: 1),
+          ],
+          pageCursor: 'expired-cursor',
+        ),
+      );
+      await repository.commitLocalMutation(_mutation());
+
+      await repository.replaceWithBootstrap(
+        homeId: 'home-1',
+        page: _page(
+          fromCursor: 'snapshot-cursor',
+          changes: <RemoteChange>[
+            _change(
+              entityId: 'server-record',
+              revision: 7,
+              cursor: 'snapshot-cursor',
+            ),
+          ],
+          pageCursor: 'snapshot-cursor',
+        ),
+      );
+
+      final records = await database.select(database.localRecords).get();
+      expect(
+        records.map((record) => record.entityId),
+        containsAll(<String>['record-1', 'server-record']),
+      );
+      expect(
+        records.map((record) => record.entityId),
+        isNot(contains('stale-record')),
+      );
+      expect(
+        jsonDecode(
+          records
+              .singleWhere((record) => record.entityId == 'record-1')
+              .payload,
+        ),
+        <String, Object?>{'quantity': 1},
+      );
+      expect(await repository.cursorForHome('home-1'), 'snapshot-cursor');
+      expect(
+        await database.select(database.clientOperations).get(),
+        hasLength(1),
+      );
+    },
+  );
 }
 
 LocalMutation _mutation({
@@ -264,6 +318,7 @@ LocalMutation _mutation({
 
 RemoteChange _change({
   String homeId = 'home-1',
+  String entityId = 'record-1',
   RemoteChangeKind kind = RemoteChangeKind.upsert,
   int revision = 1,
   String cursor = 'cursor-1',
@@ -272,7 +327,7 @@ RemoteChange _change({
     cursor: cursor,
     homeId: homeId,
     entityType: 'inventory_balance',
-    entityId: 'record-1',
+    entityId: entityId,
     kind: kind,
     revision: revision,
     serverTimestamp: DateTime.utc(2026, 7, 29, 12),

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/widgets.dart';
 import 'package:providentia/app/app_controller.dart';
+import 'package:providentia/app/configuration_required_app.dart';
 import 'package:providentia/app/providentia_app.dart';
 import 'package:providentia/core/config/runtime_configuration.dart';
 import 'package:providentia/core/database/app_database.dart';
@@ -14,8 +15,15 @@ import 'package:providentia/core/synchronization/sync_coordinator.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  final configuration = RuntimeConfiguration.fromEnvironment();
-  final bootstrapHomeId = configuration.requireBootstrapHomeId();
+  late final RuntimeConfiguration configuration;
+  late final String bootstrapHomeId;
+  try {
+    configuration = RuntimeConfiguration.fromEnvironment();
+    bootstrapHomeId = configuration.requireBootstrapHomeId();
+  } on FormatException catch (error) {
+    runApp(ConfigurationRequiredApp(safeMessage: error.message.toString()));
+    return;
+  }
   final database = AppDatabase.defaults();
   final repository = DriftLocalSyncRepository(database);
   final apiClient = const ApiClientFactory().create(

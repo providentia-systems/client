@@ -190,6 +190,80 @@ void main() {
     },
   );
 
+  test('expired cursor performs one authorized snapshot replacement', () async {
+    await local.applyPullPage(
+      homeId: 'home-1',
+      page: const PullPage(
+        protocolVersion: 1,
+        fromCursor: 'expired-cursor',
+        changes: <RemoteChange>[],
+        pageCursor: 'expired-cursor',
+        highWaterCursor: 'expired-cursor',
+        hasMore: false,
+        requestId: 'seed',
+      ),
+    );
+    var pullCalls = 0;
+    var bootstrapCalls = 0;
+    final remote = _FakeGateway(
+      pushHandler: (_, _) async {
+        return const PushResponse(results: <PushOperationResult>[]);
+      },
+      bootstrapHandler: (homeId) async {
+        bootstrapCalls++;
+        return PullPage(
+          protocolVersion: 1,
+          fromCursor: 'snapshot-cursor',
+          changes: <RemoteChange>[
+            RemoteChange(
+              cursor: 'snapshot-cursor',
+              homeId: homeId,
+              entityType: 'home-preference',
+              entityId: '0198a0b1-c2d3-7e4f-b456-789abcdef012',
+              kind: RemoteChangeKind.upsert,
+              revision: 4,
+              serverTimestamp: now,
+              payload: const <String, Object?>{'theme': 'fresh'},
+            ),
+          ],
+          pageCursor: 'snapshot-cursor',
+          highWaterCursor: 'snapshot-cursor',
+          hasMore: false,
+          requestId: 'bootstrap',
+        );
+      },
+      pullHandler: (homeId, cursor) async {
+        pullCalls++;
+        if (pullCalls == 1) {
+          throw const ResyncRequiredSyncException('Cursor expired.');
+        }
+        return PullPage(
+          protocolVersion: 1,
+          fromCursor: cursor,
+          changes: const <RemoteChange>[],
+          pageCursor: cursor!,
+          highWaterCursor: cursor,
+          hasMore: false,
+          requestId: 'pull-after-bootstrap',
+        );
+      },
+    );
+    final coordinator = SyncCoordinator(
+      local: local,
+      remote: remote,
+      connectivity: const _OnlineProbe(),
+      clock: () => now,
+    );
+
+    final outcome = await coordinator.synchronize('home-1');
+
+    expect(outcome.status, SyncRunStatus.completed);
+    expect(bootstrapCalls, 1);
+    expect(pullCalls, 2);
+    expect(await local.cursorForHome('home-1'), 'snapshot-cursor');
+    expect(await database.select(database.localRecords).get(), hasLength(1));
+  });
+
   test('deterministic retry policy applies bounded jitter', () {
     const policy = RetryPolicy(
       baseDelay: Duration(seconds: 2),
@@ -226,12 +300,18 @@ typedef _Push =
       List<PendingClientOperation> operations,
     );
 typedef _Bootstrap = Future<PullPage> Function(String homeId);
+typedef _Pull = Future<PullPage> Function(String homeId, String? afterCursor);
 
 final class _FakeGateway implements SyncRemoteGateway {
-  _FakeGateway({required this.pushHandler, this.bootstrapHandler});
+  _FakeGateway({
+    required this.pushHandler,
+    this.bootstrapHandler,
+    this.pullHandler,
+  });
 
   _Push pushHandler;
   final _Bootstrap? bootstrapHandler;
+  final _Pull? pullHandler;
   final List<String> pushedOperationIds = <String>[];
 
   @override
@@ -253,6 +333,10 @@ final class _FakeGateway implements SyncRemoteGateway {
 
   @override
   Future<PullPage> pull({required String homeId, String? afterCursor}) async {
+    final handler = pullHandler;
+    if (handler != null) {
+      return handler(homeId, afterCursor);
+    }
     return PullPage(
       protocolVersion: 1,
       fromCursor: afterCursor,

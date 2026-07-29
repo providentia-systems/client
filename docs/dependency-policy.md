@@ -15,7 +15,7 @@ Current direct non-SDK runtime dependencies:
 Current direct development dependencies:
 
 - `flutter_lints 6.0.0`
-- `build_runner 2.15.2`
+- `build_runner 2.15.1`, the exact Flutter 3.44.7-compatible generator runner
 - `drift_dev 2.34.5`
 
 The generated client is a local path package and is not published separately.

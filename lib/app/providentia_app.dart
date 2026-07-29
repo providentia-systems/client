@@ -258,6 +258,7 @@ class _SyncStatusCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final conflict = summary.blockedConflicts > 0;
+    final validation = summary.blockedValidation > 0;
     final authentication =
         summary.availability == SyncAvailability.authenticationRequired;
     final authorization =
@@ -274,6 +275,15 @@ class _SyncStatusCard extends StatelessWidget {
             Icons.sync_problem_rounded,
             'Review a synchronization conflict',
             '${summary.blockedConflicts} change needs your decision.',
+            ProvidentiaColors.warningSurface,
+            ProvidentiaColors.warning,
+          )
+        : validation
+        ? (
+            Icons.rule_rounded,
+            'Review a change before syncing',
+            summary.lastSafeError ??
+                '${summary.blockedValidation} local change needs correction.',
             ProvidentiaColors.warningSurface,
             ProvidentiaColors.warning,
           )

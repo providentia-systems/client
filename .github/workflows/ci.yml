@@ -162,6 +162,7 @@ jobs:
         run: flutter pub get --enforce-lockfile
 
       - name: Verify generated database source is current
+        shell: bash
         run: |
           dart run build_runner build --delete-conflicting-outputs
           test -z "$(git status --porcelain -- \

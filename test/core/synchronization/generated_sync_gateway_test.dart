@@ -245,4 +245,35 @@ void main() {
       },
     );
   }
+
+  test('pull maps the exact HTTP 410 problem to resync required', () async {
+    final client = generated.ProvidentiaApiClient(
+      baseUri: Uri.parse('https://api.example.test'),
+      httpClient: MockClient((_) async {
+        return http.Response(
+          jsonEncode(<String, Object?>{
+            'type': 'https://providentia.invalid/problems/sync_resync_required',
+            'title': 'Synchronization bootstrap required',
+            'status': 410,
+            'detail': 'The cursor is no longer available.',
+            'requestId': 'request-410',
+          }),
+          410,
+        );
+      }),
+    );
+
+    await expectLater(
+      GeneratedSyncGateway(
+        client,
+      ).pull(homeId: homeId, afterCursor: 'expired-cursor'),
+      throwsA(
+        isA<ResyncRequiredSyncException>().having(
+          (error) => error.safeMessage,
+          'safe message',
+          contains('cursor'),
+        ),
+      ),
+    );
+  });
 }
