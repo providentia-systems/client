@@ -1,10 +1,10 @@
 import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
-import 'package:providentia_api_client/providentia_api_client.dart'
-    as generated;
 import 'package:providentia/core/synchronization/sync_models.dart';
 import 'package:providentia/core/synchronization/sync_ports.dart';
+import 'package:providentia_api_client/providentia_api_client.dart'
+    as generated;
 
 /// Adapts the backend-owned generated API client to the durable local sync
 /// model. Server vocabulary is translated only at this boundary.

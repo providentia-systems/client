@@ -7,10 +7,12 @@ import 'package:providentia/core/synchronization/sync_models.dart';
 enum AppSection { home, stock, purchases, lists }
 
 final class AppController extends ChangeNotifier {
-  AppController({
+  factory AppController({
     required SyncCoordinator coordinator,
-    required this.activeHomeId,
-  }) : _coordinator = coordinator;
+    required String activeHomeId,
+  }) => AppController._(coordinator, activeHomeId);
+
+  AppController._(this._coordinator, this.activeHomeId);
 
   AppController.preview({
     this.activeHomeId = 'preview-home',
