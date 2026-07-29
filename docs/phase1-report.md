@@ -25,8 +25,8 @@ The corrected Phase 0 package is preserved under `docs/phase0/`.
 
 - Providentia is used throughout package names, application IDs, contracts,
   runners, documentation, and generated code.
-- `org.vastdevelopmentmethod.providentia` is the Phase 1 native identifier.
-  It requires owner confirmation before signed store publication.
+- `com.vastdevelopmentmethod.providentia` is the permanent owner-confirmed
+  native identifier.
 - Flutter 3.44.7, Dart 3.12.2, and framework revision
   `84fc5cbb223bc12f83d65b647ff8a56caf779ffd` are pinned.
 - No distribution licence was selected.
@@ -113,9 +113,9 @@ migration specification.
 ## 11. Decisions required from the user
 
 No new product decision blocks this foundation. Before public distribution the
-owner must confirm the permanent native identifier and select a distribution
-licence. Existing AI, authentication, media, proposal, locale, deployment, and
-commercial decisions remain required by their owning later phases.
+owner must select a distribution licence. Existing AI, authentication, media,
+proposal, locale, deployment, and commercial decisions remain required by
+their owning later phases.
 
 ## 12. Recommended next phase
 

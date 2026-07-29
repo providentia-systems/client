@@ -1,0 +1,7 @@
+{
+  "release": "drift-2.34.3",
+  "source": "https://github.com/simolus3/drift/releases/download/drift-2.34.3/sqlite3.wasm",
+  "sqlite3WasmSha256": "41cf968998241465d8b1dfffb1eb60dd10c35de5022a3647e14174ea3af84143",
+  "workerSource": "web/drift_worker.dart",
+  "workerCompiler": "dart compile js -O4"
+}

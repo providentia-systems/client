@@ -1,5 +1,6 @@
 import 'package:http/http.dart' as http;
 import 'package:providentia/core/config/runtime_configuration.dart';
+import 'package:providentia/core/networking/credentialed_http_client.dart';
 import 'package:providentia_api_client/providentia_api_client.dart';
 
 /// Composition-root factory for the generated backend client.
@@ -13,9 +14,15 @@ final class ApiClientFactory {
     required RuntimeConfiguration configuration,
     http.Client? httpClient,
   }) {
+    final transport = httpClient ?? createCredentialedHttpClient();
     return ProvidentiaApiClient(
       baseUri: configuration.apiBaseUri,
-      httpClient: httpClient,
+      httpClient: transport,
+      closeHttpClient: httpClient == null,
+      defaultHeaders: <String, String>{
+        if (configuration.developmentBearerToken != null)
+          'Authorization': 'Bearer ${configuration.developmentBearerToken!}',
+      },
     );
   }
 }

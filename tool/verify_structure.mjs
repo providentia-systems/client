@@ -33,13 +33,15 @@ const requiredFiles = [
   'android/gradlew',
   'android/gradlew.bat',
   'android/gradle/wrapper/gradle-wrapper.jar',
-  'android/app/src/main/kotlin/org/vastdevelopmentmethod/providentia/MainActivity.kt',
+  'android/app/src/main/kotlin/com/vastdevelopmentmethod/providentia/MainActivity.kt',
   'android/app/src/main/res/values/styles.xml',
   'ios/Runner.xcodeproj/project.pbxproj',
   'linux/CMakeLists.txt',
   'macos/Runner.xcodeproj/project.pbxproj',
   'web/index.html',
   'web/manifest.json',
+  'web/sqlite3.wasm',
+  'web/drift-assets.lock.json',
   'web/icons/Icon-192.png',
   'web/icons/Icon-512.png',
   'windows/CMakeLists.txt',
@@ -62,7 +64,7 @@ for (const relativePath of requiredFiles) {
 
 await assertContains(
   'android/app/build.gradle.kts',
-  'applicationId = "org.vastdevelopmentmethod.providentia"',
+  'applicationId = "com.vastdevelopmentmethod.providentia"',
 );
 await assertContains(
   'android/app/src/main/AndroidManifest.xml',
@@ -70,7 +72,7 @@ await assertContains(
 );
 await assertContains(
   'ios/Runner.xcodeproj/project.pbxproj',
-  'PRODUCT_BUNDLE_IDENTIFIER = "org.vastdevelopmentmethod.providentia";',
+  'PRODUCT_BUNDLE_IDENTIFIER = "com.vastdevelopmentmethod.providentia";',
 );
 await assertContains(
   'ios/Runner.xcodeproj/project.pbxproj',
@@ -78,7 +80,7 @@ await assertContains(
 );
 await assertContains(
   'macos/Runner/Configs/AppInfo.xcconfig',
-  'PRODUCT_BUNDLE_IDENTIFIER = org.vastdevelopmentmethod.providentia',
+  'PRODUCT_BUNDLE_IDENTIFIER = com.vastdevelopmentmethod.providentia',
 );
 await assertContains(
   'macos/Runner.xcodeproj/project.pbxproj',
@@ -86,7 +88,7 @@ await assertContains(
 );
 await assertContains(
   'linux/CMakeLists.txt',
-  'set(APPLICATION_ID "org.vastdevelopmentmethod.providentia")',
+  'set(APPLICATION_ID "com.vastdevelopmentmethod.providentia")',
 );
 await assertContains('windows/CMakeLists.txt', 'project(Providentia LANGUAGES CXX)');
 
@@ -97,6 +99,12 @@ assert(
   createHash('sha256').update(wrapper).digest('hex') ===
     '7d3a4ac4de1c32b59bc6a4eb8ecb8e612ccd0cf1ae1e99f66902da64df296172',
   'Unexpected Gradle 8.14 wrapper JAR.',
+);
+const sqliteWasm = await readFile(path.join(root, 'web/sqlite3.wasm'));
+assert(
+  createHash('sha256').update(sqliteWasm).digest('hex') ===
+    '41cf968998241465d8b1dfffb1eb60dd10c35de5022a3647e14174ea3af84143',
+  'Unexpected Drift 2.34.3 sqlite3.wasm.',
 );
 for (const binaryAsset of [
   'windows/runner/resources/app_icon.ico',
@@ -152,7 +160,7 @@ const allTextFiles = (await walk(root)).filter(
   (file) =>
     !file.includes(`${path.sep}.git${path.sep}`) &&
     !file.includes(`${path.sep}docs${path.sep}phase0${path.sep}`) &&
-    !/\.(png|ico|jpe?g|jar)$/u.test(file),
+    !/\.(png|ico|jpe?g|jar|wasm)$/u.test(file),
 );
 const obsoleteNameViolations = [];
 const obsoletePattern = new RegExp(
