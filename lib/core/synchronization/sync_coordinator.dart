@@ -146,13 +146,29 @@ final class SyncCoordinator {
       var cursor = await _local.cursorForHome(homeId);
       if (cursor == null) {
         final bootstrap = await _remote.bootstrap(homeId: homeId);
-        await _local.applyPullPage(homeId: homeId, page: bootstrap);
+        await _local.replaceWithBootstrap(homeId: homeId, page: bootstrap);
         pulled += bootstrap.changes.length;
         cursor = bootstrap.pageCursor;
       }
       var hasMore = true;
+      var resynchronized = false;
       while (hasMore) {
-        final page = await _remote.pull(homeId: homeId, afterCursor: cursor);
+        PullPage page;
+        try {
+          page = await _remote.pull(homeId: homeId, afterCursor: cursor);
+        } on ResyncRequiredSyncException {
+          if (resynchronized) {
+            throw const RetryableSyncException(
+              'Synchronization history changed again. Try again safely.',
+            );
+          }
+          final bootstrap = await _remote.bootstrap(homeId: homeId);
+          await _local.replaceWithBootstrap(homeId: homeId, page: bootstrap);
+          pulled += bootstrap.changes.length;
+          cursor = bootstrap.pageCursor;
+          resynchronized = true;
+          continue;
+        }
         await _local.applyPullPage(homeId: homeId, page: page);
         pulled += page.changes.length;
         cursor = page.pageCursor;

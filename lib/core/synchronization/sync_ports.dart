@@ -25,6 +25,11 @@ abstract interface class LocalSyncRepository {
 
   Future<void> applyPullPage({required String homeId, required PullPage page});
 
+  Future<void> replaceWithBootstrap({
+    required String homeId,
+    required PullPage page,
+  });
+
   Future<void> requeueRetryableOperations({
     required String homeId,
     required DateTime now,

@@ -413,6 +413,122 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
   }
 
   @override
+  Future<void> replaceWithBootstrap({
+    required String homeId,
+    required PullPage page,
+  }) {
+    return _database.transaction(() async {
+      if (page.protocolVersion != 1 || page.hasMore) {
+        throw StateError('Invalid synchronization bootstrap page.');
+      }
+      for (final change in page.changes) {
+        if (change.homeId != homeId || change.kind != RemoteChangeKind.upsert) {
+          throw StateError(
+            'Bootstrap contains an invalid or cross-home record.',
+          );
+        }
+      }
+
+      final localIntent =
+          (await (_database.select(
+            _database.clientOperations,
+          )..where((row) => row.homeId.equals(homeId))).get()).where(
+            (operation) =>
+                operation.state !=
+                ClientOperationState.acknowledged.storageValue,
+          );
+
+      await (_database.delete(
+        _database.localRecords,
+      )..where((row) => row.homeId.equals(homeId))).go();
+      await (_database.delete(
+        _database.recordTombstones,
+      )..where((row) => row.homeId.equals(homeId))).go();
+      await (_database.delete(
+        _database.localSyncCursors,
+      )..where((row) => row.homeId.equals(homeId))).go();
+
+      for (final change in page.changes) {
+        await _database
+            .into(_database.localRecords)
+            .insert(
+              LocalRecordsCompanion.insert(
+                homeId: homeId,
+                entityType: change.entityType,
+                entityId: change.entityId,
+                payload: jsonEncode(change.payload),
+                revision: Value<int>(change.revision),
+                updatedAt: change.serverTimestamp.toUtc(),
+                synchronizedAt: Value<DateTime>(change.serverTimestamp.toUtc()),
+              ),
+              mode: InsertMode.insertOrReplace,
+            );
+      }
+
+      // A server snapshot replaces synchronized cache state, never durable
+      // local intent. Reapply every unacknowledged operation over the snapshot
+      // before committing its captured cursor.
+      for (final operation in localIntent) {
+        if (operation.operationType == 'delete') {
+          await (_database.delete(_database.localRecords)..where(
+                (row) =>
+                    row.homeId.equals(homeId) &
+                    row.entityType.equals(operation.entityType) &
+                    row.entityId.equals(operation.entityId),
+              ))
+              .go();
+          await _database
+              .into(_database.recordTombstones)
+              .insertOnConflictUpdate(
+                RecordTombstonesCompanion.insert(
+                  homeId: homeId,
+                  entityType: operation.entityType,
+                  entityId: operation.entityId,
+                  revision: operation.baseRevision ?? 0,
+                  cursor: page.pageCursor,
+                  deletedAt: operation.clientTimestamp.toUtc(),
+                ),
+              );
+        } else {
+          await _database
+              .into(_database.localRecords)
+              .insertOnConflictUpdate(
+                LocalRecordsCompanion.insert(
+                  homeId: homeId,
+                  entityType: operation.entityType,
+                  entityId: operation.entityId,
+                  payload: operation.payload,
+                  revision: Value<int>(operation.baseRevision ?? 0),
+                  updatedAt: operation.clientTimestamp.toUtc(),
+                  synchronizedAt: const Value<DateTime?>(null),
+                ),
+              );
+          await (_database.delete(_database.recordTombstones)..where(
+                (row) =>
+                    row.homeId.equals(homeId) &
+                    row.entityType.equals(operation.entityType) &
+                    row.entityId.equals(operation.entityId),
+              ))
+              .go();
+        }
+      }
+
+      await _database
+          .into(_database.localSyncCursors)
+          .insert(
+            LocalSyncCursorsCompanion.insert(
+              homeId: homeId,
+              feed: const Value<String>('home_changes'),
+              protocolVersion: const Value<int>(1),
+              schemaGeneration: const Value<int>(2),
+              cursor: page.pageCursor,
+              updatedAt: DateTime.now().toUtc(),
+            ),
+          );
+    });
+  }
+
+  @override
   Future<void> requeueRetryableOperations({
     required String homeId,
     required DateTime now,

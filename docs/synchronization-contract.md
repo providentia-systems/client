@@ -54,6 +54,10 @@ timestamp, and operation `upsert` or `delete`. An upsert has a
 
 Flutter advances the cursor only in the same local transaction that commits
 the full page. It never sorts, synthesizes, or compares opaque cursor text.
+HTTP 410 with problem type ending in `sync_resync_required` triggers one
+authorized bootstrap. The replacement snapshot, captured cursor, and replay of
+unacknowledged local intent commit atomically. A second 410 in the same run
+fails safely instead of looping.
 
 ## Initial bootstrap
 

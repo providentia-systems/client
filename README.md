@@ -39,6 +39,12 @@ node tool/generate_api_client.mjs --check
 
 Generated files are never hand-edited.
 
+On the first dependency-changing branch, GitHub produces `pubspec.lock` and
+then the reviewable Drift implementation, exported schemas, web worker, and
+phone golden through guarded, exact-scope workflows. Until those bot commits
+land, those generated paths are intentionally absent and the ordinary quality
+job is expected to wait/fail closed rather than accepting local placeholders.
+
 ## Development golden path
 
 Start the backend development stack and its setup script first. Use the
@@ -66,6 +72,11 @@ development build: never use a production token, never commit the launch
 command, and revoke/discard the token after the session. Production clients
 must obtain credentials through the authenticated session flow and secure
 platform storage; tokens are never stored in Drift.
+
+Launching without the development defines renders a clear configuration and
+sign-in-required shell instead of crashing. Production authentication and
+active-home selection remain the follow-on UI that replaces this development
+bootstrap.
 
 ## Build commands
 

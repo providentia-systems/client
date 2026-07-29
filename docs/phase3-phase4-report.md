@@ -66,6 +66,9 @@ The coordinator:
 - attempts credential refresh once for token expiry;
 - distinguishes expired authentication from revoked authorization;
 - applies every pull page and its cursor in one transaction;
+- maps an expired/compacted cursor to authorized snapshot bootstrap and
+  transactionally replaces synchronized cache state while replaying durable
+  unacknowledged local intent;
 - rejects cross-home changes and cursor mismatches;
 - ignores older and duplicate revisions;
 - prevents an old upsert from resurrecting a newer tombstone;
@@ -105,11 +108,17 @@ The generated API client is the only HTTP implementation. Core networking maps
 its typed synchronization DTOs to application-owned models. UI code consumes
 only `AppController`, repositories, and synchronization summaries.
 
-The exact backend OpenAPI `1.2.0` bytes are pinned at SHA-256
-`9626cba71d368003ab069864c6f744414044f8d5c4baf8c7b69553cad435a8db`.
+The exact backend OpenAPI `1.3.0` bytes are pinned at SHA-256
+`2c5581964c7d3f23584c52ebd1ec4961b188990e4397aaed9322d98e34550024`.
 The generated adapter implements authorized bootstrap, push and pull; sends
 `Idempotency-Key` equal to `batchId`; never repeats `homeId` inside an
 operation; and maps all five server result classifications.
+
+The first branch commit intentionally relies on the guarded GitHub workflows
+to produce `pubspec.lock`, `app_database.g.dart`, `drift_schemas/*`,
+`drift_worker.dart.js`, and the phone golden. Those reviewable artifacts are
+not claimed as present until the exact-scope bot commit lands; ordinary CI
+regenerates them and fails on modified or untracked output.
 
 The shell intentionally contains no inventory count, receipt,
 purchase-history, recommendation, or shopping-list behavior. Those remain

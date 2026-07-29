@@ -123,6 +123,30 @@ void main() {
     expect(find.text('Up to date'), findsNothing);
   });
 
+  testWidgets('blocked validation never presents the client as up to date', (
+    tester,
+  ) async {
+    const summary = SyncSummary(
+      pending: 0,
+      syncing: 0,
+      retryWaiting: 0,
+      blockedConflicts: 0,
+      blockedValidation: 1,
+      blockedAuthorization: 0,
+      acknowledged: 0,
+      availability: SyncAvailability.online,
+      isSynchronizing: false,
+      lastSafeError: 'Correct the value before retrying.',
+    );
+
+    await tester.pumpWidget(
+      ProvidentiaApp(controller: AppController.preview(summary: summary)),
+    );
+
+    expect(find.text('Review a change before syncing'), findsOneWidget);
+    expect(find.text('Up to date'), findsNothing);
+  });
+
   testWidgets('large text and reduced motion remain usable', (tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(390, 844);
