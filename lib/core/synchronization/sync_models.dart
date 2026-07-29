@@ -130,7 +130,7 @@ final class PushOperationResult {
     this.acceptedRevision,
     this.changeCursor,
     this.safeMessage,
-    this.remotePayload,
+    Map<String, Object?>? remotePayload,
   }) : remotePayload = remotePayload == null
            ? null
            : Map<String, Object?>.unmodifiable(remotePayload);

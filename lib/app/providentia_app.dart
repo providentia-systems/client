@@ -253,7 +253,7 @@ class _SyncStatusCard extends StatelessWidget {
   const _SyncStatusCard({required this.summary, required this.onRetry});
 
   final SyncSummary summary;
-  final AsyncCallback onRetry;
+  final Future<void> Function() onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -370,7 +370,9 @@ class _SyncStatusCard extends StatelessWidget {
                 IconButton(
                   key: const Key('manual-sync'),
                   tooltip: 'Retry synchronization',
-                  onPressed: onRetry,
+                  onPressed: () async {
+                    await onRetry();
+                  },
                   icon: const Icon(Icons.refresh_rounded),
                 ),
             ],
