@@ -430,13 +430,18 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
       }
 
       final localIntent =
-          (await (_database.select(
-            _database.clientOperations,
-          )..where((row) => row.homeId.equals(homeId))).get()).where(
-            (operation) =>
-                operation.state !=
-                ClientOperationState.acknowledged.storageValue,
-          );
+          (await (_database.select(_database.clientOperations)
+                    ..where((row) => row.homeId.equals(homeId))
+                    ..orderBy(<OrderingTerm Function(ClientOperations)>[
+                      (row) => OrderingTerm.asc(row.clientTimestamp),
+                      (row) => OrderingTerm.asc(row.operationId),
+                    ]))
+                  .get())
+              .where(
+                (operation) =>
+                    operation.state !=
+                    ClientOperationState.acknowledged.storageValue,
+              );
 
       await (_database.delete(
         _database.localRecords,
