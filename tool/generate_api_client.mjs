@@ -693,7 +693,7 @@ final class ProvidentiaApiClient {
       '/api/v1/homes/\${Uri.encodeComponent(homeId)}/sync/pull',
       accept: 'application/json',
       query: <String, String>{
-        if (cursor != null) 'cursor': cursor,
+        'cursor': ?cursor,
         'limit': limit.toString(),
       },
     );

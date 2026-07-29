@@ -9,7 +9,7 @@ import 'package:providentia/core/synchronization/sync_ports.dart';
 /// this coordinator on start, resume, home switch, manual refresh, and after
 /// foreground mutations.
 final class SyncCoordinator {
-  SyncCoordinator({
+  factory SyncCoordinator({
     required LocalSyncRepository local,
     required SyncRemoteGateway remote,
     required ConnectivityProbe connectivity,
@@ -18,13 +18,25 @@ final class SyncCoordinator {
         const NoAuthenticationRecovery(),
     RetryPolicy retryPolicy = const RetryPolicy(),
     DateTime Function()? clock,
-  }) : _local = local,
-       _remote = remote,
-       _connectivity = connectivity,
-       _metrics = metrics,
-       _authenticationRecovery = authenticationRecovery,
-       _retryPolicy = retryPolicy,
-       _clock = clock ?? DateTime.now;
+  }) => SyncCoordinator._(
+    local,
+    remote,
+    connectivity,
+    metrics,
+    authenticationRecovery,
+    retryPolicy,
+    clock ?? DateTime.now,
+  );
+
+  SyncCoordinator._(
+    this._local,
+    this._remote,
+    this._connectivity,
+    this._metrics,
+    this._authenticationRecovery,
+    this._retryPolicy,
+    this._clock,
+  );
 
   final LocalSyncRepository _local;
   final SyncRemoteGateway _remote;

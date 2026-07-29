@@ -208,8 +208,10 @@ void main() {
     final conflict = await database
         .select(database.syncConflictRecords)
         .getSingle();
+    final remotePayload =
+        jsonDecode(conflict.remotePayload!) as Map<String, Object?>;
     expect(operation.state, ClientOperationState.blockedConflict.storageValue);
-    expect(jsonDecode(conflict.remotePayload!)['tombstone'], isTrue);
+    expect(remotePayload['tombstone'], isTrue);
     expect(conflict.remoteRevision, 2);
   });
 

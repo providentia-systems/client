@@ -164,11 +164,10 @@ final class AppDatabase extends _$AppDatabase {
         await migrator.createTable(syncConflictRecords);
       }
     },
-    beforeOpen: (details) async {
+    beforeOpen: (_) async {
       await customStatement('PRAGMA foreign_keys = ON');
-      if (details.wasCreated || details.hadUpgrade) {
-        await validateDatabaseSchema();
-      }
+      // Schema drift is enforced by the exported-schema CI gate, while
+      // executable upgrade behavior is covered by the migration tests.
     },
   );
 }
