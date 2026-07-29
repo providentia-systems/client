@@ -59,7 +59,7 @@ jobs:
           dart pub deps --json > build/compliance/dart-dependencies.json
 
       - name: Upload quality evidence
-        uses: actions/upload-artifact@ea165f8d65b6e75b5404495e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: flutter-quality-evidence
           path: |
@@ -144,7 +144,7 @@ jobs:
         run: ${{ matrix.command }}
 
       - name: Upload non-production build proof
-        uses: actions/upload-artifact@ea165f8d65b6e75b5404495e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: providentia-${{ matrix.target }}-build-proof
           path: ${{ matrix.artifact }}
