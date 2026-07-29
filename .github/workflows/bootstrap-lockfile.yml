@@ -1,6 +1,10 @@
 name: One-time dependency lock bootstrap
 
 on:
+  pull_request:
+    paths:
+      - pubspec.yaml
+      - .github/workflows/bootstrap-lockfile.yml
   push:
     branches:
       - agent/phase-1-production-foundations
@@ -9,7 +13,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: flutter-lock-bootstrap-${{ github.ref }}
+  group: providentia-flutter-lock-bootstrap
   cancel-in-progress: false
 
 jobs:
@@ -17,7 +21,8 @@ jobs:
     name: Commit initial pubspec.lock
     if: >-
       github.repository == 'vast-development-method/providentia-flutter' &&
-      !contains(github.event.head_commit.message, '[lockfile-bootstrap]')
+      (github.event_name == 'pull_request' ||
+      !contains(github.event.head_commit.message, '[lockfile-bootstrap]'))
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
