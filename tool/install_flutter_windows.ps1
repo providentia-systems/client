@@ -27,8 +27,12 @@ try {
     }
 
     Expand-Archive -Path $ArchivePath -DestinationPath $InstallParent
-    $VersionOutput = & (Join-Path $FlutterPath 'bin/flutter.bat') --version --machine |
-        ConvertFrom-Json
+    $RawVersionOutput = (& (Join-Path $FlutterPath 'bin/flutter.bat') --version --machine) -join "`n"
+    $JsonStart = $RawVersionOutput.IndexOf('{')
+    if ($JsonStart -lt 0) {
+        throw 'Flutter did not return machine-readable version metadata.'
+    }
+    $VersionOutput = $RawVersionOutput.Substring($JsonStart) | ConvertFrom-Json
     $ActualVersion = $VersionOutput.flutterVersion
     if (-not $ActualVersion) {
         $ActualVersion = $VersionOutput.frameworkVersion
