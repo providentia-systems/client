@@ -1,0 +1,12 @@
+{
+  "generator": "tool/generate_api_client.mjs",
+  "generatorVersion": 1,
+  "contract": "../../providentia-v1.json",
+  "contractVersion": "1.0.0-foundation.1",
+  "contractSha256": "960dc1d69dad9fecbb8c3e176444d9a1faae20ec8e88ba42b23569b90a5d676e",
+  "generatedFiles": [
+    "pubspec.yaml",
+    "lib/providentia_api_client.dart"
+  ],
+  "generatedCodeMustNotBeEdited": true
+}

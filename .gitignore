@@ -1,0 +1,35 @@
+# Flutter and Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+coverage/
+doc/api/
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+
+# Local platform files
+android/local.properties
+ios/Flutter/Generated.xcconfig
+ios/Flutter/ephemeral/
+macos/Flutter/ephemeral/
+linux/flutter/ephemeral/
+windows/flutter/ephemeral/
+
+# Signing and secrets
+*.jks
+*.keystore
+*.p12
+*.mobileprovision
+*.env
+!*.env.example
+
+# OS files
+.DS_Store
+Thumbs.db
