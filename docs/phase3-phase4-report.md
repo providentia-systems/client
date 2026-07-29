@@ -120,11 +120,12 @@ reads and the three synchronization resources. The remaining 21 identity,
 session, home, membership, invitation, ownership-transfer, and catalog
 operations do not yet have generated Dart methods.
 
-The first branch commit intentionally relies on the guarded GitHub workflows
-to produce `pubspec.lock`, `app_database.g.dart`, `drift_schemas/*`,
-`drift_worker.dart.js`, and the phone golden. Those reviewable artifacts are
-not claimed as present until the exact-scope bot commit lands; ordinary CI
-regenerates them and fails on modified or untracked output.
+The guarded GitHub workflows produced `pubspec.lock`,
+`app_database.g.dart`, `drift_schemas/*`, `drift_worker.dart.js`, and the
+phone golden. Generated-artifact refresh run 13 passed its exact mutation
+allowlist and committed the reviewable outputs at
+`f3a638229cbdd81b4d49d003a2e9b517924cd875`. Ordinary CI regenerates them and
+fails on modified or untracked output.
 
 ## Deferred Phase 4 and multi-device acceptance
 
