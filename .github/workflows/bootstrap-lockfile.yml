@@ -3,6 +3,7 @@ name: One-time dependency lock bootstrap
 on:
   pull_request:
     paths:
+      - .gitignore
       - pubspec.yaml
       - .github/workflows/bootstrap-lockfile.yml
   push:
