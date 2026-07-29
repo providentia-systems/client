@@ -1,6 +1,18 @@
 name: Generated artifact refresh
 
 on:
+  pull_request:
+    paths:
+      - pubspec.lock
+      - pubspec.yaml
+      - lib/core/database/**
+      - test/goldens/fresh_market_shell_golden_test.dart
+      - lib/app/**
+      - lib/core/design_system/**
+      - web/drift_worker.dart
+      - web/sqlite3.wasm
+      - web/drift-assets.lock.json
+      - .github/workflows/bootstrap-generated-artifacts.yml
   push:
     branches:
       - main
@@ -24,7 +36,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: providentia-flutter-generated-${{ github.ref_name }}
+  group: providentia-flutter-generated-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -32,14 +44,15 @@ jobs:
     name: Refresh reviewable generated artifacts
     if: >-
       github.repository == 'vast-development-method/providentia-flutter' &&
-      !contains(github.event.head_commit.message, '[generated-bootstrap]')
+      (github.event_name == 'pull_request' ||
+      !contains(github.event.head_commit.message, '[generated-bootstrap]'))
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - name: Check out exact pushed branch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: ${{ github.ref_name }}
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
 
       - name: Install pinned Flutter SDK
         run: |
@@ -100,7 +113,7 @@ jobs:
       - name: Commit only reviewable generated artifacts
         if: steps.mutation.outputs.changed == 'true'
         env:
-          TARGET_BRANCH: ${{ github.ref_name }}
+          TARGET_BRANCH: ${{ github.event.pull_request.head.ref || github.ref_name }}
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email \
