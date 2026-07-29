@@ -295,22 +295,59 @@ void main() {
       );
     },
   );
+
+  test('resync replays multiple intents in deterministic order', () async {
+    await repository.commitLocalMutation(
+      _mutation(
+        operationId: 'operation-z',
+        clientTimestamp: DateTime.utc(2026, 7, 29, 13),
+        payload: const <String, Object?>{'quantity': 13},
+      ),
+    );
+    await repository.commitLocalMutation(
+      _mutation(
+        operationId: 'operation-a',
+        clientTimestamp: DateTime.utc(2026, 7, 29, 12),
+        payload: const <String, Object?>{'quantity': 12},
+      ),
+    );
+
+    await repository.replaceWithBootstrap(
+      homeId: 'home-1',
+      page: _page(
+        fromCursor: 'snapshot-cursor',
+        changes: const <RemoteChange>[],
+        pageCursor: 'snapshot-cursor',
+      ),
+    );
+
+    final record = await database.select(database.localRecords).getSingle();
+    expect(jsonDecode(record.payload), <String, Object?>{'quantity': 13});
+    expect(
+      (await database.select(database.clientOperations).get()).map(
+        (operation) => operation.operationId,
+      ),
+      containsAll(<String>['operation-a', 'operation-z']),
+    );
+  });
 }
 
 LocalMutation _mutation({
+  String operationId = 'operation-1',
   String entityId = 'record-1',
   int? baseRevision,
+  DateTime? clientTimestamp,
   Map<String, Object?> payload = const <String, Object?>{'quantity': 1},
 }) {
   return LocalMutation(
-    operationId: 'operation-1',
+    operationId: operationId,
     deviceId: 'device-1',
     homeId: 'home-1',
     entityType: 'inventory_balance',
     entityId: entityId,
     operationType: 'set_count',
     baseRevision: baseRevision,
-    clientTimestamp: DateTime.utc(2026, 7, 29, 12),
+    clientTimestamp: clientTimestamp ?? DateTime.utc(2026, 7, 29, 12),
     payloadSchemaVersion: 1,
     payload: payload,
   );

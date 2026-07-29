@@ -72,7 +72,7 @@ The coordinator:
 - rejects cross-home changes and cursor mismatches;
 - ignores older and duplicate revisions;
 - prevents an old upsert from resurrecting a newer tombstone;
-- preserves local and remote representations for explicit conflicts.
+- preserves local and remote representations for explicit conflicts;
 - returns an explicit completed/offline/authentication/retryable outcome so
   presentation cannot mark a failed synchronization as successful.
 
@@ -114,11 +114,39 @@ The generated adapter implements authorized bootstrap, push and pull; sends
 `Idempotency-Key` equal to `batchId`; never repeats `homeId` inside an
 operation; and maps all five server result classifications.
 
+This is deliberately bounded contract coverage. OpenAPI declares 28
+operations; the generator/client implements only 7: four operational/system
+reads and the three synchronization resources. The remaining 21 identity,
+session, home, membership, invitation, ownership-transfer, and catalog
+operations do not yet have generated Dart methods.
+
 The first branch commit intentionally relies on the guarded GitHub workflows
 to produce `pubspec.lock`, `app_database.g.dart`, `drift_schemas/*`,
 `drift_worker.dart.js`, and the phone golden. Those reviewable artifacts are
 not claimed as present until the exact-scope bot commit lands; ordinary CI
 regenerates them and fails on modified or untracked output.
+
+## Deferred Phase 4 and multi-device acceptance
+
+The synchronization foundation and deterministic unit/widget tests are
+implemented, but full Phase 4 acceptance is still deferred until all of the
+following pass against running backend and client artifacts:
+
+- two authenticated devices editing the same and different entities, including
+  conflict review and a deliberate resolution;
+- lost HTTP response, identical retry, and server-side operation/batch
+  idempotency proof;
+- high-water pagination, tombstone propagation, replay, cursor expiry, and
+  authorized bootstrap replacement over real MySQL/Redis services;
+- process termination during push and pull, restart recovery, foreground
+  resume, network transition, and manual retry on physical/emulated clients;
+- revoked membership versus expired-token behavior using real sessions;
+- browser reload persistence and OPFS/IndexedDB fallback verification;
+- migration from a previously installed Drift schema with retained pending
+  operations;
+- green generated-artifact, analysis, test, and six-platform build workflows.
+
+No multi-device release-readiness claim is made before those gates complete.
 
 The shell intentionally contains no inventory count, receipt,
 purchase-history, recommendation, or shopping-list behavior. Those remain
