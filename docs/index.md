@@ -1,0 +1,16 @@
+# Providentia Flutter documentation
+
+- [Project memory](project-memory.md): permanent owner and compatibility
+  decisions that future work must preserve.
+- [Controlling implementation prompt](product/providentia_master_implementation_prompt_V1.md):
+  the amended Providentia architecture and phased delivery mandate.
+- [Architecture](architecture.md): Phase 1 dependency boundaries and deferred
+  implementation.
+- [Contracts](contracts.md): backend-owned OpenAPI and design-token pinning.
+- [Platform support](platform-support.md): upstream baselines, CI evidence, and
+  packaging status.
+- [Dependency policy](dependency-policy.md): pinning, licence, and release
+  constraints.
+- [Risk register](risk-register.md): current delivery and architecture risks.
+- [Phase 1 report](phase1-report.md): implementation evidence and limitations.
+- `phase0/`: the complete corrected and validated Phase 0 documentation trail.

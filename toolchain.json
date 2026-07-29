@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "flutter": {
+    "version": "3.44.7",
+    "channel": "stable",
+    "frameworkRevision": "84fc5cbb223bc12f83d65b647ff8a56caf779ffd",
+    "engineRevision": "69c8c61792f04cc809dfef0c910414fb9afc06cd"
+  },
+  "dart": {
+    "version": "3.12.2"
+  },
+  "archives": {
+    "linux-x64": {
+      "path": "stable/linux/flutter_linux_3.44.7-stable.tar.xz",
+      "sha256": "a0edd646c159c0e816788c0e46a4f071199c1320495898f5a679599b583a05a4"
+    },
+    "windows-x64": {
+      "path": "stable/windows/flutter_windows_3.44.7-stable.zip",
+      "sha256": "327b89c2ff612418c1d756efc9636d7811c50e4b50a916d07bc3bdc317ba25e5"
+    }
+  }
+}

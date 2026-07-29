@@ -1,0 +1,65 @@
+name: One-time dependency lock bootstrap
+
+on:
+  push:
+    branches:
+      - agent/phase-1-production-foundations
+
+permissions:
+  contents: write
+
+concurrency:
+  group: flutter-lock-bootstrap-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  create-lockfile:
+    name: Commit initial pubspec.lock
+    if: >-
+      github.repository == 'vast-development-method/providentia-flutter' &&
+      !contains(github.event.head_commit.message, '[lockfile-bootstrap]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact pushed revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: agent/phase-1-production-foundations
+
+      - name: Stop when the lock already exists
+        id: lock
+        run: |
+          if test -f pubspec.lock; then
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install pinned Flutter SDK
+        if: steps.lock.outputs.needed == 'true'
+        run: |
+          tool/install_flutter_linux.sh "$RUNNER_TEMP/providentia-sdk"
+          echo "$RUNNER_TEMP/providentia-sdk/flutter/bin" >> "$GITHUB_PATH"
+
+      - name: Generate the initial dependency lock
+        if: steps.lock.outputs.needed == 'true'
+        run: flutter pub get
+
+      - name: Verify mutation scope
+        if: steps.lock.outputs.needed == 'true'
+        run: |
+          mapfile -t changed < <(git status --porcelain | sed 's/^...//')
+          if [[ ${#changed[@]} -ne 1 || "${changed[0]}" != "pubspec.lock" ]]; then
+            printf 'Unexpected generated paths:\n%s\n' "${changed[@]}" >&2
+            exit 1
+          fi
+
+      - name: Commit only pubspec.lock
+        if: steps.lock.outputs.needed == 'true'
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- pubspec.lock
+          test "$(git diff --cached --name-only)" = 'pubspec.lock'
+          git commit -m '[lockfile-bootstrap] Pin Flutter dependency graph'
+          git push origin HEAD:agent/phase-1-production-foundations

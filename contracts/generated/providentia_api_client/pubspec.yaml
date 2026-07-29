@@ -1,0 +1,11 @@
+# GENERATED FILE - DO NOT EDIT.
+name: providentia_api_client
+description: Generated API client for the Providentia backend contract.
+publish_to: none
+version: 1.0.0
+
+environment:
+  sdk: '>=3.12.2 <3.13.0'
+
+dependencies:
+  http: 1.5.0
