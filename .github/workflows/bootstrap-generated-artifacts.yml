@@ -74,7 +74,9 @@ jobs:
         run: |
           dart compile js -O4 \
             -o web/drift_worker.dart.js web/drift_worker.dart
-          rm -f web/drift_worker.dart.js.deps
+          rm -f \
+            web/drift_worker.dart.js.deps \
+            web/drift_worker.dart.js.map
 
       - name: Verify the pinned WebAssembly asset
         run: |
