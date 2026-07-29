@@ -29,8 +29,12 @@ try {
     Expand-Archive -Path $ArchivePath -DestinationPath $InstallParent
     $VersionOutput = & (Join-Path $FlutterPath 'bin/flutter.bat') --version --machine |
         ConvertFrom-Json
-    if ($VersionOutput.frameworkVersion -ne $Version) {
-        throw "Expected Flutter $Version, found $($VersionOutput.frameworkVersion)."
+    $ActualVersion = $VersionOutput.flutterVersion
+    if (-not $ActualVersion) {
+        $ActualVersion = $VersionOutput.frameworkVersion
+    }
+    if ($ActualVersion -ne $Version) {
+        throw "Expected Flutter $Version, found $ActualVersion."
     }
 } finally {
     Remove-Item -Path $DownloadDirectory -Recurse -Force -ErrorAction SilentlyContinue

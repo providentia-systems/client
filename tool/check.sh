@@ -14,10 +14,11 @@ fi
 flutter_version=$(flutter --version --machine)
 node -e '
   const actual = JSON.parse(process.argv[1]);
-  if (actual.frameworkVersion !== "3.44.7" || actual.dartSdkVersion !== "3.12.2") {
+  const flutterVersion = actual.flutterVersion ?? actual.frameworkVersion;
+  if (flutterVersion !== "3.44.7" || actual.dartSdkVersion !== "3.12.2") {
     throw new Error(
       `Expected Flutter 3.44.7 / Dart 3.12.2; found ` +
-      `${actual.frameworkVersion} / ${actual.dartSdkVersion}.`,
+      `${flutterVersion} / ${actual.dartSdkVersion}.`,
     );
   }
 ' "$flutter_version"
