@@ -8,7 +8,7 @@
 PRODUCT_NAME = Providentia
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = org.vastdevelopmentmethod.providentia
+PRODUCT_BUNDLE_IDENTIFIER = com.vastdevelopmentmethod.providentia
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2021 org.vastdevelopmentmethod. All rights reserved.
+PRODUCT_COPYRIGHT = Copyright © 2026 Vast Development Method. All rights reserved.

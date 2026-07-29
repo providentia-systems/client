@@ -13,4 +13,8 @@
   constraints.
 - [Risk register](risk-register.md): current delivery and architecture risks.
 - [Phase 1 report](phase1-report.md): implementation evidence and limitations.
+- [Phase 3–4 report](phase3-phase4-report.md): responsive client, local
+  persistence, synchronization behavior, tests, and contract integration.
+- [Synchronization contract](synchronization-contract.md): the exact
+  backend-owned push/pull resources used by the client.
 - `phase0/`: the complete corrected and validated Phase 0 documentation trail.

@@ -74,7 +74,7 @@ const outputs = new Map([
     path.join(generatedDirectory, 'generation-manifest.json'),
     json({
       generator: 'tool/generate_api_client.mjs',
-      generatorVersion: 1,
+      generatorVersion: 2,
       contract: '../../providentia-v1.json',
       contractVersion: contract.info.version,
       contractSha256,
@@ -124,11 +124,11 @@ if (checkMode) {
 
 function validateContract(document) {
   if (document.openapi !== '3.1.0') {
-    throw new Error('The Phase 1 contract must use OpenAPI 3.1.0.');
+    throw new Error('The Providentia contract must use OpenAPI 3.1.0.');
   }
   if (
     document.info?.title !== 'Providentia API' ||
-    document.info?.version !== '1.0.0-foundation.1'
+    document.info?.version !== '1.2.0'
   ) {
     throw new Error('Unexpected API title.');
   }
@@ -138,19 +138,33 @@ function validateContract(document) {
     ['/health/ready', 'getReadiness'],
     ['/api/v1/system/info', 'getSystemInfo'],
     ['/metrics', 'getMetrics'],
+    ['/api/v1/homes/{homeId}/sync/pull', 'pullHomeSynchronization'],
+    ['/api/v1/homes/{homeId}/sync/bootstrap', 'bootstrapHomeSynchronization'],
   ]);
   for (const [resourcePath, operationId] of expectedOperations) {
     if (document.paths?.[resourcePath]?.get?.operationId !== operationId) {
       throw new Error(`Missing GET ${resourcePath} (${operationId}).`);
     }
   }
+  if (
+    document.paths?.['/api/v1/homes/{homeId}/sync/push']?.post?.operationId !==
+    'pushHomeSynchronization'
+  ) {
+    throw new Error('Missing POST home synchronization operation.');
+  }
 
   for (const schema of [
     'HealthStatus',
-    'ReadinessCheck',
     'ReadinessStatus',
     'SystemInfo',
     'ProblemDetails',
+    'SyncOperation',
+    'SyncOperationResult',
+    'SyncPushRequest',
+    'SyncPushResponse',
+    'SyncChange',
+    'SyncPullResponse',
+    'SyncBootstrapResponse',
   ]) {
     if (!document.components?.schemas?.[schema]) {
       throw new Error(`Missing component schema ${schema}.`);
@@ -162,7 +176,6 @@ function validateContract(document) {
     throw new Error('ProblemDetails must explicitly implement RFC 9457.');
   }
   assertRequiredFields(document, 'HealthStatus', ['status', 'timestamp']);
-  assertRequiredFields(document, 'ReadinessCheck', ['status']);
   assertRequiredFields(document, 'ReadinessStatus', ['status', 'checks']);
   assertRequiredFields(document, 'SystemInfo', [
     'product',
@@ -181,12 +194,42 @@ function validateContract(document) {
     'requestId',
   ]);
 
-  const readinessChecks =
-    document.components.schemas.ReadinessStatus.properties?.checks
-      ?.additionalProperties?.$ref;
-  if (readinessChecks !== '#/components/schemas/ReadinessCheck') {
-    throw new Error('Readiness checks must use ReadinessCheck objects.');
-  }
+  assertRequiredFields(document, 'SyncOperation', [
+    'operationId',
+    'entityType',
+    'entityId',
+    'operationType',
+    'clientTimestamp',
+    'payloadSchemaVersion',
+    'payload',
+  ]);
+  assertRequiredFields(document, 'SyncOperationResult', [
+    'operationId',
+    'status',
+  ]);
+  assertRequiredFields(document, 'SyncPushResponse', [
+    'protocolVersion',
+    'batchId',
+    'requestId',
+    'serverTime',
+    'results',
+    'highWaterCursor',
+  ]);
+  assertRequiredFields(document, 'SyncPullResponse', [
+    'protocolVersion',
+    'requestId',
+    'fromCursor',
+    'pageCursor',
+    'highWaterCursor',
+    'hasMore',
+    'changes',
+  ]);
+  assertRequiredFields(document, 'SyncBootstrapResponse', [
+    'protocolVersion',
+    'requestId',
+    'snapshotCursor',
+    'records',
+  ]);
 }
 
 function validateTokens(document) {
@@ -311,6 +354,212 @@ final class SystemInfo {
   final String queueBroker;
 }
 
+final class SyncOperation {
+  SyncOperation({
+    required this.operationId,
+    required this.entityType,
+    required this.entityId,
+    required this.operationType,
+    required this.baseRevision,
+    required this.clientTimestamp,
+    required this.payloadSchemaVersion,
+    required Map<String, Object?> payload,
+  }) : payload = Map<String, Object?>.unmodifiable(payload);
+
+  final String operationId;
+  final String entityType;
+  final String entityId;
+  final String operationType;
+  final int? baseRevision;
+  final DateTime clientTimestamp;
+  final int payloadSchemaVersion;
+  final Map<String, Object?> payload;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'operationId': operationId,
+    'entityType': entityType,
+    'entityId': entityId,
+    'operationType': operationType,
+    'baseRevision': baseRevision,
+    'clientTimestamp': clientTimestamp.toUtc().toIso8601String(),
+    'payloadSchemaVersion': payloadSchemaVersion,
+    'payload': payload,
+  };
+}
+
+final class SyncOperationResult {
+  SyncOperationResult({
+    required this.operationId,
+    required this.status,
+    this.revision,
+    this.changeCursor,
+    this.detail,
+    Map<String, Object?>? representation,
+    Map<String, Object?>? conflict,
+  }) : representation = representation == null
+           ? null
+           : Map<String, Object?>.unmodifiable(representation),
+       conflict = conflict == null
+           ? null
+           : Map<String, Object?>.unmodifiable(conflict);
+
+  factory SyncOperationResult.fromJson(Map<String, Object?> json) {
+    return SyncOperationResult(
+      operationId: _requiredString(json, 'operationId'),
+      status: _requiredString(json, 'status'),
+      revision: _optionalInteger(json, 'revision'),
+      changeCursor: _optionalString(json, 'changeCursor'),
+      detail: _optionalString(json, 'detail'),
+      representation: _optionalObject(json, 'representation'),
+      conflict: _optionalObject(json, 'conflict'),
+    );
+  }
+
+  final String operationId;
+  final String status;
+  final int? revision;
+  final String? changeCursor;
+  final String? detail;
+  final Map<String, Object?>? representation;
+  final Map<String, Object?>? conflict;
+}
+
+final class SyncPushResponse {
+  const SyncPushResponse({
+    required this.protocolVersion,
+    required this.batchId,
+    required this.requestId,
+    required this.serverTime,
+    required this.results,
+    required this.highWaterCursor,
+  });
+
+  factory SyncPushResponse.fromJson(Map<String, Object?> json) {
+    return SyncPushResponse(
+      protocolVersion: _requiredInteger(json, 'protocolVersion'),
+      batchId: _requiredString(json, 'batchId'),
+      requestId: _requiredString(json, 'requestId'),
+      serverTime: _requiredDateTime(json, 'serverTime'),
+      results: _requiredObjectList(
+        json,
+        'results',
+      ).map(SyncOperationResult.fromJson).toList(growable: false),
+      highWaterCursor: _requiredString(json, 'highWaterCursor'),
+    );
+  }
+
+  final int protocolVersion;
+  final String batchId;
+  final String requestId;
+  final DateTime serverTime;
+  final List<SyncOperationResult> results;
+  final String highWaterCursor;
+}
+
+final class SyncChange {
+  SyncChange({
+    required this.cursor,
+    required this.entityType,
+    required this.entityId,
+    required this.operation,
+    required this.revision,
+    required this.serverTimestamp,
+    required this.representationSchemaVersion,
+    Map<String, Object?>? representation,
+    Map<String, Object?>? tombstone,
+  }) : representation = representation == null
+           ? null
+           : Map<String, Object?>.unmodifiable(representation),
+       tombstone = tombstone == null
+           ? null
+           : Map<String, Object?>.unmodifiable(tombstone);
+
+  factory SyncChange.fromJson(Map<String, Object?> json) {
+    return SyncChange(
+      cursor: _requiredString(json, 'cursor'),
+      entityType: _requiredString(json, 'entityType'),
+      entityId: _requiredString(json, 'entityId'),
+      operation: _requiredString(json, 'operation'),
+      revision: _requiredInteger(json, 'revision'),
+      serverTimestamp: _requiredDateTime(json, 'serverTimestamp'),
+      representationSchemaVersion: _requiredInteger(
+        json,
+        'representationSchemaVersion',
+      ),
+      representation: _optionalObject(json, 'representation'),
+      tombstone: _optionalObject(json, 'tombstone'),
+    );
+  }
+
+  final String cursor;
+  final String entityType;
+  final String entityId;
+  final String operation;
+  final int revision;
+  final DateTime serverTimestamp;
+  final int representationSchemaVersion;
+  final Map<String, Object?>? representation;
+  final Map<String, Object?>? tombstone;
+}
+
+final class SyncPullResponse {
+  const SyncPullResponse({
+    required this.protocolVersion,
+    required this.requestId,
+    required this.fromCursor,
+    required this.pageCursor,
+    required this.highWaterCursor,
+    required this.hasMore,
+    required this.changes,
+  });
+
+  factory SyncPullResponse.fromJson(Map<String, Object?> json) {
+    return SyncPullResponse(
+      protocolVersion: _requiredInteger(json, 'protocolVersion'),
+      requestId: _requiredString(json, 'requestId'),
+      fromCursor: _requiredString(json, 'fromCursor'),
+      pageCursor: _requiredString(json, 'pageCursor'),
+      highWaterCursor: _requiredString(json, 'highWaterCursor'),
+      hasMore: _requiredBoolean(json, 'hasMore'),
+      changes: _requiredObjectList(
+        json,
+        'changes',
+      ).map(SyncChange.fromJson).toList(growable: false),
+    );
+  }
+
+  final int protocolVersion;
+  final String requestId;
+  final String fromCursor;
+  final String pageCursor;
+  final String highWaterCursor;
+  final bool hasMore;
+  final List<SyncChange> changes;
+}
+
+final class SyncBootstrapResponse {
+  const SyncBootstrapResponse({
+    required this.protocolVersion,
+    required this.requestId,
+    required this.snapshotCursor,
+    required this.records,
+  });
+
+  factory SyncBootstrapResponse.fromJson(Map<String, Object?> json) {
+    return SyncBootstrapResponse(
+      protocolVersion: _requiredInteger(json, 'protocolVersion'),
+      requestId: _requiredString(json, 'requestId'),
+      snapshotCursor: _requiredString(json, 'snapshotCursor'),
+      records: _requiredObjectList(json, 'records'),
+    );
+  }
+
+  final int protocolVersion;
+  final String requestId;
+  final String snapshotCursor;
+  final List<Map<String, Object?>> records;
+}
+
 final class ProblemDetails {
   const ProblemDetails({
     required this.type,
@@ -373,9 +622,10 @@ final class ProvidentiaApiClient {
   ProvidentiaApiClient({
     required this.baseUri,
     http.Client? httpClient,
+    bool closeHttpClient = false,
     Map<String, String> defaultHeaders = const <String, String>{},
   }) : _httpClient = httpClient ?? http.Client(),
-       _ownsHttpClient = httpClient == null,
+       _ownsHttpClient = httpClient == null || closeHttpClient,
        _defaultHeaders = Map<String, String>.unmodifiable(defaultHeaders) {
     if (!baseUri.hasScheme || !baseUri.hasAuthority) {
       throw ArgumentError.value(baseUri, 'baseUri', 'must be absolute');
@@ -410,15 +660,69 @@ final class ProvidentiaApiClient {
     return response.body;
   }
 
+  Future<SyncPushResponse> pushHomeSynchronization({
+    required String homeId,
+    required String idempotencyKey,
+    required String batchId,
+    required String deviceId,
+    required String? lastPulledCursor,
+    required List<SyncOperation> operations,
+  }) async {
+    final response = await _postJson(
+      '/api/v1/homes/\${Uri.encodeComponent(homeId)}/sync/push',
+      body: <String, Object?>{
+        'protocolVersion': 1,
+        'batchId': batchId,
+        'deviceId': deviceId,
+        'lastPulledCursor': lastPulledCursor,
+        'operations': operations
+            .map((operation) => operation.toJson())
+            .toList(growable: false),
+      },
+      extraHeaders: <String, String>{'Idempotency-Key': idempotencyKey},
+    );
+    return SyncPushResponse.fromJson(_decodeObject(response.body));
+  }
+
+  Future<SyncPullResponse> pullHomeSynchronization({
+    required String homeId,
+    String? cursor,
+    int limit = 250,
+  }) async {
+    final response = await _get(
+      '/api/v1/homes/\${Uri.encodeComponent(homeId)}/sync/pull',
+      accept: 'application/json',
+      query: <String, String>{
+        if (cursor != null) 'cursor': cursor,
+        'limit': limit.toString(),
+      },
+    );
+    return SyncPullResponse.fromJson(_decodeObject(response.body));
+  }
+
+  Future<SyncBootstrapResponse> bootstrapHomeSynchronization({
+    required String homeId,
+  }) async {
+    final response = await _get(
+      '/api/v1/homes/\${Uri.encodeComponent(homeId)}/sync/bootstrap',
+      accept: 'application/json',
+    );
+    return SyncBootstrapResponse.fromJson(_decodeObject(response.body));
+  }
+
   void close() {
     if (_ownsHttpClient) {
       _httpClient.close();
     }
   }
 
-  Future<http.Response> _get(String path, {required String accept}) async {
+  Future<http.Response> _get(
+    String path, {
+    required String accept,
+    Map<String, String>? query,
+  }) async {
     final response = await _httpClient.get(
-      _endpoint(path),
+      _endpoint(path, query: query),
       headers: <String, String>{..._defaultHeaders, 'Accept': accept},
     );
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -427,8 +731,33 @@ final class ProvidentiaApiClient {
     return response;
   }
 
-  Uri _endpoint(String path) {
-    return baseUri.replace(path: path, query: null, fragment: null);
+  Future<http.Response> _postJson(
+    String path, {
+    required Map<String, Object?> body,
+    Map<String, String> extraHeaders = const <String, String>{},
+  }) async {
+    final response = await _httpClient.post(
+      _endpoint(path),
+      headers: <String, String>{
+        ..._defaultHeaders,
+        ...extraHeaders,
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode(body),
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw _toException(response);
+    }
+    return response;
+  }
+
+  Uri _endpoint(String path, {Map<String, String>? query}) {
+    return baseUri.replace(
+      path: path,
+      queryParameters: query?.isEmpty ?? true ? null : query,
+      fragment: null,
+    );
   }
 
   ProvidentiaApiException _toException(http.Response response) {
@@ -468,6 +797,22 @@ Map<String, Object?> _requiredObject(Map<String, Object?> json, String key) {
   return value;
 }
 
+Map<String, Object?>? _optionalObject(Map<String, Object?> json, String key) {
+  final value = json[key];
+  return value == null ? null : _objectValue(value, key);
+}
+
+List<Map<String, Object?>> _requiredObjectList(
+  Map<String, Object?> json,
+  String key,
+) {
+  final value = json[key];
+  if (value is! List<Object?>) {
+    throw FormatException('Expected "$key" to be an array.');
+  }
+  return value.map((item) => _objectValue(item, key)).toList(growable: false);
+}
+
 Map<String, Object?> _objectValue(Object? value, String key) {
   if (value is! Map<String, Object?>) {
     throw FormatException('Expected "$key" to be an object.');
@@ -494,6 +839,23 @@ String _stringValue(Object? value, String key) {
 int _integerValue(Object? value, String key) {
   if (value is! int) {
     throw FormatException('Expected "$key" to be an integer.');
+  }
+  return value;
+}
+
+int _requiredInteger(Map<String, Object?> json, String key) {
+  return _integerValue(json[key], key);
+}
+
+int? _optionalInteger(Map<String, Object?> json, String key) {
+  final value = json[key];
+  return value == null ? null : _integerValue(value, key);
+}
+
+bool _requiredBoolean(Map<String, Object?> json, String key) {
+  final value = json[key];
+  if (value is! bool) {
+    throw FormatException('Expected "$key" to be a boolean.');
   }
   return value;
 }

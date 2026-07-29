@@ -8,7 +8,7 @@ plugins {
 }
 
 android {
-    namespace = "org.vastdevelopmentmethod.providentia"
+    namespace = "com.vastdevelopmentmethod.providentia"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -18,7 +18,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "org.vastdevelopmentmethod.providentia"
+        applicationId = "com.vastdevelopmentmethod.providentia"
         // Providentia's documented deployment baseline starts at Android API 24.
         minSdk = 24
         targetSdk = flutter.targetSdkVersion

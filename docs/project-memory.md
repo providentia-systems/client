@@ -16,6 +16,13 @@
   decision.
 - Android and iOS are first-class targets alongside Windows, macOS, Linux, and
   authenticated web.
+- The permanent application/distribution identifier is
+  `com.vastdevelopmentmethod.providentia`.
+- The project is proprietary. No distribution licence is selected yet and no
+  public redistribution permission is implied.
+- The preferred production backend database is MySQL.
+- Redis is the preferred production queue/cache profile. The shared
+  Redis-compatible port and Valkey verification remain architecture safeguards.
 
 Domain, app-store, and trademark due diligence remains mandatory before public
 launch. It does not reopen the owner-selected name.

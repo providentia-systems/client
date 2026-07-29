@@ -1,4 +1,4 @@
-name: One-time dependency lock bootstrap
+name: Dependency lock refresh
 
 on:
   pull_request:
@@ -8,18 +8,21 @@ on:
       - .github/workflows/bootstrap-lockfile.yml
   push:
     branches:
-      - agent/phase-1-production-foundations
+      - main
+      - 'agent/**'
+      - 'feature/**'
+      - 'phase-*/**'
 
 permissions:
   contents: write
 
 concurrency:
-  group: providentia-flutter-lock-bootstrap
+  group: providentia-flutter-lock-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
   create-lockfile:
-    name: Commit initial pubspec.lock
+    name: Refresh pubspec.lock
     if: >-
       github.repository == 'vast-development-method/providentia-flutter' &&
       (github.event_name == 'pull_request' ||
@@ -30,42 +33,39 @@ jobs:
       - name: Check out exact pushed revision
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: agent/phase-1-production-foundations
-
-      - name: Stop when the lock already exists
-        id: lock
-        run: |
-          if test -f pubspec.lock; then
-            echo "needed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "needed=true" >> "$GITHUB_OUTPUT"
-          fi
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
 
       - name: Install pinned Flutter SDK
-        if: steps.lock.outputs.needed == 'true'
         run: |
           tool/install_flutter_linux.sh "$RUNNER_TEMP/providentia-sdk"
           echo "$RUNNER_TEMP/providentia-sdk/flutter/bin" >> "$GITHUB_PATH"
 
-      - name: Generate the initial dependency lock
-        if: steps.lock.outputs.needed == 'true'
+      - name: Resolve the dependency graph
         run: flutter pub get
 
       - name: Verify mutation scope
-        if: steps.lock.outputs.needed == 'true'
+        id: mutation
         run: |
           mapfile -t changed < <(git status --porcelain | sed 's/^...//')
-          if [[ ${#changed[@]} -ne 1 || "${changed[0]}" != "pubspec.lock" ]]; then
+          if [[ ${#changed[@]} -gt 1 ]] ||
+             [[ ${#changed[@]} -eq 1 && "${changed[0]}" != "pubspec.lock" ]]; then
             printf 'Unexpected generated paths:\n%s\n' "${changed[@]}" >&2
             exit 1
           fi
+          if [[ ${#changed[@]} -eq 1 ]]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Commit only pubspec.lock
-        if: steps.lock.outputs.needed == 'true'
+        if: steps.mutation.outputs.changed == 'true'
+        env:
+          TARGET_BRANCH: ${{ github.event.pull_request.head.ref || github.ref_name }}
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -- pubspec.lock
           test "$(git diff --cached --name-only)" = 'pubspec.lock'
-          git commit -m '[lockfile-bootstrap] Pin Flutter dependency graph'
-          git push origin HEAD:agent/phase-1-production-foundations
+          git commit -m '[lockfile-bootstrap] Refresh Flutter dependency graph'
+          git push origin "HEAD:${TARGET_BRANCH}"
