@@ -83,9 +83,10 @@ node --check tool/*.mjs
 Flutter and Dart are not installed in the local execution environment, and
 pub.dev is unavailable there. Consequently, formatting, dependency resolution,
 analysis, Flutter tests, and compiled builds were not run locally and are not
-represented as passed. The dedicated bootstrap workflow resolves and commits
-the initial dependency lock on
-`agent/phase-1-production-foundations`; ordinary CI then runs those gates from
+represented as passed. The dedicated bootstrap workflow successfully resolved
+and committed the initial dependency lock on
+`agent/phase-1-production-foundations` at
+`fb9bf90dc6e5e66202a9bd3e4cbf7ecc629a68c5`; ordinary CI runs those gates from
 the committed lock.
 
 ## 8. Platform results
@@ -103,8 +104,6 @@ migration specification.
 
 ## 10. Known limitations
 
-- `pubspec.lock` is created by the guarded first-branch workflow because
-  pub.dev is unavailable in the local execution environment.
 - Platform compile evidence is pending the remote CI matrix.
 - Phase 1 runner icons are Flutter engineering assets, not approved public
   Providentia branding.
