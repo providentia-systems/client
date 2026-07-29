@@ -58,6 +58,7 @@ jobs:
         run: |
           dart compile js -O4 \
             -o web/drift_worker.dart.js web/drift_worker.dart
+          rm -f web/drift_worker.dart.js.deps
           test -z "$(git status --porcelain -- web/drift_worker.dart.js)"
           echo \
             '41cf968998241465d8b1dfffb1eb60dd10c35de5022a3647e14174ea3af84143  web/sqlite3.wasm' \
