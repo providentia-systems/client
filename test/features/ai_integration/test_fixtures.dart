@@ -237,12 +237,15 @@ final class FakeCredentialVault implements CredentialVault {
 
 final class FakeServerCredentials implements ServerCredentialProvisioningPort {
   int replacements = 0;
+  int deletions = 0;
 
   @override
   Future<void> deleteCredential({
     required String homeId,
     required String profileId,
-  }) async {}
+  }) async {
+    deletions++;
+  }
 
   @override
   Future<void> replaceCredential({
