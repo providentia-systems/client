@@ -55,6 +55,7 @@ abstract interface class LocalSyncStore {
   });
 
   Future<void> requeueOperation({
+    required String homeId,
     required String operationId,
     required DateTime now,
   });
