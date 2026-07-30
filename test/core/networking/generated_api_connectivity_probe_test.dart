@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -85,4 +86,72 @@ void main() {
     expect(result.availability, SyncAvailability.offline);
     expect(result.safeMessage, contains('temporarily unavailable'));
   });
+
+  test('non-ready health response reports service startup', () async {
+    final probe = GeneratedApiConnectivityProbe(
+      ProvidentiaApiClient(
+        baseUri: Uri.parse('https://api.example.test'),
+        httpClient: MockClient((_) async {
+          return http.Response(
+            jsonEncode(<String, Object?>{
+              'status': 'starting',
+              'checks': <String, Object?>{},
+            }),
+            200,
+          );
+        }),
+      ),
+    );
+
+    final result = await probe.check();
+
+    expect(result.availability, SyncAvailability.offline);
+    expect(result.safeMessage, contains('starting'));
+  });
+
+  test('timeout is distinct from an ordinary connection failure', () async {
+    final never = Completer<http.Response>();
+    final probe = GeneratedApiConnectivityProbe(
+      ProvidentiaApiClient(
+        baseUri: Uri.parse('https://api.example.test'),
+        httpClient: MockClient((_) => never.future),
+      ),
+      timeout: const Duration(milliseconds: 1),
+    );
+
+    final result = await probe.check();
+
+    expect(result.availability, SyncAvailability.offline);
+    expect(result.safeMessage, contains('did not respond'));
+  });
+
+  test('ordinary client exceptions preserve offline work', () async {
+    final probe = GeneratedApiConnectivityProbe(
+      ProvidentiaApiClient(
+        baseUri: Uri.parse('https://api.example.test'),
+        httpClient: MockClient((_) async {
+          throw Exception('network unavailable');
+        }),
+      ),
+    );
+
+    final result = await probe.check();
+
+    expect(result.availability, SyncAvailability.offline);
+    expect(result.safeMessage, contains('No connection'));
+  });
+
+  test('programming errors are not disguised as connectivity failures', () async {
+    final probe = GeneratedApiConnectivityProbe(
+      ProvidentiaApiClient(
+        baseUri: Uri.parse('https://api.example.test'),
+        httpClient: MockClient((_) async {
+          throw StateError('programming defect');
+        }),
+      ),
+    );
+
+    await expectLater(probe.check(), throwsStateError);
+  });
+
 }
