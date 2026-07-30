@@ -273,6 +273,8 @@ void main() {
     expect(find.text('Catalog review'), findsOneWidget);
     expect(find.text('Rice Basmati'), findsWidgets);
     expect(find.textContaining('contains no home identity'), findsOneWidget);
+    await tester.tap(find.text('Rice Basmati').first);
+    await tester.pump();
     expect(find.text('Generate revision-bound merge preview'), findsOneWidget);
     expect(find.text('Catalog audit history'), findsOneWidget);
     expect(find.byIcon(Icons.qr_code_rounded), findsOneWidget);
@@ -309,6 +311,8 @@ void main() {
         ),
       );
       expect(find.textContaining('Read-only reviewer view'), findsOneWidget);
+      await tester.tap(find.text('Rice Basmati').first);
+      await tester.pump();
       expect(
         tester
             .widget<OutlinedButton>(

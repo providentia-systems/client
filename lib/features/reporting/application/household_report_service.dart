@@ -21,7 +21,7 @@ final class UnavailableHouseholdReportRepository
   const UnavailableHouseholdReportRepository();
 
   @override
-  Future<HouseholdReport> load({required String homeId}) {
+  Future<HouseholdReport> load({required String homeId}) async {
     throw const ReportContractUnavailableException();
   }
 }
