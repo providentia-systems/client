@@ -213,7 +213,7 @@ final class ExtractReceiptProposal {
         timeout: timeout,
       );
       final result = await gateway.extractReceipt(request);
-      return switch (result) {
+      final outcome = switch (result) {
         AiExtractionSuccess<ReceiptProposal>() => _acceptReceipt(run, result),
         AiExtractionRefused<ReceiptProposal>() => _recordReceiptFailure(
           run,
@@ -235,6 +235,7 @@ final class ExtractReceiptProposal {
           result.classification,
         ),
       };
+      return await outcome;
     } on AiPolicyViolation {
       await _runs.save(run.withState(AiRunState.failed));
       rethrow;
