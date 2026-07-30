@@ -121,14 +121,28 @@ final class NoopSyncMetrics implements SyncMetrics {
 }
 
 final class RetryPolicy {
-  const RetryPolicy({
-    this.baseDelay = const Duration(seconds: 2),
-    this.maximumDelay = const Duration(minutes: 15),
-  }) : assert(baseDelay > Duration.zero, 'baseDelay must be positive.'),
-       assert(
-         maximumDelay >= baseDelay,
-         'maximumDelay must not be shorter than baseDelay.',
-       );
+  factory RetryPolicy({
+    Duration baseDelay = const Duration(seconds: 2),
+    Duration maximumDelay = const Duration(minutes: 15),
+  }) {
+    if (baseDelay <= Duration.zero) {
+      throw ArgumentError.value(
+        baseDelay,
+        'baseDelay',
+        'must be positive',
+      );
+    }
+    if (maximumDelay < baseDelay) {
+      throw ArgumentError.value(
+        maximumDelay,
+        'maximumDelay',
+        'must not be shorter than baseDelay',
+      );
+    }
+    return RetryPolicy._(baseDelay, maximumDelay);
+  }
+
+  const RetryPolicy._(this.baseDelay, this.maximumDelay);
 
   final Duration baseDelay;
   final Duration maximumDelay;
