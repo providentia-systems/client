@@ -214,6 +214,7 @@ class _BrandBar extends StatelessWidget {
     return Row(
       children: <Widget>[
         Semantics(
+          key: const Key('brand-mark-semantics'),
           label: 'Providentia',
           image: true,
           child: const DecoratedBox(
@@ -411,16 +412,25 @@ class _OverviewGrid extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final columns = constraints.maxWidth >= 760 ? 3 : 1;
-        return GridView.count(
+        const spacing = 12.0;
+        final columnWidth =
+            (constraints.maxWidth - (columns - 1) * spacing) / columns;
+        final nominalExtent = columnWidth / (columns == 1 ? 3.7 : 2.1);
+
+        return Wrap(
           key: const Key('overview-grid'),
-          crossAxisCount: columns,
-          mainAxisSpacing: 12,
-          crossAxisSpacing: 12,
-          childAspectRatio: columns == 1 ? 3.7 : 2.1,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
+          spacing: spacing,
+          runSpacing: spacing,
           children: cards
-              .map((data) => _OverviewCard(data: data))
+              .map(
+                (data) => SizedBox(
+                  width: columnWidth,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(minHeight: nominalExtent),
+                    child: _OverviewCard(data: data),
+                  ),
+                ),
+              )
               .toList(growable: false),
         );
       },
@@ -466,6 +476,7 @@ class _OverviewCard extends StatelessWidget {
             const SizedBox(width: 14),
             Expanded(
               child: Column(
+                mainAxisSize: MainAxisSize.min,
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
@@ -726,7 +737,7 @@ class _NavigationSidebar extends StatelessWidget {
     return SizedBox(
       key: const Key('navigation-sidebar'),
       width: 256,
-      child: ColoredBox(
+      child: Material(
         color: ProvidentiaColors.surfaceStrong,
         child: Padding(
           padding: const EdgeInsets.all(18),
