@@ -279,6 +279,7 @@ final class SyncCoordinator implements AppSynchronization {
     required String operationId,
   }) async {
     await _local.requeueOperation(
+      homeId: homeId,
       operationId: operationId,
       now: _clock().toUtc(),
     );
