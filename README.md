@@ -24,10 +24,12 @@ flutter pub get --enforce-lockfile
 dart run build_runner build --delete-conflicting-outputs
 node tool/generate_api_client.mjs --check
 node tool/verify_structure.mjs
+node --test tool/*.test.mjs
 dart format --output=none --set-exit-if-changed \
   lib test contracts/generated/providentia_api_client/lib
 flutter analyze --fatal-infos --fatal-warnings
-flutter test
+flutter test --coverage
+node tool/check_coverage.mjs coverage/lcov.info 80
 ```
 
 Regenerate the client only after replacing the pinned backend-owned contract:
@@ -96,8 +98,11 @@ configuration uses the debug key.
 ## Documentation
 
 Start with [docs/index.md](docs/index.md). The permanent owner decisions are in
-[docs/project-memory.md](docs/project-memory.md), and the exact support claims
-are in [docs/platform-support.md](docs/platform-support.md).
+[docs/project-memory.md](docs/project-memory.md), the current SOLID and Phase 4
+readiness decision is in
+[docs/phase4-solid-readiness-audit.md](docs/phase4-solid-readiness-audit.md),
+and the exact support claims are in
+[docs/platform-support.md](docs/platform-support.md).
 
 This is a proprietary project. No distribution licence has been selected. Do
 not publish or redistribute the application until the owner records that
