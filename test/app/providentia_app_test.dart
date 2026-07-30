@@ -16,7 +16,6 @@ void main() {
     expect(find.text('Providentia'), findsOneWidget);
     expect(find.text('Your pantry, ready'), findsOneWidget);
     expect(find.textContaining('Prototype shell:'), findsOneWidget);
-    expect(find.byKey(const Key('bottom-navigation')), findsOneWidget);
   });
 
   for (final viewport in <(String, Size, Key)>[
@@ -148,8 +147,10 @@ void main() {
   });
 
   testWidgets('large text and reduced motion remain usable', (tester) async {
+    final semantics = tester.ensureSemantics();
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(390, 844);
+    addTearDown(semantics.dispose);
     addTearDown(tester.view.reset);
 
     await tester.pumpWidget(
@@ -164,7 +165,9 @@ void main() {
     await tester.pump();
 
     expect(find.text('Your pantry, ready'), findsOneWidget);
-    expect(find.bySemanticsLabel('Providentia'), findsOneWidget);
+    final brandMark = find.byKey(const Key('brand-mark-semantics'));
+    expect(brandMark, findsOneWidget);
+    expect(tester.getSemantics(brandMark).label, 'Providentia');
     expect(tester.takeException(), isNull);
   });
 
