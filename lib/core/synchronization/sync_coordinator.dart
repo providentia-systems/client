@@ -8,9 +8,9 @@ import 'package:providentia/core/synchronization/sync_ports.dart';
 /// Mobile background execution remains best effort. The composition root calls
 /// this coordinator on start, resume, home switch, manual refresh, and after
 /// foreground mutations.
-final class SyncCoordinator {
+final class SyncCoordinator implements AppSynchronization {
   factory SyncCoordinator({
-    required LocalSyncRepository local,
+    required LocalSyncStore local,
     required SyncRemoteGateway remote,
     required ConnectivityProbe connectivity,
     SyncMetrics metrics = const NoopSyncMetrics(),
@@ -18,15 +18,26 @@ final class SyncCoordinator {
         const NoAuthenticationRecovery(),
     RetryPolicy retryPolicy = const RetryPolicy(),
     DateTime Function()? clock,
-  }) => SyncCoordinator._(
-    local,
-    remote,
-    connectivity,
-    metrics,
-    authenticationRecovery,
-    retryPolicy,
-    clock ?? DateTime.now,
-  );
+    int maximumPullPages = 1000,
+  }) {
+    if (maximumPullPages < 1) {
+      throw ArgumentError.value(
+        maximumPullPages,
+        'maximumPullPages',
+        'must be at least one',
+      );
+    }
+    return SyncCoordinator._(
+      local,
+      remote,
+      connectivity,
+      metrics,
+      authenticationRecovery,
+      retryPolicy,
+      clock ?? DateTime.now,
+      maximumPullPages,
+    );
+  }
 
   SyncCoordinator._(
     this._local,
@@ -36,22 +47,29 @@ final class SyncCoordinator {
     this._authenticationRecovery,
     this._retryPolicy,
     this._clock,
+    this._maximumPullPages,
   );
 
-  final LocalSyncRepository _local;
+  final LocalSyncStore _local;
   final SyncRemoteGateway _remote;
   final ConnectivityProbe _connectivity;
   final SyncMetrics _metrics;
   final AuthenticationRecovery _authenticationRecovery;
   final RetryPolicy _retryPolicy;
   final DateTime Function() _clock;
+  final int _maximumPullPages;
 
   bool _running = false;
 
-  Stream<SyncSummary> watchSummary() => _local.watchSummary();
+  @override
+  Stream<SyncSummary> watchSummary({required String homeId}) {
+    return _local.watchSummary(homeId: homeId);
+  }
 
+  @override
   Future<ConnectivityResult> connectivity() => _connectivity.check();
 
+  @override
   Future<SyncRunOutcome> synchronize(String homeId) async {
     if (_running) {
       return const SyncRunOutcome(
@@ -135,7 +153,7 @@ final class SyncCoordinator {
             retryPolicy: _retryPolicy,
           );
           rethrow;
-        } on Object {
+        } on Exception {
           // A lost response is retryable. Idempotency is provided by the
           // durable operation ID and must be enforced by the server.
           await _local.applyPushResults(
@@ -164,7 +182,16 @@ final class SyncCoordinator {
       }
       var hasMore = true;
       var resynchronized = false;
+      var pullPageCount = 0;
+      String? highWaterCursor;
       while (hasMore) {
+        pullPageCount++;
+        if (pullPageCount > _maximumPullPages) {
+          throw const RetryableSyncException(
+            'Synchronization returned too many pages. Try again safely.',
+          );
+        }
+
         PullPage page;
         try {
           page = await _remote.pull(homeId: homeId, afterCursor: cursor);
@@ -178,9 +205,24 @@ final class SyncCoordinator {
           await _local.replaceWithBootstrap(homeId: homeId, page: bootstrap);
           pulled += bootstrap.changes.length;
           cursor = bootstrap.pageCursor;
+          highWaterCursor = null;
           resynchronized = true;
           continue;
         }
+
+        if (highWaterCursor != null &&
+            page.highWaterCursor != highWaterCursor) {
+          throw const RetryableSyncException(
+            'Synchronization page boundary changed. Try again safely.',
+          );
+        }
+        highWaterCursor ??= page.highWaterCursor;
+        if (page.hasMore && page.pageCursor == cursor) {
+          throw const RetryableSyncException(
+            'Synchronization cursor did not advance. Try again safely.',
+          );
+        }
+
         await _local.applyPullPage(homeId: homeId, page: page);
         pulled += page.changes.length;
         cursor = page.pageCursor;
@@ -219,7 +261,7 @@ final class SyncCoordinator {
         acknowledgedCount: acknowledged,
         pulledChangeCount: pulled,
       );
-    } on Object {
+    } on Exception {
       _metrics.recordFailure(classification: 'retryable');
       return SyncRunOutcome(
         status: SyncRunStatus.retryableFailure,
