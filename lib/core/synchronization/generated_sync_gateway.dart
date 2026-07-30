@@ -24,14 +24,22 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
           'Unsupported sync protocol version ${response.protocolVersion}.',
         );
       }
+      final seenEntities = <String>{};
       final changes = response.records
           .map((record) {
+            final entityType = _requiredString(record, 'entityType');
+            final entityId = _requiredString(record, 'entityId');
+            if (!seenEntities.add('$entityType\u0000$entityId')) {
+              throw FormatException(
+                'Bootstrap contains duplicate entity $entityType/$entityId.',
+              );
+            }
             final representation = _requiredObject(record, 'representation');
             return RemoteChange(
               cursor: response.snapshotCursor,
               homeId: homeId,
-              entityType: _requiredString(record, 'entityType'),
-              entityId: _requiredString(record, 'entityId'),
+              entityType: entityType,
+              entityId: entityId,
               kind: RemoteChangeKind.upsert,
               revision: _requiredInteger(record, 'revision'),
               serverTimestamp: _requiredDateTime(record, 'serverTimestamp'),
@@ -69,6 +77,19 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
   }) async {
     if (operations.isEmpty) {
       return const PushResponse(results: <PushOperationResult>[]);
+    }
+    if (operations.any((operation) => operation.homeId != homeId)) {
+      throw const FormatException(
+        'A synchronization batch cannot contain operations from another home.',
+      );
+    }
+    final operationIds = operations
+        .map((operation) => operation.operationId)
+        .toSet();
+    if (operationIds.length != operations.length) {
+      throw const FormatException(
+        'A synchronization batch cannot contain duplicate operation IDs.',
+      );
     }
     final deviceId = operations.first.deviceId;
     if (operations.any((operation) => operation.deviceId != deviceId)) {
@@ -108,9 +129,11 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
           'Synchronization response identity did not match the request.',
         );
       }
-      return PushResponse(
-        results: response.results.map(_pushResult).toList(growable: false),
-      );
+      final results = response.results
+          .map(_pushResult)
+          .toList(growable: false);
+      _validatePushResults(operationIds, results);
+      return PushResponse(results: results);
     } on generated.ProvidentiaApiException catch (error) {
       if (error.statusCode == 401) {
         throw AuthenticationSyncException(_safeProblem(error));
@@ -224,6 +247,31 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
       safeMessage: result.detail,
       remotePayload: result.representation ?? result.conflict,
     );
+  }
+
+  void _validatePushResults(
+    Set<String> expectedOperationIds,
+    List<PushOperationResult> results,
+  ) {
+    final returnedOperationIds = <String>{};
+    for (final result in results) {
+      if (!expectedOperationIds.contains(result.operationId)) {
+        throw FormatException(
+          'Synchronization returned unknown operation ${result.operationId}.',
+        );
+      }
+      if (!returnedOperationIds.add(result.operationId)) {
+        throw FormatException(
+          'Synchronization returned operation ${result.operationId} twice.',
+        );
+      }
+    }
+    if (returnedOperationIds.length != expectedOperationIds.length) {
+      final missing = expectedOperationIds.difference(returnedOperationIds);
+      throw FormatException(
+        'Synchronization omitted operation results: ${missing.join(', ')}.',
+      );
+    }
   }
 
   String _safeProblem(generated.ProvidentiaApiException error) {
