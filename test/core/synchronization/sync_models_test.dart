@@ -38,6 +38,31 @@ void main() {
     );
   });
 
+  test('local mutation rejects invalid durable identity and revisions', () {
+    LocalMutation build({
+      String operationId = 'operation-1',
+      int? baseRevision,
+      int payloadSchemaVersion = 1,
+    }) {
+      return LocalMutation(
+        operationId: operationId,
+        deviceId: 'device-1',
+        homeId: 'home-1',
+        entityType: 'inventory_balance',
+        entityId: 'record-1',
+        operationType: 'put',
+        baseRevision: baseRevision,
+        clientTimestamp: DateTime.utc(2026, 7, 30, 12),
+        payloadSchemaVersion: payloadSchemaVersion,
+        payload: const <String, Object?>{'quantity': 2},
+      );
+    }
+
+    expect(() => build(operationId: '  '), throwsArgumentError);
+    expect(() => build(baseRevision: -1), throwsArgumentError);
+    expect(() => build(payloadSchemaVersion: 0), throwsArgumentError);
+  });
+
   test('push result copies and freezes its remote representation', () {
     final source = <String, Object?>{'revision': 4};
     final result = PushOperationResult(
