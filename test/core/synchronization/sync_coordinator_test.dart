@@ -264,6 +264,138 @@ void main() {
     expect(await database.select(database.localRecords).get(), hasLength(1));
   });
 
+  test('concurrent synchronization returns an explicit running outcome', () async {
+    final entered = Completer<void>();
+    final release = Completer<void>();
+    final remote = _FakeGateway(
+      pushHandler: (_, _) async =>
+          const PushResponse(results: <PushOperationResult>[]),
+      bootstrapHandler: (homeId) async {
+        entered.complete();
+        await release.future;
+        return PullPage(
+          protocolVersion: 1,
+          fromCursor: 'cursor-0',
+          changes: const <RemoteChange>[],
+          pageCursor: 'cursor-0',
+          highWaterCursor: 'cursor-0',
+          hasMore: false,
+          requestId: 'bootstrap',
+        );
+      },
+    );
+    final coordinator = SyncCoordinator(
+      local: local,
+      remote: remote,
+      connectivity: const _OnlineProbe(),
+      clock: () => now,
+    );
+
+    final first = coordinator.synchronize('home-1');
+    await entered.future;
+    final overlapping = await coordinator.synchronize('home-1');
+    release.complete();
+
+    expect(overlapping.status, SyncRunStatus.alreadyRunning);
+    expect((await first).status, SyncRunStatus.completed);
+  });
+
+  test('a paged response must advance its cursor', () async {
+    await local.applyPullPage(
+      homeId: 'home-1',
+      page: const PullPage(
+        protocolVersion: 1,
+        fromCursor: 'cursor-0',
+        changes: <RemoteChange>[],
+        pageCursor: 'cursor-0',
+        highWaterCursor: 'high-water',
+        hasMore: false,
+        requestId: 'seed',
+      ),
+    );
+    final coordinator = SyncCoordinator(
+      local: local,
+      remote: _FakeGateway(
+        pushHandler: (_, _) async =>
+            const PushResponse(results: <PushOperationResult>[]),
+        pullHandler: (homeId, cursor) async => PullPage(
+          protocolVersion: 1,
+          fromCursor: cursor,
+          changes: const <RemoteChange>[],
+          pageCursor: cursor!,
+          highWaterCursor: 'high-water',
+          hasMore: true,
+          requestId: 'stalled-page',
+        ),
+      ),
+      connectivity: const _OnlineProbe(),
+      clock: () => now,
+    );
+
+    final outcome = await coordinator.synchronize('home-1');
+
+    expect(outcome.status, SyncRunStatus.retryableFailure);
+    expect(outcome.safeMessage, contains('did not advance'));
+    expect(await local.cursorForHome('home-1'), 'cursor-0');
+  });
+
+  test('pull page count has a configurable safety limit', () async {
+    await local.applyPullPage(
+      homeId: 'home-1',
+      page: const PullPage(
+        protocolVersion: 1,
+        fromCursor: 'cursor-0',
+        changes: <RemoteChange>[],
+        pageCursor: 'cursor-0',
+        highWaterCursor: 'seed-high-water',
+        hasMore: false,
+        requestId: 'seed',
+      ),
+    );
+    var calls = 0;
+    final coordinator = SyncCoordinator(
+      local: local,
+      remote: _FakeGateway(
+        pushHandler: (_, _) async =>
+            const PushResponse(results: <PushOperationResult>[]),
+        pullHandler: (homeId, cursor) async {
+          calls++;
+          return PullPage(
+            protocolVersion: 1,
+            fromCursor: cursor,
+            changes: const <RemoteChange>[],
+            pageCursor: 'cursor-$calls',
+            highWaterCursor: 'run-high-water',
+            hasMore: true,
+            requestId: 'page-$calls',
+          );
+        },
+      ),
+      connectivity: const _OnlineProbe(),
+      clock: () => now,
+      maximumPullPages: 1,
+    );
+
+    final outcome = await coordinator.synchronize('home-1');
+
+    expect(outcome.status, SyncRunStatus.retryableFailure);
+    expect(outcome.safeMessage, contains('too many pages'));
+    expect(calls, 1);
+    expect(await local.cursorForHome('home-1'), 'cursor-1');
+    expect(
+      () => SyncCoordinator(
+        local: local,
+        remote: _FakeGateway(
+          pushHandler: (_, _) async =>
+              const PushResponse(results: <PushOperationResult>[]),
+        ),
+        connectivity: const _OnlineProbe(),
+        maximumPullPages: 0,
+      ),
+      throwsArgumentError,
+    );
+  });
+
   test('deterministic retry policy applies bounded jitter', () {
     const policy = RetryPolicy(
       baseDelay: Duration(seconds: 2),
