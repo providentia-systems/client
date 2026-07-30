@@ -233,6 +233,7 @@ void main() {
     );
 
     await repository.requeueOperation(
+      homeId: 'home-1',
       operationId: 'operation-1',
       now: DateTime.utc(2026, 7, 29, 15),
     );
@@ -244,6 +245,36 @@ void main() {
       operation.state,
       ClientOperationState.blockedValidation.storageValue,
     );
+  });
+
+  test('manual retry cannot cross a home boundary', () async {
+    await repository.commitLocalMutation(
+      _mutation(homeId: 'home-2'),
+    );
+    await repository.markSyncing(const <String>['operation-1']);
+    await repository.applyPushResults(
+      results: <PushOperationResult>[
+        PushOperationResult(
+          operationId: 'operation-1',
+          kind: PushResultKind.retryableFailure,
+          safeMessage: 'Retry later.',
+        ),
+      ],
+      now: DateTime.utc(2026, 7, 29, 14),
+      retryPolicy: RetryPolicy(),
+    );
+
+    await repository.requeueOperation(
+      homeId: 'home-1',
+      operationId: 'operation-1',
+      now: DateTime.utc(2026, 7, 29, 15),
+    );
+
+    final operation = await database
+        .select(database.clientOperations)
+        .getSingle();
+    expect(operation.homeId, 'home-2');
+    expect(operation.state, ClientOperationState.retryWait.storageValue);
   });
 
   test(
