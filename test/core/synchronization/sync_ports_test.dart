@@ -20,10 +20,7 @@ void main() {
   });
 
   test('retry policy rejects impossible delay ranges', () {
-    expect(
-      () => RetryPolicy(baseDelay: Duration.zero),
-      throwsArgumentError,
-    );
+    expect(() => RetryPolicy(baseDelay: Duration.zero), throwsArgumentError);
     expect(
       () => RetryPolicy(
         baseDelay: const Duration(seconds: 2),
@@ -40,13 +37,10 @@ void main() {
   test('no-op metrics accept every lifecycle event', () {
     const metrics = NoopSyncMetrics();
 
-    expect(
-      () {
-        metrics.recordAttempt(operationCount: 2);
-        metrics.recordSuccess(acknowledgedCount: 1, pulledChangeCount: 3);
-        metrics.recordFailure(classification: 'offline');
-      },
-      returnsNormally,
-    );
+    expect(() {
+      metrics.recordAttempt(operationCount: 2);
+      metrics.recordSuccess(acknowledgedCount: 1, pulledChangeCount: 3);
+      metrics.recordFailure(classification: 'offline');
+    }, returnsNormally);
   });
 }

@@ -31,7 +31,9 @@ void main() {
     source['quantity'] = 3;
 
     expect(mutation.payload, <String, Object?>{'quantity': 2});
-    expect(jsonDecode(mutation.encodedPayload), <String, Object?>{'quantity': 2});
+    expect(jsonDecode(mutation.encodedPayload), <String, Object?>{
+      'quantity': 2,
+    });
     expect(
       () => mutation.payload['quantity'] = 4,
       throwsA(isA<UnsupportedError>()),

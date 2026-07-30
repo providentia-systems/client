@@ -141,17 +141,19 @@ void main() {
     expect(result.safeMessage, contains('No connection'));
   });
 
-  test('programming errors are not disguised as connectivity failures', () async {
-    final probe = GeneratedApiConnectivityProbe(
-      ProvidentiaApiClient(
-        baseUri: Uri.parse('https://api.example.test'),
-        httpClient: MockClient((_) async {
-          throw StateError('programming defect');
-        }),
-      ),
-    );
+  test(
+    'programming errors are not disguised as connectivity failures',
+    () async {
+      final probe = GeneratedApiConnectivityProbe(
+        ProvidentiaApiClient(
+          baseUri: Uri.parse('https://api.example.test'),
+          httpClient: MockClient((_) async {
+            throw StateError('programming defect');
+          }),
+        ),
+      );
 
-    await expectLater(probe.check(), throwsStateError);
-  });
-
+      await expectLater(probe.check(), throwsStateError);
+    },
+  );
 }

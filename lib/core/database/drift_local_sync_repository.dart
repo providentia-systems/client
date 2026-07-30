@@ -6,10 +6,8 @@ import 'package:providentia/core/synchronization/sync_models.dart';
 import 'package:providentia/core/synchronization/sync_ports.dart';
 
 final class DriftLocalSyncRepository implements LocalSyncRepository {
-  DriftLocalSyncRepository(
-    this._database, {
-    DateTime Function()? clock,
-  }) : _clock = clock ?? DateTime.now;
+  DriftLocalSyncRepository(this._database, {DateTime Function()? clock})
+    : _clock = clock ?? DateTime.now;
 
   static final List<String> _unacknowledgedOperationStates =
       <ClientOperationState>[

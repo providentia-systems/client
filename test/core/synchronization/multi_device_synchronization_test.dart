@@ -38,14 +38,14 @@ void main() {
     expect((await deviceB.synchronize()).completed, isTrue);
     expect((await deviceA.synchronize()).completed, isTrue);
 
-    expect(
-      await deviceA.quantities(),
-      <String, int>{'record-a': 2, 'record-b': 4},
-    );
-    expect(
-      await deviceB.quantities(),
-      <String, int>{'record-a': 2, 'record-b': 4},
-    );
+    expect(await deviceA.quantities(), <String, int>{
+      'record-a': 2,
+      'record-b': 4,
+    });
+    expect(await deviceB.quantities(), <String, int>{
+      'record-a': 2,
+      'record-b': 4,
+    });
   });
 
   test('same-entity edits preserve both sides of a conflict', () async {
@@ -86,22 +86,20 @@ void main() {
     final localRecord = await deviceB.database
         .select(deviceB.database.localRecords)
         .getSingle();
-    final operation =
-        await (deviceB.database.select(deviceB.database.clientOperations)
-              ..where((row) => row.operationId.equals('operation-b-2')))
-            .getSingle();
+    final operation = await (deviceB.database.select(
+      deviceB.database.clientOperations,
+    )..where((row) => row.operationId.equals('operation-b-2'))).getSingle();
     final conflict = await deviceB.database
         .select(deviceB.database.syncConflictRecords)
         .getSingle();
 
     expect(deviceBOutcome.completed, isTrue);
     expect(jsonDecode(localRecord.payload), <String, Object?>{'quantity': 3});
-    expect(
-      operation.state,
-      ClientOperationState.blockedConflict.storageValue,
-    );
+    expect(operation.state, ClientOperationState.blockedConflict.storageValue);
     expect(jsonDecode(conflict.localPayload), <String, Object?>{'quantity': 3});
-    expect(jsonDecode(conflict.remotePayload!), <String, Object?>{'quantity': 2});
+    expect(jsonDecode(conflict.remotePayload!), <String, Object?>{
+      'quantity': 2,
+    });
     expect(conflict.remoteRevision, 2);
   });
 }
@@ -155,7 +153,8 @@ final class _Device {
     return <String, int>{
       for (final row in rows)
         row.entityId:
-            (jsonDecode(row.payload) as Map<String, Object?>)['quantity']! as int,
+            (jsonDecode(row.payload) as Map<String, Object?>)['quantity']!
+                as int,
     };
   }
 
@@ -214,7 +213,9 @@ final class _InMemorySyncServer implements SyncRemoteGateway {
       protocolVersion: 1,
       fromCursor: afterCursor,
       changes: changes,
-      pageCursor: changes.isEmpty ? afterCursor ?? _cursor : changes.last.cursor,
+      pageCursor: changes.isEmpty
+          ? afterCursor ?? _cursor
+          : changes.last.cursor,
       highWaterCursor: _cursor,
       hasMore: false,
       requestId: 'pull-$_sequence',

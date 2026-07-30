@@ -248,9 +248,7 @@ void main() {
   });
 
   test('manual retry cannot cross a home boundary', () async {
-    await repository.commitLocalMutation(
-      _mutation(homeId: 'home-2'),
-    );
+    await repository.commitLocalMutation(_mutation(homeId: 'home-2'));
     await repository.markSyncing(const <String>['operation-1']);
     await repository.applyPushResults(
       results: <PushOperationResult>[
@@ -377,12 +375,8 @@ void main() {
     );
     await repository.markSyncing(const <String>['operation-2']);
 
-    final homeOne = await repository
-        .watchSummary(homeId: 'home-1')
-        .first;
-    final homeTwo = await repository
-        .watchSummary(homeId: 'home-2')
-        .first;
+    final homeOne = await repository.watchSummary(homeId: 'home-1').first;
+    final homeTwo = await repository.watchSummary(homeId: 'home-2').first;
 
     expect(homeOne.pending, 1);
     expect(homeOne.syncing, 0);
@@ -417,22 +411,18 @@ void main() {
         .getSingle();
 
     expect(jsonDecode(record.payload), <String, Object?>{'quantity': 1});
-    expect(
-      operation.state,
-      ClientOperationState.blockedConflict.storageValue,
-    );
+    expect(operation.state, ClientOperationState.blockedConflict.storageValue);
     expect(conflict.remoteRevision, 3);
-    expect(jsonDecode(conflict.remotePayload!), <String, Object?>{'quantity': 3});
+    expect(jsonDecode(conflict.remotePayload!), <String, Object?>{
+      'quantity': 3,
+    });
     expect(await repository.cursorForHome('home-1'), 'cursor-3');
   });
 
   test('cursor audit timestamps use the injected clock', () async {
     await repository.applyPullPage(
       homeId: 'home-1',
-      page: _page(
-        changes: const <RemoteChange>[],
-        pageCursor: 'cursor-1',
-      ),
+      page: _page(changes: const <RemoteChange>[], pageCursor: 'cursor-1'),
     );
 
     final cursor = await database.select(database.localSyncCursors).getSingle();
@@ -454,7 +444,6 @@ void main() {
     expect(replaced.updatedAt, clock);
   });
 }
-
 
 LocalMutation _mutation({
   String operationId = 'operation-1',

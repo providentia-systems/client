@@ -266,41 +266,44 @@ void main() {
     expect(await database.select(database.localRecords).get(), hasLength(1));
   });
 
-  test('concurrent synchronization returns an explicit running outcome', () async {
-    final entered = Completer<void>();
-    final release = Completer<void>();
-    final remote = _FakeGateway(
-      pushHandler: (_, _) async =>
-          const PushResponse(results: <PushOperationResult>[]),
-      bootstrapHandler: (homeId) async {
-        entered.complete();
-        await release.future;
-        return PullPage(
-          protocolVersion: 1,
-          fromCursor: 'cursor-0',
-          changes: const <RemoteChange>[],
-          pageCursor: 'cursor-0',
-          highWaterCursor: 'cursor-0',
-          hasMore: false,
-          requestId: 'bootstrap',
-        );
-      },
-    );
-    final coordinator = SyncCoordinator(
-      local: local,
-      remote: remote,
-      connectivity: const _OnlineProbe(),
-      clock: () => now,
-    );
+  test(
+    'concurrent synchronization returns an explicit running outcome',
+    () async {
+      final entered = Completer<void>();
+      final release = Completer<void>();
+      final remote = _FakeGateway(
+        pushHandler: (_, _) async =>
+            const PushResponse(results: <PushOperationResult>[]),
+        bootstrapHandler: (homeId) async {
+          entered.complete();
+          await release.future;
+          return PullPage(
+            protocolVersion: 1,
+            fromCursor: 'cursor-0',
+            changes: const <RemoteChange>[],
+            pageCursor: 'cursor-0',
+            highWaterCursor: 'cursor-0',
+            hasMore: false,
+            requestId: 'bootstrap',
+          );
+        },
+      );
+      final coordinator = SyncCoordinator(
+        local: local,
+        remote: remote,
+        connectivity: const _OnlineProbe(),
+        clock: () => now,
+      );
 
-    final first = coordinator.synchronize('home-1');
-    await entered.future;
-    final overlapping = await coordinator.synchronize('home-1');
-    release.complete();
+      final first = coordinator.synchronize('home-1');
+      await entered.future;
+      final overlapping = await coordinator.synchronize('home-1');
+      release.complete();
 
-    expect(overlapping.status, SyncRunStatus.alreadyRunning);
-    expect((await first).status, SyncRunStatus.completed);
-  });
+      expect(overlapping.status, SyncRunStatus.alreadyRunning);
+      expect((await first).status, SyncRunStatus.completed);
+    },
+  );
 
   test('a paged response must advance its cursor', () async {
     await local.applyPullPage(

@@ -72,5 +72,4 @@ void main() {
 
     expect(client.close, returnsNormally);
   });
-
 }

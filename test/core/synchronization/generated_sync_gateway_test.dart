@@ -294,49 +294,52 @@ void main() {
     expect(response.results, isEmpty);
   });
 
-  test('push rejects cross-home and mixed-device batches before HTTP', () async {
-    final client = generated.ProvidentiaApiClient(
-      baseUri: Uri.parse('https://api.example.test'),
-      httpClient: MockClient((_) async {
-        fail('An invalid synchronization batch must not perform HTTP.');
-      }),
-    );
-    final gateway = GeneratedSyncGateway(client);
+  test(
+    'push rejects cross-home and mixed-device batches before HTTP',
+    () async {
+      final client = generated.ProvidentiaApiClient(
+        baseUri: Uri.parse('https://api.example.test'),
+        httpClient: MockClient((_) async {
+          fail('An invalid synchronization batch must not perform HTTP.');
+        }),
+      );
+      final gateway = GeneratedSyncGateway(client);
 
-    await expectLater(
-      gateway.push(
-        homeId: homeId,
-        lastPulledCursor: null,
-        operations: <PendingClientOperation>[
-          _operation(
-            operationId: operationId,
-            homeId: '0198a0b1-c2d3-7e4f-8123-456789abcdee',
-            deviceId: deviceId,
-          ),
-        ],
-      ),
-      throwsFormatException,
-    );
-    await expectLater(
-      gateway.push(
-        homeId: homeId,
-        lastPulledCursor: null,
-        operations: <PendingClientOperation>[
-          _operation(
-            operationId: operationId,
-            homeId: homeId,
-            deviceId: deviceId,
-          ),
-          _operation(
-            operationId: '0198a0b1-c2d3-7e4f-9234-56789abcdef1',
-            homeId: homeId,
-            deviceId: '0198a0b1-c2d3-7e4f-a345-6789abcdef02',
-          ),
-        ],
-      ),
-      throwsFormatException,
-    );
-  });
+      await expectLater(
+        gateway.push(
+          homeId: homeId,
+          lastPulledCursor: null,
+          operations: <PendingClientOperation>[
+            _operation(
+              operationId: operationId,
+              homeId: '0198a0b1-c2d3-7e4f-8123-456789abcdee',
+              deviceId: deviceId,
+            ),
+          ],
+        ),
+        throwsFormatException,
+      );
+      await expectLater(
+        gateway.push(
+          homeId: homeId,
+          lastPulledCursor: null,
+          operations: <PendingClientOperation>[
+            _operation(
+              operationId: operationId,
+              homeId: homeId,
+              deviceId: deviceId,
+            ),
+            _operation(
+              operationId: '0198a0b1-c2d3-7e4f-9234-56789abcdef1',
+              homeId: homeId,
+              deviceId: '0198a0b1-c2d3-7e4f-a345-6789abcdef02',
+            ),
+          ],
+        ),
+        throwsFormatException,
+      );
+    },
+  );
 
   test('push requires exactly one result for every operation', () async {
     final missingGateway = _gatewayWithPushResults(const <Object?>[]);
@@ -352,11 +355,13 @@ void main() {
           ),
         ],
       ),
-      throwsA(isA<FormatException>().having(
-        (error) => error.message,
-        'message',
-        contains('omitted'),
-      )),
+      throwsA(
+        isA<FormatException>().having(
+          (error) => error.message,
+          'message',
+          contains('omitted'),
+        ),
+      ),
     );
 
     final duplicateResult = <String, Object?>{
@@ -365,9 +370,10 @@ void main() {
       'revision': 2,
       'changeCursor': 'cursor-2',
     };
-    final duplicateGateway = _gatewayWithPushResults(
-      <Object?>[duplicateResult, duplicateResult],
-    );
+    final duplicateGateway = _gatewayWithPushResults(<Object?>[
+      duplicateResult,
+      duplicateResult,
+    ]);
     await expectLater(
       duplicateGateway.push(
         homeId: homeId,
@@ -380,23 +386,23 @@ void main() {
           ),
         ],
       ),
-      throwsA(isA<FormatException>().having(
-        (error) => error.message,
-        'message',
-        contains('twice'),
-      )),
+      throwsA(
+        isA<FormatException>().having(
+          (error) => error.message,
+          'message',
+          contains('twice'),
+        ),
+      ),
     );
 
-    final unknownGateway = _gatewayWithPushResults(
-      const <Object?>[
-        <String, Object?>{
-          'operationId': '0198a0b1-c2d3-7e4f-9234-56789abcdef9',
-          'status': 'accepted',
-          'revision': 2,
-          'changeCursor': 'cursor-2',
-        },
-      ],
-    );
+    final unknownGateway = _gatewayWithPushResults(const <Object?>[
+      <String, Object?>{
+        'operationId': '0198a0b1-c2d3-7e4f-9234-56789abcdef9',
+        'status': 'accepted',
+        'revision': 2,
+        'changeCursor': 'cursor-2',
+      },
+    ]);
     await expectLater(
       unknownGateway.push(
         homeId: homeId,
@@ -409,14 +415,15 @@ void main() {
           ),
         ],
       ),
-      throwsA(isA<FormatException>().having(
-        (error) => error.message,
-        'message',
-        contains('unknown operation'),
-      )),
+      throwsA(
+        isA<FormatException>().having(
+          (error) => error.message,
+          'message',
+          contains('unknown operation'),
+        ),
+      ),
     );
   });
-
 }
 
 GeneratedSyncGateway _gatewayWithPushResults(List<Object?> results) {
