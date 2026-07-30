@@ -4,11 +4,16 @@ This repository contains the authenticated, multi-platform Providentia client.
 The application supplies real Android, iOS, Windows, macOS, Linux, and web
 runners, explicit core/feature boundaries, pinned toolchains, a pinned backend
 contract, deterministic generated Dart bindings, a responsive Fresh Market
-prototype, Drift persistence, durable synchronization primitives,
+workspace, Drift persistence, durable synchronization primitives,
 architecture tests, and a full CI build matrix.
 
-Phase 5 inventory, purchase, dashboard, and list workflow parity is
-deliberately not implemented yet.
+Phases 5–8 add household inventory, count sessions, purchase history, shopping
+lists, AI review policies, catalog moderation models, explainable suggestions,
+price intelligence, reporting, and evaluation. The pinned API `1.3.0` does not
+yet expose those resources, so their feature ports currently use an explicit
+local projection and never invent generic sync entity types. See
+[docs/phases5-8-contract-release-plan.md](docs/phases5-8-contract-release-plan.md)
+for the backend release sequence.
 
 ## Pinned environment
 
@@ -101,6 +106,8 @@ Start with [docs/index.md](docs/index.md). The permanent owner decisions are in
 [docs/project-memory.md](docs/project-memory.md), the current SOLID and Phase 4
 readiness decision is in
 [docs/phase4-solid-readiness-audit.md](docs/phase4-solid-readiness-audit.md),
+the Phase 5–8 backend boundary is in
+[docs/phases5-8-contract-release-plan.md](docs/phases5-8-contract-release-plan.md),
 and the exact support claims are in
 [docs/platform-support.md](docs/platform-support.md).
 
