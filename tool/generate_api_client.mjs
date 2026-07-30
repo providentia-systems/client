@@ -692,10 +692,7 @@ final class ProvidentiaApiClient {
     final response = await _get(
       '/api/v1/homes/\${Uri.encodeComponent(homeId)}/sync/pull',
       accept: 'application/json',
-      query: <String, String>{
-        'cursor': ?cursor,
-        'limit': limit.toString(),
-      },
+      query: <String, String>{'cursor': ?cursor, 'limit': limit.toString()},
     );
     return SyncPullResponse.fromJson(_decodeObject(response.body));
   }
