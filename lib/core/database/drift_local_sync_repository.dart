@@ -11,14 +11,15 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
     DateTime Function()? clock,
   }) : _clock = clock ?? DateTime.now;
 
-  static const List<String> _unacknowledgedOperationStates = <String>[
-    'pending',
-    'syncing',
-    'retry_wait',
-    'blocked_conflict',
-    'blocked_validation',
-    'blocked_authorization',
-  ];
+  static final List<String> _unacknowledgedOperationStates =
+      <ClientOperationState>[
+        ClientOperationState.pending,
+        ClientOperationState.syncing,
+        ClientOperationState.retryWait,
+        ClientOperationState.blockedConflict,
+        ClientOperationState.blockedValidation,
+        ClientOperationState.blockedAuthorization,
+      ].map((state) => state.storageValue).toList(growable: false);
 
   final AppDatabase _database;
   final DateTime Function() _clock;
