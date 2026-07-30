@@ -3,7 +3,7 @@ import 'package:providentia/core/synchronization/sync_ports.dart';
 
 void main() {
   test('retry policy is deterministic, exponential, and bounded', () {
-    const policy = RetryPolicy(
+    final policy = RetryPolicy(
       baseDelay: Duration(seconds: 2),
       maximumDelay: Duration(seconds: 30),
     );
