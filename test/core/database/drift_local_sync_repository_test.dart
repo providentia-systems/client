@@ -426,7 +426,7 @@ void main() {
     );
 
     final cursor = await database.select(database.localSyncCursors).getSingle();
-    expect(cursor.updatedAt, clock);
+    expect(cursor.updatedAt.microsecondsSinceEpoch, clock.microsecondsSinceEpoch);
 
     clock = clock.add(const Duration(minutes: 5));
     await repository.replaceWithBootstrap(
@@ -441,7 +441,10 @@ void main() {
     final replaced = await database
         .select(database.localSyncCursors)
         .getSingle();
-    expect(replaced.updatedAt, clock);
+    expect(
+      replaced.updatedAt.microsecondsSinceEpoch,
+      clock.microsecondsSinceEpoch,
+    );
   });
 }
 
