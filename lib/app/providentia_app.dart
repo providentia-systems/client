@@ -1,12 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:providentia/app/app_controller.dart';
+import 'package:providentia/app/household_features.dart';
 import 'package:providentia/core/design_system/providentia_theme.dart';
 import 'package:providentia/core/synchronization/sync_models.dart';
+import 'package:providentia/features/inventory/presentation/inventory_workspace.dart';
+import 'package:providentia/features/purchasing/presentation/purchasing_workspace.dart';
+import 'package:providentia/features/shopping/presentation/shopping_workspace.dart';
 
 class ProvidentiaApp extends StatefulWidget {
-  const ProvidentiaApp({required this.controller, this.onDispose, super.key});
+  const ProvidentiaApp({
+    required this.controller,
+    this.features,
+    this.onDispose,
+    super.key,
+  });
 
   final AppController controller;
+  final HouseholdFeatures? features;
   final VoidCallback? onDispose;
 
   @override
@@ -18,10 +28,12 @@ class _ProvidentiaAppState extends State<ProvidentiaApp> {
   void initState() {
     super.initState();
     widget.controller.start();
+    widget.features?.start();
   }
 
   @override
   void dispose() {
+    widget.features?.dispose();
     widget.controller.dispose();
     widget.onDispose?.call();
     super.dispose();
@@ -37,7 +49,10 @@ class _ProvidentiaAppState extends State<ProvidentiaApp> {
       home: ListenableBuilder(
         listenable: widget.controller,
         builder: (context, _) {
-          return _AdaptiveShell(controller: widget.controller);
+          return _AdaptiveShell(
+            controller: widget.controller,
+            features: widget.features,
+          );
         },
       ),
     );
@@ -45,9 +60,10 @@ class _ProvidentiaAppState extends State<ProvidentiaApp> {
 }
 
 class _AdaptiveShell extends StatelessWidget {
-  const _AdaptiveShell({required this.controller});
+  const _AdaptiveShell({required this.controller, required this.features});
 
   final AppController controller;
+  final HouseholdFeatures? features;
 
   static const double phoneBreakpoint = 700;
   static const double desktopBreakpoint = 1100;
@@ -57,7 +73,10 @@ class _AdaptiveShell extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
-        final content = _ContentViewport(controller: controller);
+        final content = _ContentViewport(
+          controller: controller,
+          features: features,
+        );
 
         if (width < phoneBreakpoint) {
           return Scaffold(
@@ -102,36 +121,31 @@ class _AdaptiveShell extends StatelessWidget {
 }
 
 class _ContentViewport extends StatelessWidget {
-  const _ContentViewport({required this.controller});
+  const _ContentViewport({required this.controller, required this.features});
 
   final AppController controller;
+  final HouseholdFeatures? features;
 
   @override
   Widget build(BuildContext context) {
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
     final page = switch (controller.section) {
-      AppSection.home => _HomeWorkspace(controller: controller),
-      AppSection.stock => const _DeferredWorkspace(
-        icon: Icons.inventory_2_outlined,
-        title: 'Stock',
-        description:
-            'The local data layer is ready for stock counts and balances. '
-            'Inventory workflows arrive in Phase 5.',
+      AppSection.home => _HomeWorkspace(
+        controller: controller,
+        features: features,
       ),
-      AppSection.purchases => const _DeferredWorkspace(
-        icon: Icons.shopping_bag_outlined,
-        title: 'Purchases',
-        description:
-            'Receipt and purchase-history surfaces remain intentionally '
-            'deferred until Phase 5.',
-      ),
-      AppSection.lists => const _DeferredWorkspace(
-        icon: Icons.format_list_bulleted_rounded,
-        title: 'Lists',
-        description:
-            'The responsive workspace is prepared for manual and suggested '
-            'lists without inventing Phase 5 behavior.',
-      ),
+      AppSection.stock =>
+        features == null
+            ? const _UnavailableWorkspace(title: 'Stock')
+            : InventoryWorkspace(controller: features!.inventory),
+      AppSection.purchases =>
+        features == null
+            ? const _UnavailableWorkspace(title: 'Purchases')
+            : PurchasingWorkspace(controller: features!.purchasing),
+      AppSection.lists =>
+        features == null
+            ? const _UnavailableWorkspace(title: 'Lists')
+            : ShoppingWorkspace(controller: features!.shopping),
     };
 
     return SafeArea(
@@ -147,9 +161,10 @@ class _ContentViewport extends StatelessWidget {
 }
 
 class _HomeWorkspace extends StatelessWidget {
-  const _HomeWorkspace({required this.controller});
+  const _HomeWorkspace({required this.controller, required this.features});
 
   final AppController controller;
+  final HouseholdFeatures? features;
 
   @override
   Widget build(BuildContext context) {
@@ -190,16 +205,75 @@ class _HomeWorkspace extends StatelessWidget {
                       onRetry: controller.refresh,
                     ),
                     const SizedBox(height: 20),
-                    _OverviewGrid(summary: controller.syncSummary),
+                    _QuickActions(
+                      enabled: features != null,
+                      onReceipt: () =>
+                          controller.selectSection(AppSection.purchases),
+                      onStockPhoto: () =>
+                          controller.selectSection(AppSection.stock),
+                    ),
                     const SizedBox(height: 20),
-                    const _WorkspacePanel(),
+                    if (features == null)
+                      const _OverviewGrid(features: null)
+                    else
+                      ListenableBuilder(
+                        listenable: Listenable.merge(<Listenable>[
+                          features!.inventory,
+                          features!.purchasing,
+                          features!.shopping,
+                        ]),
+                        builder: (context, _) => Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: <Widget>[
+                            _OverviewGrid(features: features),
+                            const SizedBox(height: 20),
+                            _RecentStockPanel(features: features!),
+                          ],
+                        ),
+                      ),
                     const SizedBox(height: 20),
-                    const _ImplementationNotice(),
+                    _WorkspacePanel(controller: controller, features: features),
+                    const SizedBox(height: 20),
+                    const _ContractBoundaryNotice(),
                   ],
                 ),
               ),
             ),
           ),
+        ),
+      ],
+    );
+  }
+}
+
+class _QuickActions extends StatelessWidget {
+  const _QuickActions({
+    required this.enabled,
+    required this.onReceipt,
+    required this.onStockPhoto,
+  });
+
+  final bool enabled;
+  final VoidCallback onReceipt;
+  final VoidCallback onStockPhoto;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 12,
+      runSpacing: 12,
+      children: <Widget>[
+        FilledButton.icon(
+          key: const Key('receipt-capture-action'),
+          onPressed: enabled ? onReceipt : null,
+          icon: const Icon(Icons.receipt_long_outlined),
+          label: const Text('Review a receipt'),
+        ),
+        OutlinedButton.icon(
+          key: const Key('stock-photo-action'),
+          onPressed: enabled ? onStockPhoto : null,
+          icon: const Icon(Icons.add_a_photo_outlined),
+          label: const Text('Count from photos'),
         ),
       ],
     );
@@ -385,27 +459,35 @@ class _SyncStatusCard extends StatelessWidget {
 }
 
 class _OverviewGrid extends StatelessWidget {
-  const _OverviewGrid({required this.summary});
+  const _OverviewGrid({required this.features});
 
-  final SyncSummary summary;
+  final HouseholdFeatures? features;
 
   @override
   Widget build(BuildContext context) {
+    final inventory = features?.inventory.state;
+    final purchasing = features?.purchasing.state;
     final cards = <_OverviewData>[
-      const _OverviewData(
-        icon: Icons.grid_view_rounded,
-        value: '4',
-        label: 'Workspaces',
-      ),
-      const _OverviewData(
-        icon: Icons.storage_rounded,
-        value: 'Local',
-        label: 'Offline store',
+      _OverviewData(
+        icon: Icons.inventory_2_outlined,
+        value: inventory == null || inventory.loading
+            ? '—'
+            : '${inventory.items.length}',
+        label: 'Item master',
       ),
       _OverviewData(
-        icon: Icons.sync_rounded,
-        value: '${summary.waiting}',
-        label: 'Waiting to sync',
+        icon: Icons.check_circle_outline_rounded,
+        value: inventory == null || inventory.loading
+            ? '—'
+            : '${inventory.items.where((item) => item.isCounted).length}',
+        label: 'Counted stock',
+      ),
+      _OverviewData(
+        icon: Icons.shopping_bag_outlined,
+        value: purchasing == null || purchasing.loading
+            ? '—'
+            : '${purchasing.lines.where((line) => line.lineTotal != null).length}',
+        label: 'Recent purchases',
       ),
     ];
 
@@ -434,6 +516,58 @@ class _OverviewGrid extends StatelessWidget {
               .toList(growable: false),
         );
       },
+    );
+  }
+}
+
+class _RecentStockPanel extends StatelessWidget {
+  const _RecentStockPanel({required this.features});
+
+  final HouseholdFeatures features;
+
+  @override
+  Widget build(BuildContext context) {
+    final items =
+        features.inventory.state.items
+            .where((item) => item.currentQuantity != null)
+            .toList(growable: false)
+          ..sort(
+            (left, right) => (left.currentQuantity ?? 0).compareTo(
+              right.currentQuantity ?? 0,
+            ),
+          );
+    final visible = items.take(5);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 18, 18, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Text(
+              'Stock needing attention',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 8),
+            if (items.isEmpty)
+              const Padding(
+                padding: EdgeInsets.only(bottom: 12),
+                child: Text('Complete a count to see stock here.'),
+              )
+            else
+              for (final item in visible)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(item.canonicalName),
+                  subtitle: Text('${item.packSize} · ${item.category}'),
+                  trailing: Text(
+                    item.currentQuantity == 0
+                        ? 'Out of stock'
+                        : '${item.currentQuantity!.toStringAsFixed(item.currentQuantity == item.currentQuantity!.roundToDouble() ? 0 : 2)} ${item.unit}',
+                  ),
+                ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -498,25 +632,31 @@ class _OverviewCard extends StatelessWidget {
 }
 
 class _WorkspacePanel extends StatelessWidget {
-  const _WorkspacePanel();
+  const _WorkspacePanel({required this.controller, required this.features});
+
+  final AppController controller;
+  final HouseholdFeatures? features;
 
   @override
   Widget build(BuildContext context) {
-    const workspaces = <(IconData, String, String)>[
+    const workspaces = <(IconData, String, String, AppSection)>[
       (
         Icons.inventory_2_outlined,
         'Stock workspace',
-        'Prepared for count sessions and inventory balances',
+        'Search the master, count stock, and review quantities',
+        AppSection.stock,
       ),
       (
         Icons.shopping_bag_outlined,
         'Purchases workspace',
-        'Prepared for receipt review and purchase history',
+        'Review recent receipts and monthly purchase history',
+        AppSection.purchases,
       ),
       (
         Icons.format_list_bulleted_rounded,
         'Lists workspace',
-        'Prepared for manual and suggested shopping lists',
+        'Manage manual and explainable suggested items',
+        AppSection.lists,
       ),
     ];
 
@@ -536,6 +676,8 @@ class _WorkspacePanel extends StatelessWidget {
                 icon: workspace.$1,
                 title: workspace.$2,
                 detail: workspace.$3,
+                enabled: features != null,
+                onTap: () => controller.selectSection(workspace.$4),
               ),
           ],
         ),
@@ -549,50 +691,62 @@ class _WorkspaceRow extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.detail,
+    required this.enabled,
+    required this.onTap,
   });
 
   final IconData icon;
   final String title;
   final String detail;
+  final bool enabled;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      child: Row(
-        children: <Widget>[
-          DecoratedBox(
-            decoration: BoxDecoration(
-              color: ProvidentiaColors.canvas,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: ProvidentiaColors.line),
+    return InkWell(
+      onTap: enabled ? onTap : null,
+      borderRadius: BorderRadius.circular(14),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Row(
+          children: <Widget>[
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: ProvidentiaColors.canvas,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: ProvidentiaColors.line),
+              ),
+              child: SizedBox(
+                width: 52,
+                height: 52,
+                child: Icon(icon, color: ProvidentiaColors.forest),
+              ),
             ),
-            child: SizedBox(
-              width: 52,
-              height: 52,
-              child: Icon(icon, color: ProvidentiaColors.forest),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(title, style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 2),
+                  Text(detail),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(title, style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: 2),
-                Text(detail),
-              ],
+            Icon(
+              enabled
+                  ? Icons.chevron_right_rounded
+                  : Icons.lock_outline_rounded,
             ),
-          ),
-          const Chip(label: Text('Phase 5')),
-        ],
+          ],
+        ),
       ),
     );
   }
 }
 
-class _ImplementationNotice extends StatelessWidget {
-  const _ImplementationNotice();
+class _ContractBoundaryNotice extends StatelessWidget {
+  const _ContractBoundaryNotice();
 
   @override
   Widget build(BuildContext context) {
@@ -605,25 +759,20 @@ class _ImplementationNotice extends StatelessWidget {
       child: const Padding(
         padding: EdgeInsets.all(14),
         child: Text(
-          'Prototype shell: the Fresh Market design system, persistent local '
-          'database, and synchronization lifecycle are active. Inventory, '
-          'purchase, and list workflows remain outside this phase.',
+          'Inventory, purchases, lists, and intelligence projections remain '
+          'local on this device until the backend publishes their generated '
+          'contract. Providentia will not sync them through an invented or '
+          'unversioned endpoint.',
         ),
       ),
     );
   }
 }
 
-class _DeferredWorkspace extends StatelessWidget {
-  const _DeferredWorkspace({
-    required this.icon,
-    required this.title,
-    required this.description,
-  });
+class _UnavailableWorkspace extends StatelessWidget {
+  const _UnavailableWorkspace({required this.title});
 
-  final IconData icon;
   final String title;
-  final String description;
 
   @override
   Widget build(BuildContext context) {
@@ -638,7 +787,11 @@ class _DeferredWorkspace extends StatelessWidget {
                 padding: const EdgeInsets.all(28),
                 child: Column(
                   children: <Widget>[
-                    Icon(icon, size: 52, color: ProvidentiaColors.forest),
+                    const Icon(
+                      Icons.lock_outline_rounded,
+                      size: 52,
+                      color: ProvidentiaColors.forest,
+                    ),
                     const SizedBox(height: 16),
                     Semantics(
                       header: true,
@@ -648,9 +801,12 @@ class _DeferredWorkspace extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 10),
-                    Text(description, textAlign: TextAlign.center),
+                    const Text(
+                      'This feature requires a household data composition.',
+                      textAlign: TextAlign.center,
+                    ),
                     const SizedBox(height: 18),
-                    const Chip(label: Text('Workflow begins in Phase 5')),
+                    const Chip(label: Text('Unavailable in preview mode')),
                   ],
                 ),
               ),
@@ -779,7 +935,7 @@ class _NavigationSidebar extends StatelessWidget {
                 ),
               const Spacer(),
               const Text(
-                'Local-first prototype',
+                'Local-first household workspace',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: ProvidentiaColors.muted),
               ),

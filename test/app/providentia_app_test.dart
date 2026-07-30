@@ -6,7 +6,7 @@ import 'package:providentia/app/providentia_app.dart';
 import 'package:providentia/core/synchronization/sync_models.dart';
 
 void main() {
-  testWidgets('Fresh Market shell identifies the product and phase boundary', (
+  testWidgets('shell identifies the product and contract boundary', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -15,7 +15,7 @@ void main() {
 
     expect(find.text('Providentia'), findsOneWidget);
     expect(find.text('Your pantry, ready'), findsOneWidget);
-    expect(find.textContaining('Prototype shell:'), findsOneWidget);
+    expect(find.textContaining('generated contract'), findsOneWidget);
   });
 
   for (final viewport in <(String, Size, Key)>[
