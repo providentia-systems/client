@@ -127,12 +127,11 @@ void main() {
 final class _FakeSynchronization implements AppSynchronization {
   _FakeSynchronization({
     this.outcome = const SyncRunOutcome(status: SyncRunStatus.completed),
-    this.connectivityResult = const ConnectivityResult.online(),
     this.connectivityGate,
   });
 
   final SyncRunOutcome outcome;
-  final ConnectivityResult connectivityResult;
+  final ConnectivityResult connectivityResult = const ConnectivityResult.online();
   final Completer<void>? connectivityGate;
   final StreamController<SyncSummary> summaries =
       StreamController<SyncSummary>.broadcast();
