@@ -71,7 +71,7 @@ The branch must pass all of these before merge:
 - deterministic generated OpenAPI formatting;
 - Drift implementation regeneration and exported-schema comparison;
 - web worker regeneration and pinned SQLite WASM checksum;
-- Dart formatting and strict Flutter analysis with warnings and infos fatal;
+- canonical Dart formatting and strict Flutter analysis with warnings and infos fatal;
 - Flutter unit, database, synchronization, two-device, widget, accessibility,
   adaptive-layout, and golden tests with coverage;
 - the 80% handwritten-production coverage floor;
