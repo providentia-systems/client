@@ -290,6 +290,56 @@ void main() {
   });
 
   group('InventoryWorkspace workflow', () {
+    testWidgets(
+      'keeps adjustment dialog controllers alive through route exit',
+      (WidgetTester tester) async {
+        final repository = _RecordingInventoryRepository();
+        final controller = _controller(
+          repository,
+          idGenerator: () => 'dialog-adjustment',
+        );
+        addTearDown(() async {
+          controller.dispose();
+          await repository.close();
+        });
+
+        await tester.pumpWidget(_testApp(controller));
+        repository.items.add(<InventoryItem>[
+          _item(
+            id: 'rice',
+            name: 'Basmati Rice',
+            category: 'Food',
+            quantity: 2,
+          ),
+        ]);
+        repository.sessions.add(null);
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Basmati Rice'));
+        await tester.pumpAndSettle();
+        expect(find.text('Adjust Basmati Rice'), findsOneWidget);
+
+        await tester.enterText(
+          find.byKey(const ValueKey<String>('inventory-quantity-input')),
+          '3.5',
+        );
+        await tester.enterText(
+          find.byKey(const ValueKey<String>('inventory-adjustment-reason')),
+          'Cycle count correction',
+        );
+        await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+        await tester.pumpAndSettle();
+
+        expect(tester.takeException(), isNull);
+        expect(find.text('Adjust Basmati Rice'), findsNothing);
+        expect(repository.adjustments, hasLength(1));
+        expect(repository.adjustments.single.id, 'dialog-adjustment');
+        expect(repository.adjustments.single.observedQuantity, 3.5);
+        expect(repository.adjustments.single.reason, 'Cycle count correction');
+        expect(repository.movements.single?.quantityDelta, 1.5);
+      },
+    );
+
     testWidgets('records and finishes a count from the workspace', (
       WidgetTester tester,
     ) async {
