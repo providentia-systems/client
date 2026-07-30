@@ -22,14 +22,14 @@ void main() {
   test('retry policy rejects impossible delay ranges', () {
     expect(
       () => RetryPolicy(baseDelay: Duration.zero),
-      throwsAssertionError,
+      throwsArgumentError,
     );
     expect(
       () => RetryPolicy(
         baseDelay: const Duration(seconds: 2),
         maximumDelay: const Duration(seconds: 1),
       ),
-      throwsAssertionError,
+      throwsArgumentError,
     );
   });
 
