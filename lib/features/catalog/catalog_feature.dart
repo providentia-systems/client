@@ -1,6 +1,8 @@
 import 'package:providentia/core/architecture/feature_descriptor.dart';
 
-const FeatureDescriptor catalogFeature = FeatureDescriptor(
+const FeatureDescriptor catalogFeatureDescriptor = FeatureDescriptor(
   id: 'catalog',
   displayName: 'Catalog',
 );
+
+const FeatureDescriptor catalogFeature = catalogFeatureDescriptor;
