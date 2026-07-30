@@ -54,7 +54,8 @@ void main() {
     expect(
       violations,
       isEmpty,
-      reason: 'Application presentation must depend inward:\n${violations.join('\n')}',
+      reason:
+          'Application presentation must depend inward:\n${violations.join('\n')}',
     );
   });
 
@@ -83,7 +84,8 @@ void main() {
     expect(
       violations,
       isEmpty,
-      reason: 'Domain policy must not depend on frameworks:\n${violations.join('\n')}',
+      reason:
+          'Domain policy must not depend on frameworks:\n${violations.join('\n')}',
     );
   });
 

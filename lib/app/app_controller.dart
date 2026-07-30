@@ -11,11 +11,7 @@ final class AppController extends ChangeNotifier {
     required AppSynchronization synchronization,
     required String activeHomeId,
     DateTime Function()? clock,
-  }) => AppController._(
-    synchronization,
-    activeHomeId,
-    clock ?? DateTime.now,
-  );
+  }) => AppController._(synchronization, activeHomeId, clock ?? DateTime.now);
 
   AppController._(this._synchronization, this.activeHomeId, this._clock);
 

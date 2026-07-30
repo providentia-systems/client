@@ -129,9 +129,7 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
           'Synchronization response identity did not match the request.',
         );
       }
-      final results = response.results
-          .map(_pushResult)
-          .toList(growable: false);
+      final results = response.results.map(_pushResult).toList(growable: false);
       _validatePushResults(operationIds, results);
       return PushResponse(results: results);
     } on generated.ProvidentiaApiException catch (error) {

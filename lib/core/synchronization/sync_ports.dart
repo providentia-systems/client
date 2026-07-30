@@ -127,11 +127,7 @@ final class RetryPolicy {
     Duration maximumDelay = const Duration(minutes: 15),
   }) {
     if (baseDelay <= Duration.zero) {
-      throw ArgumentError.value(
-        baseDelay,
-        'baseDelay',
-        'must be positive',
-      );
+      throw ArgumentError.value(baseDelay, 'baseDelay', 'must be positive');
     }
     if (maximumDelay < baseDelay) {
       throw ArgumentError.value(
