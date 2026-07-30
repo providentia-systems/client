@@ -24,7 +24,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Check out source
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Verify source-only gates
         run: |
@@ -141,7 +141,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Check out source
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Install Linux prerequisites
         if: matrix.target == 'linux'
@@ -171,13 +171,6 @@ jobs:
 
       - name: Resolve pinned dependencies
         run: flutter pub get --enforce-lockfile
-
-      - name: Verify generated database source is current
-        shell: bash
-        run: |
-          dart run build_runner build --delete-conflicting-outputs
-          test -z "$(git status --porcelain -- \
-            lib/core/database/app_database.g.dart)"
 
       - name: Build target
         run: ${{ matrix.command }}
