@@ -31,6 +31,7 @@ jobs:
           node tool/verify_toolchain.mjs
           node tool/generate_api_client.mjs --check
           node tool/verify_structure.mjs
+          node --test tool/*.test.mjs
 
       - name: Install pinned Flutter SDK
         run: |
@@ -84,6 +85,9 @@ jobs:
 
       - name: Test
         run: flutter test --coverage
+
+      - name: Enforce handwritten production coverage
+        run: node tool/check_coverage.mjs coverage/lcov.info 80
 
       - name: Produce dependency inventory
         run: |
