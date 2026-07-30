@@ -1,9 +1,28 @@
 import 'package:providentia/core/synchronization/sync_models.dart';
 
-abstract interface class LocalSyncRepository {
-  Stream<SyncSummary> watchSummary();
+/// Application-facing synchronization use cases.
+///
+/// Presentation depends on this abstraction rather than the concrete
+/// coordinator, keeping orchestration replaceable and independently testable.
+abstract interface class AppSynchronization {
+  Stream<SyncSummary> watchSummary({required String homeId});
 
+  Future<ConnectivityResult> connectivity();
+
+  Future<SyncRunOutcome> synchronize(String homeId);
+}
+
+/// Atomic local domain mutation and durable outbox boundary.
+///
+/// Feature code that writes local state does not need access to cursor,
+/// recovery, or transport synchronization operations.
+abstract interface class LocalMutationRepository {
   Future<void> commitLocalMutation(LocalMutation mutation);
+}
+
+/// Persistence operations required only by synchronization orchestration.
+abstract interface class LocalSyncStore {
+  Stream<SyncSummary> watchSummary({required String homeId});
 
   Future<List<PendingClientOperation>> pendingOperations({
     required String homeId,
@@ -40,6 +59,12 @@ abstract interface class LocalSyncRepository {
     required DateTime now,
   });
 }
+
+/// Convenience aggregate implemented by the Drift adapter.
+///
+/// Consumers should request the smallest port they need.
+abstract interface class LocalSyncRepository
+    implements LocalMutationRepository, LocalSyncStore {}
 
 abstract interface class SyncRemoteGateway {
   Future<PullPage> bootstrap({required String homeId});
@@ -99,7 +124,11 @@ final class RetryPolicy {
   const RetryPolicy({
     this.baseDelay = const Duration(seconds: 2),
     this.maximumDelay = const Duration(minutes: 15),
-  });
+  }) : assert(baseDelay > Duration.zero, 'baseDelay must be positive.'),
+       assert(
+         maximumDelay >= baseDelay,
+         'maximumDelay must not be shorter than baseDelay.',
+       );
 
   final Duration baseDelay;
   final Duration maximumDelay;
