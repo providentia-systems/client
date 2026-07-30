@@ -10,10 +10,12 @@ import 'package:providentia/core/synchronization/sync_ports.dart';
 void main() {
   late AppDatabase database;
   late DriftLocalSyncRepository repository;
+  late DateTime clock;
 
   setUp(() {
     database = AppDatabase(NativeDatabase.memory());
-    repository = DriftLocalSyncRepository(database);
+    clock = DateTime.utc(2026, 7, 30, 12);
+    repository = DriftLocalSyncRepository(database, clock: () => clock);
   });
 
   tearDown(() async {
@@ -332,10 +334,100 @@ void main() {
       containsAll(<String>['operation-a', 'operation-z']),
     );
   });
+
+  test('summary stream is isolated to its requested home', () async {
+    await repository.commitLocalMutation(_mutation());
+    await repository.commitLocalMutation(
+      _mutation(
+        operationId: 'operation-2',
+        homeId: 'home-2',
+        entityId: 'record-2',
+      ),
+    );
+    await repository.markSyncing(const <String>['operation-2']);
+
+    final homeOne = await repository
+        .watchSummary(homeId: 'home-1')
+        .first;
+    final homeTwo = await repository
+        .watchSummary(homeId: 'home-2')
+        .first;
+
+    expect(homeOne.pending, 1);
+    expect(homeOne.syncing, 0);
+    expect(homeTwo.pending, 0);
+    expect(homeTwo.syncing, 1);
+  });
+
+  test('later remote changes preserve already-blocked local intent', () async {
+    await repository.commitLocalMutation(_mutation(baseRevision: 1));
+    await repository.applyPullPage(
+      homeId: 'home-1',
+      page: _page(
+        changes: <RemoteChange>[_change(revision: 2, cursor: 'cursor-2')],
+        pageCursor: 'cursor-2',
+      ),
+    );
+    await repository.applyPullPage(
+      homeId: 'home-1',
+      page: _page(
+        fromCursor: 'cursor-2',
+        changes: <RemoteChange>[_change(revision: 3, cursor: 'cursor-3')],
+        pageCursor: 'cursor-3',
+      ),
+    );
+
+    final record = await database.select(database.localRecords).getSingle();
+    final operation = await database
+        .select(database.clientOperations)
+        .getSingle();
+    final conflict = await database
+        .select(database.syncConflictRecords)
+        .getSingle();
+
+    expect(jsonDecode(record.payload), <String, Object?>{'quantity': 1});
+    expect(
+      operation.state,
+      ClientOperationState.blockedConflict.storageValue,
+    );
+    expect(conflict.remoteRevision, 3);
+    expect(jsonDecode(conflict.remotePayload!), <String, Object?>{'quantity': 3});
+    expect(await repository.cursorForHome('home-1'), 'cursor-3');
+  });
+
+  test('cursor audit timestamps use the injected clock', () async {
+    await repository.applyPullPage(
+      homeId: 'home-1',
+      page: _page(
+        changes: const <RemoteChange>[],
+        pageCursor: 'cursor-1',
+      ),
+    );
+
+    final cursor = await database.select(database.localSyncCursors).getSingle();
+    expect(cursor.updatedAt, clock);
+
+    clock = clock.add(const Duration(minutes: 5));
+    await repository.replaceWithBootstrap(
+      homeId: 'home-1',
+      page: _page(
+        fromCursor: 'snapshot-cursor',
+        changes: const <RemoteChange>[],
+        pageCursor: 'snapshot-cursor',
+      ),
+    );
+
+    final replaced = await database
+        .select(database.localSyncCursors)
+        .getSingle();
+    expect(replaced.updatedAt, clock);
+  });
 }
+
 
 LocalMutation _mutation({
   String operationId = 'operation-1',
+  String homeId = 'home-1',
   String entityId = 'record-1',
   int? baseRevision,
   DateTime? clientTimestamp,
@@ -344,7 +436,7 @@ LocalMutation _mutation({
   return LocalMutation(
     operationId: operationId,
     deviceId: 'device-1',
-    homeId: 'home-1',
+    homeId: homeId,
     entityType: 'inventory_balance',
     entityId: entityId,
     operationType: 'set_count',
