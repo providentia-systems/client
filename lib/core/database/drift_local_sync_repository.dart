@@ -6,13 +6,28 @@ import 'package:providentia/core/synchronization/sync_models.dart';
 import 'package:providentia/core/synchronization/sync_ports.dart';
 
 final class DriftLocalSyncRepository implements LocalSyncRepository {
-  const DriftLocalSyncRepository(this._database);
+  DriftLocalSyncRepository(
+    this._database, {
+    DateTime Function()? clock,
+  }) : _clock = clock ?? DateTime.now;
+
+  static const List<String> _unacknowledgedOperationStates = <String>[
+    'pending',
+    'syncing',
+    'retry_wait',
+    'blocked_conflict',
+    'blocked_validation',
+    'blocked_authorization',
+  ];
 
   final AppDatabase _database;
+  final DateTime Function() _clock;
 
   @override
-  Stream<SyncSummary> watchSummary() {
-    return _database.select(_database.clientOperations).watch().map((rows) {
+  Stream<SyncSummary> watchSummary({required String homeId}) {
+    final query = _database.select(_database.clientOperations)
+      ..where((row) => row.homeId.equals(homeId));
+    return query.watch().map((rows) {
       int count(ClientOperationState state) =>
           rows.where((row) => row.state == state.storageValue).length;
       final safeErrors = rows
@@ -263,21 +278,17 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
             '${change.entityId}.',
           );
         }
-        final pending =
+        final localIntent =
             await (_database.select(_database.clientOperations)..where(
                   (row) =>
                       row.homeId.equals(homeId) &
                       row.entityType.equals(change.entityType) &
                       row.entityId.equals(change.entityId) &
-                      row.state.isIn(<String>[
-                        ClientOperationState.pending.storageValue,
-                        ClientOperationState.syncing.storageValue,
-                        ClientOperationState.retryWait.storageValue,
-                      ]),
+                      row.state.isIn(_unacknowledgedOperationStates),
                 ))
                 .get();
 
-        if (pending.isNotEmpty) {
+        if (localIntent.isNotEmpty) {
           final remoteRepresentation = change.kind == RemoteChangeKind.upsert
               ? jsonEncode(change.payload)
               : jsonEncode(<String, Object?>{
@@ -286,7 +297,7 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
                   'cursor': change.cursor,
                   'deletedAt': change.serverTimestamp.toUtc().toIso8601String(),
                 });
-          for (final operation in pending) {
+          for (final operation in localIntent) {
             await _database
                 .into(_database.syncConflictRecords)
                 .insertOnConflictUpdate(
@@ -406,7 +417,7 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
               protocolVersion: const Value<int>(1),
               schemaGeneration: const Value<int>(2),
               cursor: page.pageCursor,
-              updatedAt: DateTime.now().toUtc(),
+              updatedAt: _clock().toUtc(),
             ),
           );
     });
@@ -527,7 +538,7 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
               protocolVersion: const Value<int>(1),
               schemaGeneration: const Value<int>(2),
               cursor: page.pageCursor,
-              updatedAt: DateTime.now().toUtc(),
+              updatedAt: _clock().toUtc(),
             ),
           );
     });
