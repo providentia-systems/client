@@ -131,7 +131,8 @@ final class _FakeSynchronization implements AppSynchronization {
   });
 
   final SyncRunOutcome outcome;
-  final ConnectivityResult connectivityResult = const ConnectivityResult.online();
+  final ConnectivityResult connectivityResult =
+      const ConnectivityResult.online();
   final Completer<void>? connectivityGate;
   final StreamController<SyncSummary> summaries =
       StreamController<SyncSummary>.broadcast();
