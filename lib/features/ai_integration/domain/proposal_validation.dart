@@ -377,7 +377,7 @@ abstract final class AiProposalValidator {
   }
 
   static ReceiptLineProposal _receiptLine(Object? value, int index) {
-    final path = r'$.lines[' + index.toString() + ']';
+    final path = '\$.lines[$index]';
     final map = _mapAt(value, path);
     _exactKeys(map, AiProposalSchemas._receiptLineKeys.toSet(), path);
     final lineId = _stringAt(map['lineId'], '$path.lineId');
@@ -425,7 +425,7 @@ abstract final class AiProposalValidator {
   }
 
   static StockCandidateProposal _stockCandidate(Object? value, int index) {
-    final path = r'$.candidates[' + index.toString() + ']';
+    final path = '\$.candidates[$index]';
     final map = _mapAt(value, path);
     _exactKeys(map, AiProposalSchemas._stockCandidateKeys.toSet(), path);
     final minimum = _positiveNumber(

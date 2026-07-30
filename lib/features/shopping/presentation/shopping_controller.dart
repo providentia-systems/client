@@ -13,16 +13,24 @@ final class ShoppingState {
 }
 
 final class ShoppingController extends ChangeNotifier {
-  ShoppingController({
+  factory ShoppingController({
     required ShoppingRepository repository,
-    required this.homeId,
+    required String homeId,
     DateTime Function()? clock,
     String Function()? idGenerator,
-  }) : _repository = repository,
-       _clock = clock ?? DateTime.now,
-       _idGenerator =
-           idGenerator ??
-           (() => DateTime.now().microsecondsSinceEpoch.toString());
+  }) => ShoppingController._(
+    repository,
+    homeId,
+    clock ?? DateTime.now,
+    idGenerator ?? (() => DateTime.now().microsecondsSinceEpoch.toString()),
+  );
+
+  ShoppingController._(
+    this._repository,
+    this.homeId,
+    this._clock,
+    this._idGenerator,
+  );
 
   final ShoppingRepository _repository;
   final String homeId;

@@ -5,15 +5,24 @@ import 'package:providentia/features/ai_integration/domain/ai_models.dart';
 import 'package:providentia/features/ai_integration/domain/ai_policy.dart';
 
 final class AiConsentController extends ChangeNotifier {
-  AiConsentController({
+  factory AiConsentController({
     required AiProviderProfile provider,
     required AiPrivacyMode privacyMode,
     required PreparedMediaBatch media,
     DateTime Function()? clock,
-  }) : _provider = provider,
-       _privacyMode = privacyMode,
-       _media = media,
-       _clock = clock ?? DateTime.now;
+  }) => AiConsentController._(
+    provider,
+    privacyMode,
+    media,
+    clock ?? DateTime.now,
+  );
+
+  AiConsentController._(
+    this._provider,
+    this._privacyMode,
+    this._media,
+    this._clock,
+  );
 
   final DateTime Function() _clock;
   AiProviderProfile _provider;
@@ -284,16 +293,30 @@ final class CatalogCandidateController extends ChangeNotifier {
 }
 
 final class ReceiptReviewController extends ChangeNotifier {
-  ReceiptReviewController({
-    required this.proposal,
-    required this.homeId,
-    required this.approvedBy,
+  factory ReceiptReviewController({
+    required ReceiptProposal proposal,
+    required String homeId,
+    required String approvedBy,
     required ApproveReceiptProposal approval,
     required String Function() idempotencyKey,
     DateTime Function()? clock,
-  }) : _approval = approval,
-       _idempotencyKey = idempotencyKey,
-       _clock = clock ?? DateTime.now;
+  }) => ReceiptReviewController._(
+    proposal,
+    homeId,
+    approvedBy,
+    approval,
+    idempotencyKey,
+    clock ?? DateTime.now,
+  );
+
+  ReceiptReviewController._(
+    this.proposal,
+    this.homeId,
+    this.approvedBy,
+    this._approval,
+    this._idempotencyKey,
+    this._clock,
+  );
 
   final ReceiptProposal proposal;
   final String homeId;
@@ -387,18 +410,36 @@ final class ReceiptReviewController extends ChangeNotifier {
 }
 
 final class StockPhotoReviewController extends ChangeNotifier {
-  StockPhotoReviewController({
-    required this.proposal,
-    required this.homeId,
-    required this.sessionId,
-    required this.locationId,
-    required this.closedBy,
+  factory StockPhotoReviewController({
+    required StockPhotoProposal proposal,
+    required String homeId,
+    required String sessionId,
+    required String locationId,
+    required String closedBy,
     required CloseStockPhotoCount closeCount,
     required String Function() idempotencyKey,
     DateTime Function()? clock,
-  }) : _closeCount = closeCount,
-       _idempotencyKey = idempotencyKey,
-       _clock = clock ?? DateTime.now;
+  }) => StockPhotoReviewController._(
+    proposal,
+    homeId,
+    sessionId,
+    locationId,
+    closedBy,
+    closeCount,
+    idempotencyKey,
+    clock ?? DateTime.now,
+  );
+
+  StockPhotoReviewController._(
+    this.proposal,
+    this.homeId,
+    this.sessionId,
+    this.locationId,
+    this.closedBy,
+    this._closeCount,
+    this._idempotencyKey,
+    this._clock,
+  );
 
   final StockPhotoProposal proposal;
   final String homeId;
