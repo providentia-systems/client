@@ -156,6 +156,59 @@ assert(
   `Direct transport/database access from UI boundaries:\n${violations.join('\n')}`,
 );
 
+const dependencyViolations = [];
+const generatedClientAdapters = new Set([
+  'lib/core/networking/api_client_factory.dart',
+  'lib/core/networking/generated_api_connectivity_probe.dart',
+  'lib/core/synchronization/generated_sync_gateway.dart',
+]);
+const synchronizationPolicyFiles = new Set([
+  'lib/core/synchronization/sync_models.dart',
+  'lib/core/synchronization/sync_ports.dart',
+  'lib/core/synchronization/sync_coordinator.dart',
+]);
+for (const file of dartFiles) {
+  const source = await readFile(file, 'utf8');
+  const relativePath = path.relative(root, file).split(path.sep).join('/');
+  if (relativePath.startsWith('lib/app/')) {
+    for (const forbidden of [
+      '/sync_coordinator.dart',
+      '/database/',
+      '/networking/',
+    ]) {
+      if (source.includes(forbidden)) {
+        dependencyViolations.push(`${relativePath}: ${forbidden}`);
+      }
+    }
+  }
+  if (synchronizationPolicyFiles.has(relativePath)) {
+    for (const forbidden of [
+      'package:flutter/',
+      'package:http/',
+      'package:drift/',
+      'providentia_api_client',
+      '/database/',
+      '/networking/',
+    ]) {
+      if (source.includes(forbidden)) {
+        dependencyViolations.push(`${relativePath}: ${forbidden}`);
+      }
+    }
+  }
+  if (
+    source.includes('providentia_api_client') &&
+    !generatedClientAdapters.has(relativePath)
+  ) {
+    dependencyViolations.push(
+      `${relativePath}: generated transport outside approved adapter`,
+    );
+  }
+}
+assert(
+  dependencyViolations.length === 0,
+  `Dependency inversion violations:\n${dependencyViolations.join('\\n')}`,
+);
+
 const allTextFiles = (await walk(root)).filter(
   (file) =>
     !file.includes(`${path.sep}.git${path.sep}`) &&
