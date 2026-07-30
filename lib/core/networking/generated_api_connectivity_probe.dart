@@ -41,7 +41,7 @@ final class GeneratedApiConnectivityProbe implements ConnectivityProbe {
       return const ConnectivityResult.offline(
         'The service did not respond. Local changes remain safe.',
       );
-    } on Object {
+    } on Exception {
       return const ConnectivityResult.offline(
         'No connection. Local changes remain safe.',
       );
