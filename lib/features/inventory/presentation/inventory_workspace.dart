@@ -188,63 +188,13 @@ class _InventoryRow extends StatelessWidget {
   }
 
   Future<void> _editQuantity(BuildContext context) async {
-    final quantity = TextEditingController(
-      text: item.currentQuantity?.toString() ?? '',
-    );
-    final reason = TextEditingController();
     final result = await showDialog<(double, String)>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(
-          countSessionActive ? 'Record count' : 'Adjust ${item.canonicalName}',
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            TextField(
-              key: const Key('inventory-quantity-input'),
-              controller: quantity,
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-              ),
-              decoration: const InputDecoration(labelText: 'Observed quantity'),
-            ),
-            if (!countSessionActive) ...<Widget>[
-              const SizedBox(height: 12),
-              TextField(
-                key: const Key('inventory-adjustment-reason'),
-                controller: reason,
-                decoration: const InputDecoration(
-                  labelText: 'Reason for adjustment',
-                ),
-              ),
-            ],
-          ],
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final parsed = double.tryParse(quantity.text.trim());
-              final explanation = reason.text.trim();
-              if (parsed == null ||
-                  !parsed.isFinite ||
-                  parsed < 0 ||
-                  (!countSessionActive && explanation.isEmpty)) {
-                return;
-              }
-              Navigator.pop(context, (parsed, explanation));
-            },
-            child: const Text('Save'),
-          ),
-        ],
+      builder: (_) => _InventoryQuantityDialog(
+        item: item,
+        countSessionActive: countSessionActive,
       ),
     );
-    quantity.dispose();
-    reason.dispose();
     if (result == null) return;
     if (countSessionActive) {
       await controller.recordManualCount(
@@ -262,4 +212,90 @@ class _InventoryRow extends StatelessWidget {
   }
 
   int _decimals(double value) => value == value.roundToDouble() ? 0 : 2;
+}
+
+class _InventoryQuantityDialog extends StatefulWidget {
+  const _InventoryQuantityDialog({
+    required this.item,
+    required this.countSessionActive,
+  });
+
+  final InventoryItem item;
+  final bool countSessionActive;
+
+  @override
+  State<_InventoryQuantityDialog> createState() =>
+      _InventoryQuantityDialogState();
+}
+
+class _InventoryQuantityDialogState extends State<_InventoryQuantityDialog> {
+  late final TextEditingController _quantity;
+  late final TextEditingController _reason;
+
+  @override
+  void initState() {
+    super.initState();
+    _quantity = TextEditingController(
+      text: widget.item.currentQuantity?.toString() ?? '',
+    );
+    _reason = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _quantity.dispose();
+    _reason.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(
+        widget.countSessionActive
+            ? 'Record count'
+            : 'Adjust ${widget.item.canonicalName}',
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          TextField(
+            key: const Key('inventory-quantity-input'),
+            controller: _quantity,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(labelText: 'Observed quantity'),
+          ),
+          if (!widget.countSessionActive) ...<Widget>[
+            const SizedBox(height: 12),
+            TextField(
+              key: const Key('inventory-adjustment-reason'),
+              controller: _reason,
+              decoration: const InputDecoration(
+                labelText: 'Reason for adjustment',
+              ),
+            ),
+          ],
+        ],
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(onPressed: _save, child: const Text('Save')),
+      ],
+    );
+  }
+
+  void _save() {
+    final parsed = double.tryParse(_quantity.text.trim());
+    final explanation = _reason.text.trim();
+    if (parsed == null ||
+        !parsed.isFinite ||
+        parsed < 0 ||
+        (!widget.countSessionActive && explanation.isEmpty)) {
+      return;
+    }
+    Navigator.pop(context, (parsed, explanation));
+  }
 }
