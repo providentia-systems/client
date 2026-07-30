@@ -301,7 +301,7 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
                 .into(_database.syncConflictRecords)
                 .insertOnConflictUpdate(
                   SyncConflictRecordsCompanion.insert(
-                    conflictId: 'pull-conflict:${operation.operationId}',
+                    conflictId: 'conflict:${operation.operationId}',
                     operationId: operation.operationId,
                     homeId: homeId,
                     entityType: change.entityType,
