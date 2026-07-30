@@ -235,6 +235,31 @@ void main() {
         expect(harness.media.discardCalls, 1);
       });
     }
+
+    test(
+      'records a validation failure before rejecting a mismatched proposal',
+      () async {
+        final harness = _receiptHarness(
+          (request) async => AiExtractionSuccess<ReceiptProposal>(
+            proposal: receiptProposal(runId: 'different-run'),
+            metadata: runMetadata,
+          ),
+        );
+
+        await expectLater(
+          _extractReceipt(harness),
+          throwsA(isA<ProposalValidationException>()),
+        );
+
+        expect(harness.proposals.receipts, isEmpty);
+        expect(harness.runs.values['run-1']?.state, AiRunState.failed);
+        expect(
+          harness.runs.values['run-1']?.safeFailureCode,
+          'invalid_structured_output',
+        );
+        expect(harness.media.discardCalls, 1);
+      },
+    );
   });
 
   group('stock-photo extraction outcomes', () {
