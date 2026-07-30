@@ -68,18 +68,64 @@ enum PushResultKind {
 enum RemoteChangeKind { upsert, tombstone }
 
 final class LocalMutation {
-  LocalMutation({
+  factory LocalMutation({
+    required String operationId,
+    required String deviceId,
+    required String homeId,
+    required String entityType,
+    required String entityId,
+    required String operationType,
+    int? baseRevision,
+    required DateTime clientTimestamp,
+    required int payloadSchemaVersion,
+    required Map<String, Object?> payload,
+  }) {
+    _requireNonEmpty(operationId, 'operationId');
+    _requireNonEmpty(deviceId, 'deviceId');
+    _requireNonEmpty(homeId, 'homeId');
+    _requireNonEmpty(entityType, 'entityType');
+    _requireNonEmpty(entityId, 'entityId');
+    _requireNonEmpty(operationType, 'operationType');
+    if (baseRevision != null && baseRevision < 0) {
+      throw ArgumentError.value(
+        baseRevision,
+        'baseRevision',
+        'must not be negative',
+      );
+    }
+    if (payloadSchemaVersion < 1) {
+      throw ArgumentError.value(
+        payloadSchemaVersion,
+        'payloadSchemaVersion',
+        'must be at least one',
+      );
+    }
+    return LocalMutation._(
+      operationId: operationId,
+      deviceId: deviceId,
+      homeId: homeId,
+      entityType: entityType,
+      entityId: entityId,
+      operationType: operationType,
+      baseRevision: baseRevision,
+      clientTimestamp: clientTimestamp,
+      payloadSchemaVersion: payloadSchemaVersion,
+      payload: Map<String, Object?>.unmodifiable(payload),
+    );
+  }
+
+  const LocalMutation._({
     required this.operationId,
     required this.deviceId,
     required this.homeId,
     required this.entityType,
     required this.entityId,
     required this.operationType,
-    this.baseRevision,
+    required this.baseRevision,
     required this.clientTimestamp,
     required this.payloadSchemaVersion,
-    required Map<String, Object?> payload,
-  }) : payload = Map<String, Object?>.unmodifiable(payload);
+    required this.payload,
+  });
 
   final String operationId;
   final String deviceId;
@@ -93,6 +139,12 @@ final class LocalMutation {
   final Map<String, Object?> payload;
 
   String get encodedPayload => jsonEncode(payload);
+
+  static void _requireNonEmpty(String value, String name) {
+    if (value.trim().isEmpty) {
+      throw ArgumentError.value(value, name, 'must not be empty');
+    }
+  }
 }
 
 final class PendingClientOperation {
