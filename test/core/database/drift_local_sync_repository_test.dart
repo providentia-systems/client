@@ -71,7 +71,7 @@ void main() {
         ),
       ],
       now: now,
-      retryPolicy: const RetryPolicy(baseDelay: Duration(seconds: 2)),
+      retryPolicy: RetryPolicy(baseDelay: Duration(seconds: 2)),
     );
 
     final operation = await database
@@ -229,7 +229,7 @@ void main() {
         ),
       ],
       now: DateTime.utc(2026, 7, 29, 14),
-      retryPolicy: const RetryPolicy(),
+      retryPolicy: RetryPolicy(),
     );
 
     await repository.requeueOperation(
