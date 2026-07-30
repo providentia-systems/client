@@ -16,7 +16,7 @@ final class SyncCoordinator implements AppSynchronization {
     SyncMetrics metrics = const NoopSyncMetrics(),
     AuthenticationRecovery authenticationRecovery =
         const NoAuthenticationRecovery(),
-    RetryPolicy retryPolicy = const RetryPolicy(),
+    RetryPolicy? retryPolicy,
     DateTime Function()? clock,
     int maximumPullPages = 1000,
   }) {
@@ -33,7 +33,7 @@ final class SyncCoordinator implements AppSynchronization {
       connectivity,
       metrics,
       authenticationRecovery,
-      retryPolicy,
+      retryPolicy ?? RetryPolicy(),
       clock ?? DateTime.now,
       maximumPullPages,
     );
