@@ -567,11 +567,13 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
 
   @override
   Future<void> requeueOperation({
+    required String homeId,
     required String operationId,
     required DateTime now,
   }) async {
     await (_database.update(_database.clientOperations)..where(
           (row) =>
+              row.homeId.equals(homeId) &
               row.operationId.equals(operationId) &
               row.state.equals(ClientOperationState.retryWait.storageValue),
         ))
