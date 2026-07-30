@@ -29,13 +29,13 @@ Future<void> main() async {
   final apiClient = const ApiClientFactory().create(
     configuration: configuration,
   );
-  final coordinator = SyncCoordinator(
+  final synchronization = SyncCoordinator(
     local: repository,
     remote: GeneratedSyncGateway(apiClient),
     connectivity: GeneratedApiConnectivityProbe(apiClient),
   );
   final controller = AppController(
-    coordinator: coordinator,
+    synchronization: synchronization,
     // This development value only chooses the client partition. The backend
     // independently resolves membership and authorization from the session.
     activeHomeId: bootstrapHomeId,
