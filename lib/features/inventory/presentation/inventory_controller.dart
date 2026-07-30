@@ -22,18 +22,27 @@ final class InventoryViewState {
 }
 
 final class InventoryController extends ChangeNotifier {
-  InventoryController({
+  factory InventoryController({
     required InventoryRepository repository,
-    required this.homeId,
+    required String homeId,
     InventoryItemSearch search = const InventoryItemSearch(),
     DateTime Function()? clock,
     String Function()? idGenerator,
-  }) : _repository = repository,
-       _search = search,
-       _clock = clock ?? DateTime.now,
-       _idGenerator =
-           idGenerator ??
-           (() => DateTime.now().microsecondsSinceEpoch.toString());
+  }) => InventoryController._(
+    repository,
+    homeId,
+    search,
+    clock ?? DateTime.now,
+    idGenerator ?? (() => DateTime.now().microsecondsSinceEpoch.toString()),
+  );
+
+  InventoryController._(
+    this._repository,
+    this.homeId,
+    this._search,
+    this._clock,
+    this._idGenerator,
+  );
 
   final InventoryRepository _repository;
   final InventoryItemSearch _search;

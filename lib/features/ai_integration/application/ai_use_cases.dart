@@ -6,17 +6,27 @@ import 'package:providentia/features/ai_integration/domain/ai_policy.dart';
 import 'package:providentia/features/ai_integration/domain/proposal_validation.dart';
 
 final class ConfigureAiProvider {
-  const ConfigureAiProvider({
+  factory ConfigureAiProvider({
     required AiPrivacyPolicy policy,
     required AiProviderRepository providers,
     required AiGatewayResolver gateways,
     required ServerCredentialProvisioningPort serverCredentials,
     required CredentialVault credentialVault,
-  }) : _policy = policy,
-       _providers = providers,
-       _gateways = gateways,
-       _serverCredentials = serverCredentials,
-       _credentialVault = credentialVault;
+  }) => ConfigureAiProvider._(
+    policy,
+    providers,
+    gateways,
+    serverCredentials,
+    credentialVault,
+  );
+
+  const ConfigureAiProvider._(
+    this._policy,
+    this._providers,
+    this._gateways,
+    this._serverCredentials,
+    this._credentialVault,
+  );
 
   final AiPrivacyPolicy _policy;
   final AiProviderRepository _providers;
@@ -125,7 +135,7 @@ final class PrepareAiMedia {
 }
 
 final class ExtractReceiptProposal {
-  const ExtractReceiptProposal({
+  factory ExtractReceiptProposal({
     required AiPrivacyPolicy policy,
     required AiGatewayResolver gateways,
     required AiMediaPreparationPort media,
@@ -133,13 +143,25 @@ final class ExtractReceiptProposal {
     required AiProposalRepository proposals,
     required AiIdentifierFactory identifiers,
     DateTime Function()? clock,
-  }) : _policy = policy,
-       _gateways = gateways,
-       _media = media,
-       _runs = runs,
-       _proposals = proposals,
-       _identifiers = identifiers,
-       _clock = clock ?? DateTime.now;
+  }) => ExtractReceiptProposal._(
+    policy,
+    gateways,
+    media,
+    runs,
+    proposals,
+    identifiers,
+    clock ?? DateTime.now,
+  );
+
+  const ExtractReceiptProposal._(
+    this._policy,
+    this._gateways,
+    this._media,
+    this._runs,
+    this._proposals,
+    this._identifiers,
+    this._clock,
+  );
 
   final AiPrivacyPolicy _policy;
   final AiGatewayResolver _gateways;
@@ -302,7 +324,7 @@ final class ExtractReceiptProposal {
 }
 
 final class ExtractStockPhotoProposal {
-  const ExtractStockPhotoProposal({
+  factory ExtractStockPhotoProposal({
     required AiPrivacyPolicy policy,
     required AiGatewayResolver gateways,
     required AiMediaPreparationPort media,
@@ -310,13 +332,25 @@ final class ExtractStockPhotoProposal {
     required AiProposalRepository proposals,
     required AiIdentifierFactory identifiers,
     DateTime Function()? clock,
-  }) : _policy = policy,
-       _gateways = gateways,
-       _media = media,
-       _runs = runs,
-       _proposals = proposals,
-       _identifiers = identifiers,
-       _clock = clock ?? DateTime.now;
+  }) => ExtractStockPhotoProposal._(
+    policy,
+    gateways,
+    media,
+    runs,
+    proposals,
+    identifiers,
+    clock ?? DateTime.now,
+  );
+
+  const ExtractStockPhotoProposal._(
+    this._policy,
+    this._gateways,
+    this._media,
+    this._runs,
+    this._proposals,
+    this._identifiers,
+    this._clock,
+  );
 
   final AiPrivacyPolicy _policy;
   final AiGatewayResolver _gateways;
@@ -387,7 +421,7 @@ final class ExtractStockPhotoProposal {
           timeout: timeout,
         ),
       );
-      if (result case AiExtractionSuccess<StockPhotoProposal> success) {
+      if (result case final AiExtractionSuccess<StockPhotoProposal> success) {
         final proposal = success.proposal;
         if (proposal.runId != run.id ||
             proposal.schemaVersion != AiProposalSchemas.stockPhotoVersion) {
@@ -442,11 +476,12 @@ final class ExtractStockPhotoProposal {
 }
 
 final class ApproveReceiptProposal {
-  const ApproveReceiptProposal({
+  factory ApproveReceiptProposal({
     required AiProposalRepository proposals,
     required ReceiptCommitPort commits,
-  }) : _proposals = proposals,
-       _commits = commits;
+  }) => ApproveReceiptProposal._(proposals, commits);
+
+  const ApproveReceiptProposal._(this._proposals, this._commits);
 
   final AiProposalRepository _proposals;
   final ReceiptCommitPort _commits;
@@ -515,11 +550,12 @@ final class ApproveReceiptProposal {
 }
 
 final class CloseStockPhotoCount {
-  const CloseStockPhotoCount({
+  factory CloseStockPhotoCount({
     required AiProposalRepository proposals,
     required StockCountCommitPort commits,
-  }) : _proposals = proposals,
-       _commits = commits;
+  }) => CloseStockPhotoCount._(proposals, commits);
+
+  const CloseStockPhotoCount._(this._proposals, this._commits);
 
   final AiProposalRepository _proposals;
   final StockCountCommitPort _commits;

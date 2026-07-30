@@ -22,12 +22,13 @@ final class PurchasingState {
 }
 
 final class PurchasingController extends ChangeNotifier {
-  PurchasingController({
+  factory PurchasingController({
     required PurchaseRepository repository,
-    required this.homeId,
+    required String homeId,
     PurchaseHistoryGrouper grouper = const PurchaseHistoryGrouper(),
-  }) : _repository = repository,
-       _grouper = grouper;
+  }) => PurchasingController._(repository, homeId, grouper);
+
+  PurchasingController._(this._repository, this.homeId, this._grouper);
 
   final PurchaseRepository _repository;
   final PurchaseHistoryGrouper _grouper;

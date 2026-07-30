@@ -155,7 +155,7 @@ final class ReceiptProposalReviewPage extends StatelessWidget {
           return SafeArea(
             child: Column(
               children: <Widget>[
-                if (catalogSearch != null) catalogSearch!,
+                ?catalogSearch,
                 _ReceiptHeaderCard(header: proposal.header),
                 Expanded(
                   child: ListView.builder(
@@ -262,7 +262,7 @@ final class StockPhotoReviewPage extends StatelessWidget {
                     child: mediaPreview,
                   ),
                 ),
-                if (catalogSearch != null) catalogSearch!,
+                ?catalogSearch,
                 Expanded(
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
