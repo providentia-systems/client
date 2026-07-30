@@ -32,7 +32,7 @@ void main() {
       local: local,
       remote: remote,
       connectivity: const _OnlineProbe(),
-      retryPolicy: const RetryPolicy(baseDelay: Duration(seconds: 1)),
+      retryPolicy: RetryPolicy(baseDelay: Duration(seconds: 1)),
       clock: () => now,
     );
 
@@ -399,7 +399,7 @@ void main() {
   });
 
   test('deterministic retry policy applies bounded jitter', () {
-    const policy = RetryPolicy(
+    final policy = RetryPolicy(
       baseDelay: Duration(seconds: 2),
       maximumDelay: Duration(seconds: 30),
     );
