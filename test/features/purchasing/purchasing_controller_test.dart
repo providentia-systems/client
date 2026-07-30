@@ -17,7 +17,9 @@ void main() {
         homeId: 'home-a',
       );
       await tester.pumpWidget(
-        MaterialApp(home: PurchasingWorkspace(controller: controller)),
+        MaterialApp(
+          home: Scaffold(body: PurchasingWorkspace(controller: controller)),
+        ),
       );
       repository.lines.add(<PurchaseLine>[
         _line(

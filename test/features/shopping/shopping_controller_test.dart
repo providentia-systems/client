@@ -19,7 +19,9 @@ void main() {
       clock: () => DateTime.utc(2026, 7, 30),
     );
     await tester.pumpWidget(
-      MaterialApp(home: ShoppingWorkspace(controller: controller)),
+      MaterialApp(
+        home: Scaffold(body: ShoppingWorkspace(controller: controller)),
+      ),
     );
     repository.emit();
     await tester.pump();

@@ -128,5 +128,6 @@ class _TestApp extends StatelessWidget {
   final Widget child;
 
   @override
-  Widget build(BuildContext context) => MaterialApp(home: child);
+  Widget build(BuildContext context) =>
+      MaterialApp(home: Scaffold(body: child));
 }
