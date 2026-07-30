@@ -63,7 +63,7 @@ minimum.
 
 ## Test and quality gates
 
-The branch must pass all of these before merge:
+The final branch revision must pass all of these before merge:
 
 - source-only toolchain, contract-generation, structure, naming, and dependency
   inversion checks;
