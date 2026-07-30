@@ -150,7 +150,6 @@ void main() {
     final semantics = tester.ensureSemantics();
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(390, 844);
-    addTearDown(semantics.dispose);
     addTearDown(tester.view.reset);
 
     await tester.pumpWidget(
@@ -169,6 +168,7 @@ void main() {
     expect(brandMark, findsOneWidget);
     expect(tester.getSemantics(brandMark).label, 'Providentia');
     expect(tester.takeException(), isNull);
+    semantics.dispose();
   });
 
   testWidgets('keyboard traversal reaches primary interactive controls', (
