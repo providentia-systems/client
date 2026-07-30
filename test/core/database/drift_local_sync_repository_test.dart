@@ -426,7 +426,10 @@ void main() {
     );
 
     final cursor = await database.select(database.localSyncCursors).getSingle();
-    expect(cursor.updatedAt.microsecondsSinceEpoch, clock.microsecondsSinceEpoch);
+    expect(
+      cursor.updatedAt.microsecondsSinceEpoch,
+      clock.microsecondsSinceEpoch,
+    );
 
     clock = clock.add(const Duration(minutes: 5));
     await repository.replaceWithBootstrap(
