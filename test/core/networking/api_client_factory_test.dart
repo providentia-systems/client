@@ -36,4 +36,41 @@ void main() {
       client.close();
     },
   );
+
+  test('production transport never invents an authorization header', () async {
+    final configuration = RuntimeConfiguration(
+      apiBaseUri: Uri.parse('https://api.example.test'),
+      environment: 'production',
+    );
+    final client = const ApiClientFactory().create(
+      configuration: configuration,
+      httpClient: MockClient((request) async {
+        expect(request.headers, isNot(contains('Authorization')));
+        return http.Response(
+          jsonEncode(<String, Object?>{
+            'status': 'alive',
+            'timestamp': '2026-07-30T12:00:00Z',
+          }),
+          200,
+        );
+      }),
+    );
+
+    await client.getLiveness();
+    client.close();
+  });
+
+  test('factory can own and close its native HTTP transport', () {
+    final configuration = RuntimeConfiguration(
+      apiBaseUri: Uri.parse('https://api.example.test'),
+      environment: 'production',
+    );
+
+    final client = const ApiClientFactory().create(
+      configuration: configuration,
+    );
+
+    expect(client.close, returnsNormally);
+  });
+
 }
