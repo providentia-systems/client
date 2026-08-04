@@ -117,8 +117,12 @@ void main() {
         filePicker: ({required bool allowMultiple}) async {
           requestedMultiple = allowMultiple;
           return FilePickerResult(<PlatformFile>[
+            PlatformFile(name: 'receipt.jpg', size: 28, bytes: _raw(28)),
+            PlatformFile(name: 'pantry.png', size: 29, bytes: _raw(29)),
+            PlatformFile(name: 'shelf.webp', size: 30, bytes: _raw(30)),
             PlatformFile(name: 'receipt.pdf', size: 32, bytes: _raw(32)),
             PlatformFile(name: 'stock.mp4', size: 33, bytes: _raw(33)),
+            PlatformFile(name: 'stock.mov', size: 34, bytes: _raw(34)),
             PlatformFile(name: 'stock.webm', size: 34, bytes: _raw(34)),
             PlatformFile(name: 'unknown.bin', size: 35, bytes: _raw(35)),
           ]);
@@ -133,12 +137,16 @@ void main() {
 
       expect(requestedMultiple, isFalse);
       expect(assets.map((asset) => asset.mimeType), <String>[
+        'image/jpeg',
+        'image/png',
+        'image/webp',
         'application/pdf',
         'video/mp4',
+        'video/quicktime',
         'video/webm',
         'application/octet-stream',
       ]);
-      expect(registry.registeredIds, hasLength(4));
+      expect(registry.registeredIds, hasLength(8));
     },
   );
 
