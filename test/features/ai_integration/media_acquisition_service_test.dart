@@ -146,7 +146,7 @@ void main() {
         'video/webm',
         'application/octet-stream',
       ]);
-      expect(registry.registeredIds, hasLength(8));
+      expect(registry.registeredIds, hasLength(7));
     },
   );
 
