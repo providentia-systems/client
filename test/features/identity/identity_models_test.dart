@@ -13,6 +13,7 @@ void main() {
 
     final switched = metadata.copyWith(activeHomeId: 'home-2');
     final cleared = switched.copyWith(clearActiveHome: true);
+    final preserved = metadata.copyWith();
 
     expect(switched.sessionId, metadata.sessionId);
     expect(switched.deviceId, metadata.deviceId);
@@ -20,6 +21,7 @@ void main() {
     expect(switched.transport, metadata.transport);
     expect(switched.activeHomeId, 'home-2');
     expect(cleared.activeHomeId, isNull);
+    expect(preserved.activeHomeId, 'home-1');
   });
 
   test('identity snapshots copy state and clear transient values', () {
@@ -40,12 +42,15 @@ void main() {
       clearMessage: true,
       deviceSessions: const <DeviceSessionView>[],
     );
+    final preserved = snapshot.copyWith();
 
     expect(refreshing.status, IdentitySessionStatus.refreshing);
     expect(refreshing.isAuthenticated, isTrue);
     expect(refreshing.challenge, isNull);
     expect(refreshing.safeMessage, isNull);
     expect(refreshing.deviceSessions, isEmpty);
+    expect(preserved.status, IdentitySessionStatus.challengeRequested);
+    expect(preserved.safeMessage, 'Check your email.');
   });
 
   test('challenge expiry uses UTC instants at the boundary', () {
