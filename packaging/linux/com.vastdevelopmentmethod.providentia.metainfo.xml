@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.vastdevelopmentmethod.providentia</id>
+  <name>Providentia</name>
+  <summary>Household stock control</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>LicenseRef-Proprietary</project_license>
+  <description>
+    <p>Providentia is the proprietary household stock control client from Vast Development Method.</p>
+  </description>
+  <launchable type="desktop-id">com.vastdevelopmentmethod.providentia.desktop</launchable>
+  <developer_name>Vast Development Method</developer_name>
+  <provides>
+    <binary>providentia</binary>
+  </provides>
+</component>

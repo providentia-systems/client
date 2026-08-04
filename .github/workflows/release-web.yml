@@ -1,0 +1,102 @@
+name: Release Web PWA
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semantic release version without a v prefix
+        required: true
+        type: string
+      publish:
+        description: Invoke the protected hosted-deployment hook
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-web-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    environment: production-release
+    timeout-minutes: 45
+    env:
+      DEPLOY_HOOK: ${{ secrets.WEB_DEPLOY_WEBHOOK_URL }}
+      DEPLOY_TOKEN: ${{ secrets.WEB_DEPLOY_WEBHOOK_TOKEN }}
+      API_BASE_URL: ${{ vars.PRODUCTION_API_BASE_URL }}
+      REQUESTED_VERSION: ${{ inputs.version }}
+      REQUESTED_PUBLISH: ${{ inputs.publish }}
+    steps:
+      - id: gate
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then version=$REQUESTED_VERSION; fi
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]] || exit 64
+          [[ "$API_BASE_URL" == https://* ]] || { echo 'PRODUCTION_API_BASE_URL must be HTTPS.' >&2; exit 78; }
+          publish=$([[ "$GITHUB_EVENT_NAME" == push || "$REQUESTED_PUBLISH" == true ]] && echo true || echo false)
+          if [[ "$publish" == true && ( -z "$DEPLOY_HOOK" || -z "$DEPLOY_TOKEN" ) ]]; then
+            echo 'Hosted publication requested without WEB_DEPLOY_WEBHOOK_URL/TOKEN.' >&2
+            exit 78
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Install pinned Flutter
+        run: |
+          tool/install_flutter_linux.sh "$RUNNER_TEMP/providentia-sdk"
+          echo "$RUNNER_TEMP/providentia-sdk/flutter/bin" >> "$GITHUB_PATH"
+      - name: Build deployable PWA
+        env:
+          RELEASE_VERSION: ${{ steps.gate.outputs.version }}
+        run: |
+          flutter pub get --enforce-lockfile
+          flutter build web --release --pwa-strategy=offline-first \
+            --build-name "$RELEASE_VERSION" --build-number "$GITHUB_RUN_NUMBER" \
+            --dart-define PROVIDENTIA_ENVIRONMENT=production \
+            --dart-define PROVIDENTIA_API_BASE_URL="$API_BASE_URL"
+          test -f build/web/flutter_service_worker.js
+          test -f build/web/manifest.json
+          mkdir -p build/release/web/artifacts
+          tar --sort=name --mtime="@${SOURCE_DATE_EPOCH:-0}" --owner=0 --group=0 --numeric-owner \
+            -C build/web -czf "build/release/web/artifacts/Providentia-${RELEASE_VERSION}-web.tar.gz" .
+      - name: Generate SBOM, checksums and provenance
+        env:
+          RELEASE_VERSION: ${{ steps.gate.outputs.version }}
+        run: |
+          dart pub deps --json > "$RUNNER_TEMP/dart-dependencies.json"
+          node tool/release/generate_release_evidence.mjs \
+            --artifacts build/release/web/artifacts \
+            --output build/release/web/evidence \
+            --platform web --version "$RELEASE_VERSION" \
+            --dependencies "$RUNNER_TEMP/dart-dependencies.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: providentia-web-${{ steps.gate.outputs.version }}
+          path: build/release/web
+          if-no-files-found: error
+          retention-days: 30
+      - name: Invoke protected hosted-deployment hook
+        if: steps.gate.outputs.publish == 'true'
+        env:
+          RELEASE_VERSION: ${{ steps.gate.outputs.version }}
+        run: |
+          checksum=$(awk '{print $1; exit}' build/release/web/evidence/SHA256SUMS)
+          payload=$(jq -n \
+            --arg repository "$GITHUB_REPOSITORY" --arg commit "$GITHUB_SHA" \
+            --arg version "$RELEASE_VERSION" --arg checksum "$checksum" \
+            --arg runId "$GITHUB_RUN_ID" \
+            '{schemaVersion:1,repository:$repository,commit:$commit,version:$version,sha256:$checksum,runId:$runId}')
+          curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer $DEPLOY_TOKEN" \
+            --header 'Content-Type: application/json' \
+            --data "$payload" "$DEPLOY_HOOK"
+      - name: Record artifact-only outcome
+        if: steps.gate.outputs.publish != 'true'
+        run: echo 'Web artifact built; hosted deployment hook was explicitly not requested.' >> "$GITHUB_STEP_SUMMARY"

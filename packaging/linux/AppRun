@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+set -eu
+appdir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec "$appdir/usr/lib/providentia/Providentia" "$@"

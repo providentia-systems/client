@@ -1,0 +1,120 @@
+name: Release Linux
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semantic release version without a v prefix
+        required: true
+        type: string
+      publish:
+        description: Enforce protected Linux signing configuration
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-linux-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    environment: production-release
+    outputs:
+      ready: ${{ steps.gate.outputs.ready }}
+      version: ${{ steps.gate.outputs.version }}
+    env:
+      SIGNING_KEY: ${{ secrets.LINUX_SIGNING_KEY_BASE64 }}
+      SIGNING_KEY_ID: ${{ secrets.LINUX_SIGNING_KEY_ID }}
+      SIGNING_PASSPHRASE: ${{ secrets.LINUX_SIGNING_PASSPHRASE }}
+      APPIMAGETOOL_URL: ${{ vars.APPIMAGETOOL_URL }}
+      APPIMAGETOOL_SHA256: ${{ vars.APPIMAGETOOL_SHA256 }}
+      API_BASE_URL: ${{ vars.PRODUCTION_API_BASE_URL }}
+    steps:
+      - id: gate
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+          REQUESTED_PUBLISH: ${{ inputs.publish }}
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then version=$REQUESTED_VERSION; fi
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]] || exit 64
+          [[ "$API_BASE_URL" == https://* ]] || missing="${missing:-} PRODUCTION_API_BASE_URL"
+          [[ "$APPIMAGETOOL_URL" == https://* ]] || missing="${missing:-} APPIMAGETOOL_URL"
+          [[ "$APPIMAGETOOL_SHA256" =~ ^[0-9a-fA-F]{64}$ ]] || missing="${missing:-} APPIMAGETOOL_SHA256"
+          for name in SIGNING_KEY SIGNING_KEY_ID SIGNING_PASSPHRASE; do
+            [[ -n "${!name}" ]] || missing="${missing:-} ${name}"
+          done
+          publish=$([[ "$GITHUB_EVENT_NAME" == push || "$REQUESTED_PUBLISH" == true ]] && echo true || echo false)
+          if [[ -n "${missing:-}" ]]; then
+            echo "Linux packaging/signing unavailable; missing protected configuration:${missing}" >> "$GITHUB_STEP_SUMMARY"
+            [[ "$publish" == false ]] || exit 78
+            echo 'ready=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'ready=true' >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  signed-build:
+    needs: preflight
+    if: needs.preflight.outputs.ready == 'true'
+    runs-on: ubuntu-24.04
+    environment: production-release
+    timeout-minutes: 60
+    env:
+      RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+      APPIMAGETOOL_URL: ${{ vars.APPIMAGETOOL_URL }}
+      APPIMAGETOOL_SHA256: ${{ vars.APPIMAGETOOL_SHA256 }}
+      LINUX_SIGNING_KEY: ${{ secrets.LINUX_SIGNING_KEY_BASE64 }}
+      LINUX_SIGNING_KEY_ID: ${{ secrets.LINUX_SIGNING_KEY_ID }}
+      LINUX_SIGNING_PASSPHRASE: ${{ secrets.LINUX_SIGNING_PASSPHRASE }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Install Linux build and package dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev \
+            libfuse2t64 dpkg-dev gnupg curl
+      - name: Install pinned Flutter
+        run: |
+          tool/install_flutter_linux.sh "$RUNNER_TEMP/providentia-sdk"
+          echo "$RUNNER_TEMP/providentia-sdk/flutter/bin" >> "$GITHUB_PATH"
+      - name: Build and package Linux release
+        run: |
+          flutter pub get --enforce-lockfile
+          flutter build linux --release \
+            --build-name "$RELEASE_VERSION" --build-number "$GITHUB_RUN_NUMBER" \
+            --dart-define PROVIDENTIA_ENVIRONMENT=production \
+            --dart-define PROVIDENTIA_API_BASE_URL='${{ vars.PRODUCTION_API_BASE_URL }}'
+          bash tool/release/package_linux.sh \
+            build/linux/x64/release/bundle "$RELEASE_VERSION" \
+            build/release/linux/artifacts
+          bash tool/release/sign_linux_artifacts.sh build/release/linux/artifacts
+      - name: Generate SBOM, checksums and provenance
+        run: |
+          dart pub deps --json > "$RUNNER_TEMP/dart-dependencies.json"
+          node tool/release/generate_release_evidence.mjs \
+            --artifacts build/release/linux/artifacts \
+            --output build/release/linux/evidence \
+            --platform linux --version "$RELEASE_VERSION" \
+            --dependencies "$RUNNER_TEMP/dart-dependencies.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: providentia-linux-${{ needs.preflight.outputs.version }}-signed
+          path: build/release/linux
+          if-no-files-found: error
+          retention-days: 30
+
+  skipped:
+    needs: preflight
+    if: needs.preflight.outputs.ready != 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo 'Linux publication was explicitly skipped because pinned packaging/signing configuration was absent.' >> "$GITHUB_STEP_SUMMARY"
