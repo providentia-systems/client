@@ -402,6 +402,84 @@ void main() {
       expect(result.proposal.warnings, isEmpty);
     },
   );
+
+  test('provider profile updates and gateway routing remain explicit', () {
+    final timestamp = DateTime.utc(2026, 8, 4);
+    final changed = _profile().copyWith(
+      displayName: 'Validator',
+      endpoint: Uri.parse('https://validator.example.test'),
+      model: 'validator-model',
+      capabilities: <AiCapability>{AiCapability.vision},
+      availability: AiProviderAvailability.unavailable,
+      credentialConfigured: false,
+      strictLocalAttestedAt: timestamp,
+      revision: 2,
+      enabled: false,
+    );
+    final gateway = Api17AiGateway(
+      client: _client((_) async => throw StateError('not called')),
+      mediaReader: _MediaReader(_bytes),
+    );
+
+    expect(gateway.route, AiGatewayRoute.serverProxyCloud);
+    expect(changed.displayName, 'Validator');
+    expect(changed.endpoint, Uri.parse('https://validator.example.test'));
+    expect(changed.model, 'validator-model');
+    expect(changed.capabilities, <AiCapability>{AiCapability.vision});
+    expect(changed.availability, AiProviderAvailability.unavailable);
+    expect(changed.credentialConfigured, isFalse);
+    expect(changed.strictLocalAttestedAt, timestamp);
+    expect(changed.revision, 2);
+    expect(changed.enabled, isFalse);
+  });
+
+  test('malformed candidate primitives never escape as proposals', () async {
+    Future<AiExtractionFailure<ReceiptProposal>> extract(
+      Map<String, Object?> payload, {
+      Object position = 0,
+    }) async {
+      final response = <String, Object?>{
+        'id': 'extraction-1',
+        'status': 'review_required',
+        'result': <String, Object?>{'documentType': 'receipt'},
+        'candidates': <Object?>[
+          <String, Object?>{'position': position, 'payload': payload},
+        ],
+      };
+      final gateway = Api17AiGateway(
+        client: _client(
+          (request) async => request.method == 'POST'
+              ? _json(<String, Object?>{'id': 'extraction-1'}, statusCode: 201)
+              : _json(response),
+        ),
+        mediaReader: _MediaReader(_bytes),
+      );
+      return await gateway.extractReceipt(_request(AiExtractionKind.receipt))
+          as AiExtractionFailure<ReceiptProposal>;
+    }
+
+    expect(
+      (await extract(<String, Object?>{}, position: 'zero')).code,
+      'invalid_ai_response',
+    );
+    expect(
+      (await extract(<String, Object?>{
+        'description': 'Rice',
+        'quantity': '1',
+        'confidence': 2,
+        'fieldConfidence': <String, Object?>{},
+      })).code,
+      'invalid_ai_response',
+    );
+    expect(
+      (await extract(<String, Object?>{
+        'quantity': '1',
+        'confidence': 0.5,
+        'fieldConfidence': <String, Object?>{},
+      })).code,
+      'invalid_ai_response',
+    );
+  });
 }
 
 ProvidentiaApiClient _extractionClient({required String documentType}) {
