@@ -109,6 +109,13 @@ void main() {
 XFile _file(String name, int length) => XFile.fromData(
   Uint8List.fromList(List<int>.generate(length, (index) => index % 251)),
   name: name,
+  mimeType: switch (name.split('.').last) {
+    'jpeg' || 'jpg' => 'image/jpeg',
+    'png' => 'image/png',
+    'webp' => 'image/webp',
+    'mov' => 'video/quicktime',
+    _ => 'application/octet-stream',
+  },
 );
 
 final class _FakeImagePicker extends ImagePicker {
