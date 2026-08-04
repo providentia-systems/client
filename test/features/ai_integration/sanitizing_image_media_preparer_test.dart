@@ -121,6 +121,37 @@ void main() {
       throwsArgumentError,
     );
   });
+
+  test(
+    'preparer removes earlier output when a later image is invalid',
+    () async {
+      final source = RegisteredMediaSourceReader();
+      final prepared = _RecordingPreparedStore();
+      final validImage = image.Image(width: 16, height: 16);
+      final validBytes = Uint8List.fromList(image.encodePng(validImage));
+      final invalidBytes = Uint8List.fromList(List<int>.filled(32, 1));
+      final valid = _asset('valid', validBytes.length);
+      final invalid = _asset('invalid', invalidBytes.length);
+      source.register(valid, validBytes);
+      source.register(invalid, invalidBytes);
+      final preparer = SanitizingImageMediaPreparer(
+        sources: source,
+        prepared: prepared,
+      );
+
+      await expectLater(
+        preparer.prepare(
+          homeId: 'home-1',
+          purpose: AiExtractionKind.stockPhoto,
+          assets: <AiMediaAsset>[valid, invalid],
+        ),
+        throwsFormatException,
+      );
+
+      expect(prepared.written, hasLength(1));
+      expect(prepared.deleted, prepared.written);
+    },
+  );
 }
 
 AiMediaAsset _asset(String id, int byteLength, {int? pageIndex}) =>
@@ -146,3 +177,27 @@ PreparedAiMedia _prepared(String reference, int byteLength) => PreparedAiMedia(
   height: 10,
   pageIndex: 0,
 );
+
+final class _RecordingPreparedStore implements EphemeralPreparedMediaStore {
+  final List<String> written = <String>[];
+  final List<String> deleted = <String>[];
+  final Map<String, Uint8List> _bytes = <String, Uint8List>{};
+
+  @override
+  Future<String> write({required String id, required Uint8List bytes}) async {
+    final reference = 'ephemeral://$id';
+    written.add(reference);
+    _bytes[reference] = bytes;
+    return reference;
+  }
+
+  @override
+  Future<Uint8List> read(PreparedAiMedia media) async =>
+      _bytes[media.ephemeralReference]!;
+
+  @override
+  Future<void> delete(String reference) async {
+    deleted.add(reference);
+    _bytes.remove(reference);
+  }
+}
