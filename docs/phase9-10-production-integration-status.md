@@ -34,6 +34,7 @@ several API 1.7 responses are intentionally free-form.
 | Devices | Stable client device ID plus list/revoke session flows |
 | Homes | List, create, select/switch, membership list, role change, invite, accept, leave |
 | Revoked access | Active workspace closes and late responses are generation-fenced |
+| Online household boundary | Authoritative API 1.7 home-stock reads and idempotent home-level adjustments, with strict cross-home response checks |
 | AI credentials | Flutter entry to write-only, encrypted, home/provider-scoped Laminas vault |
 | API 1.7 extraction | Concrete one-image server-proxy gateway with mandatory review response mapping |
 | Media acquisition | Camera, gallery, supported file selection, and short-video capture boundary |
@@ -93,6 +94,16 @@ live integration target:
 Step 6 is online-only until typed Phase 5–8 synchronization is released. Local
 Phase 5–8 projections must not be described as cross-device authoritative in
 that interim state.
+
+The existing Phase 5 controller contracts are not identical to API 1.7. In
+particular, they model location-scoped adjustments, richer count sessions, raw
+purchase/price rows, atomic shopping-list replacement, and feedback without a
+server suggestion identifier. The staged online repository therefore exposes
+authoritative stock reads and the compatible home-level adjustment operation,
+and fails every incompatible legacy method explicitly. Production composition
+continues to use the local projection for those incompatible workflows until
+the controller models and Laminas sync contract converge; it does not silently
+drop location, revision, or idempotency semantics.
 
 ## Release evidence versus release automation
 
