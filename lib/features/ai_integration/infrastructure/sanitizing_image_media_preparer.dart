@@ -51,13 +51,24 @@ final class MemoryEphemeralPreparedMediaStore
 /// orientation is baked into pixels, dimensions are bounded, and consent can
 /// be tied to the exact SHA-256 bytes sent to a provider.
 final class SanitizingImageMediaPreparer implements AiMediaPreparationPort {
-  const SanitizingImageMediaPreparer({
+  factory SanitizingImageMediaPreparer({
     required AiMediaSourceByteReader sources,
     required EphemeralPreparedMediaStore prepared,
-    this.maximumDimension = 4096,
-    this.jpegQuality = 88,
-  }) : _sources = sources,
-       _prepared = prepared;
+    int maximumDimension = 4096,
+    int jpegQuality = 88,
+  }) => SanitizingImageMediaPreparer._(
+    sources,
+    prepared,
+    maximumDimension,
+    jpegQuality,
+  );
+
+  const SanitizingImageMediaPreparer._(
+    this._sources,
+    this._prepared,
+    this.maximumDimension,
+    this.jpegQuality,
+  );
 
   final AiMediaSourceByteReader _sources;
   final EphemeralPreparedMediaStore _prepared;
@@ -189,8 +200,9 @@ final class RegisteredMediaSourceReader implements AiMediaSourceByteReader {
   @override
   Future<Uint8List> read(AiMediaAsset asset) async {
     final bytes = _sources[asset.id];
-    if (bytes == null)
+    if (bytes == null) {
       throw StateError('Selected media is no longer available.');
+    }
     return Uint8List.fromList(bytes);
   }
 }

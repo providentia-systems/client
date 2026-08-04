@@ -15,12 +15,21 @@ final class MediaAcquisitionException implements Exception {
 /// Camera, gallery and file-system acquisition with bounded in-memory bytes.
 /// Nothing is transmitted until preparation, disclosure and explicit consent.
 final class MediaAcquisitionService {
-  MediaAcquisitionService({
+  factory MediaAcquisitionService({
     required RegisteredMediaSourceReader registry,
     ImagePicker? imagePicker,
-    this.maximumSourceBytes = 25 * 1024 * 1024,
-  }) : _registry = registry,
-       _imagePicker = imagePicker ?? ImagePicker();
+    int maximumSourceBytes = 25 * 1024 * 1024,
+  }) => MediaAcquisitionService._(
+    registry,
+    imagePicker ?? ImagePicker(),
+    maximumSourceBytes,
+  );
+
+  MediaAcquisitionService._(
+    this._registry,
+    this._imagePicker,
+    this.maximumSourceBytes,
+  );
 
   final RegisteredMediaSourceReader _registry;
   final ImagePicker _imagePicker;
@@ -68,7 +77,7 @@ final class MediaAcquisitionService {
     required AiExtractionKind purpose,
     bool allowMultiple = true,
   }) async {
-    final result = await FilePicker.platform.pickFiles(
+    final result = await FilePicker.pickFiles(
       allowMultiple: allowMultiple,
       withData: true,
       type: FileType.custom,

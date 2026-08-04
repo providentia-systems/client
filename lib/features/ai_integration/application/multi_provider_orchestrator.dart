@@ -148,10 +148,13 @@ final class AiOrchestrationViolation implements Exception {
 }
 
 final class ExtractAndValidateAiProposal<T> {
-  const ExtractAndValidateAiProposal({
+  factory ExtractAndValidateAiProposal({
     required AiProposalExecutionPort<T> executions,
-    this.consensusEngine = const DeterministicAiConsensusEngine(),
-  }) : _executions = executions;
+    DeterministicAiConsensusEngine consensusEngine =
+        const DeterministicAiConsensusEngine(),
+  }) => ExtractAndValidateAiProposal._(executions, consensusEngine);
+
+  const ExtractAndValidateAiProposal._(this._executions, this.consensusEngine);
 
   final AiProposalExecutionPort<T> _executions;
   final DeterministicAiConsensusEngine consensusEngine;

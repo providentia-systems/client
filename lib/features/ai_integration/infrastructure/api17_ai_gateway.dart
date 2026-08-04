@@ -13,11 +13,12 @@ abstract interface class PreparedMediaByteReader {
 /// Multi-page, video-frame batches and independent validation deliberately
 /// remain in the orchestration layer until Laminas publishes a batch contract.
 final class Api17AiGateway implements AiProviderGateway {
-  const Api17AiGateway({
+  factory Api17AiGateway({
     required ProvidentiaApiClient client,
     required PreparedMediaByteReader mediaReader,
-  }) : _client = client,
-       _mediaReader = mediaReader;
+  }) => Api17AiGateway._(client, mediaReader);
+
+  const Api17AiGateway._(this._client, this._mediaReader);
 
   final ProvidentiaApiClient _client;
   final PreparedMediaByteReader _mediaReader;
