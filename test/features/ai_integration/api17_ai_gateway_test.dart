@@ -7,6 +7,7 @@ import 'package:http/testing.dart';
 import 'package:providentia/features/ai_integration/application/ai_ports.dart';
 import 'package:providentia/features/ai_integration/domain/ai_models.dart';
 import 'package:providentia/features/ai_integration/infrastructure/api17_ai_gateway.dart';
+import 'package:providentia/features/ai_integration/infrastructure/api17_server_credential_provisioning.dart';
 import 'package:providentia_api_client/providentia_api_client.dart';
 
 void main() {
@@ -107,6 +108,150 @@ void main() {
             as AiExtractionFailure<ReceiptProposal>;
     expect(byteFailure.code, 'prepared_media_changed');
   });
+
+  test(
+    'readiness fails closed for encryption, provider, and network gaps',
+    () async {
+      var attempt = 0;
+      final gateway = Api17AiGateway(
+        client: _client((_) async {
+          attempt += 1;
+          return switch (attempt) {
+            1 => _json(<String, Object?>{
+              'credentialEncryptionAvailable': false,
+              'availableServerProviders': <Object?>[],
+            }),
+            2 => _json(<String, Object?>{
+              'credentialEncryptionAvailable': true,
+              'availableServerProviders': <Object?>[],
+            }),
+            _ => throw http.ClientException('offline'),
+          };
+        }),
+        mediaReader: _MediaReader(_bytes),
+      );
+
+      expect(
+        (await gateway.readiness(_profile())).state,
+        AiGatewayReadinessState.unavailable,
+      );
+      expect(
+        (await gateway.readiness(_profile())).state,
+        AiGatewayReadinessState.missingCapability,
+      );
+      expect(
+        (await gateway.readiness(_profile())).state,
+        AiGatewayReadinessState.unavailable,
+      );
+    },
+  );
+
+  test(
+    'API 1.7 rejects batches and unprepared media before transmission',
+    () async {
+      final gateway = Api17AiGateway(
+        client: _client((_) async => throw StateError('must not call server')),
+        mediaReader: _MediaReader(_bytes),
+      );
+
+      final batchFailure =
+          await gateway.extractReceipt(
+                _request(
+                  AiExtractionKind.receipt,
+                  media: const <PreparedAiMedia>[],
+                ),
+              )
+              as AiExtractionFailure<ReceiptProposal>;
+      expect(batchFailure.code, 'api17_single_image_only');
+
+      final mediaFailure =
+          await gateway.extractReceipt(
+                _request(
+                  AiExtractionKind.receipt,
+                  media: <PreparedAiMedia>[_media(mimeType: 'application/pdf')],
+                ),
+              )
+              as AiExtractionFailure<ReceiptProposal>;
+      expect(mediaFailure.code, 'unsupported_media_type');
+    },
+  );
+
+  test(
+    'server and malformed extraction responses become safe failures',
+    () async {
+      final serverFailure = Api17AiGateway(
+        client: _client(
+          (_) async =>
+              _json(<String, Object?>{'type': 'rate-limit'}, statusCode: 429),
+        ),
+        mediaReader: _MediaReader(_bytes),
+      );
+      final rejected =
+          await serverFailure.extractReceipt(_request(AiExtractionKind.receipt))
+              as AiExtractionFailure<ReceiptProposal>;
+      expect(rejected.code, 'server_429');
+
+      final malformed = Api17AiGateway(
+        client: _client(
+          (request) async => request.method == 'POST'
+              ? _json(<String, Object?>{'id': 'extraction-1'}, statusCode: 201)
+              : _json(<String, Object?>{
+                  ..._extraction('receipt'),
+                  'candidates': 'not-a-list',
+                }),
+        ),
+        mediaReader: _MediaReader(_bytes),
+      );
+      final invalid =
+          await malformed.extractReceipt(_request(AiExtractionKind.receipt))
+              as AiExtractionFailure<ReceiptProposal>;
+      expect(invalid.code, 'invalid_ai_response');
+    },
+  );
+
+  test('credential provisioning validates and writes secrets only', () async {
+    final requests = <http.Request>[];
+    final provisioning = Api17ServerCredentialProvisioning(
+      _client((request) async {
+        requests.add(request);
+        return http.Response('', 204);
+      }),
+    );
+
+    expect(
+      () => provisioning.replaceCredential(
+        homeId: 'home-1',
+        profileId: 'openai',
+        secret: 'short',
+      ),
+      throwsArgumentError,
+    );
+    expect(
+      () => provisioning.replaceCredential(
+        homeId: 'home-1',
+        profileId: 'openai',
+        secret: List<String>.filled(501, 'x').join(),
+      ),
+      throwsArgumentError,
+    );
+
+    await provisioning.replaceCredential(
+      homeId: 'home-1',
+      profileId: 'openai',
+      secret: 'sk-providentia-secret',
+    );
+    await provisioning.deleteCredential(homeId: 'home-1', profileId: 'openai');
+
+    expect(requests.map((request) => request.method), <String>[
+      'PUT',
+      'DELETE',
+    ]);
+    expect(
+      requests.first.url.path,
+      '/api/v1/homes/home-1/ai/credentials/openai',
+    );
+    expect(requests.first.body, contains('sk-providentia-secret'));
+  });
 }
 
 ProvidentiaApiClient _extractionClient({required String documentType}) {
@@ -191,6 +336,7 @@ AiExtractionRequest _request(
   AiExtractionKind kind, {
   AiProviderProfile? profile,
   AiPrivacyMode privacyMode = AiPrivacyMode.serverProxyCloud,
+  List<PreparedAiMedia>? media,
 }) => AiExtractionRequest(
   runId: 'run-1',
   homeId: 'home-1',
@@ -201,24 +347,23 @@ AiExtractionRequest _request(
     id: 'batch-1',
     homeId: 'home-1',
     purpose: kind,
-    media: const <PreparedAiMedia>[
-      PreparedAiMedia(
-        sourceMediaId: 'source-1',
-        ephemeralReference: 'memory://prepared-1',
-        previewReference: 'memory://preview-1',
-        sha256:
-            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-        mimeType: 'image/jpeg',
-        byteLength: 16,
-        width: 1200,
-        height: 1600,
-        pageIndex: 0,
-      ),
-    ],
+    media: media ?? <PreparedAiMedia>[_media()],
   ),
   schemaVersion: kind == AiExtractionKind.receipt ? 'receipt-v1' : 'stock-v1',
   promptVersion: 'prompt-v1',
   timeout: const Duration(seconds: 30),
+);
+
+PreparedAiMedia _media({String mimeType = 'image/jpeg'}) => PreparedAiMedia(
+  sourceMediaId: 'source-1',
+  ephemeralReference: 'memory://prepared-1',
+  previewReference: 'memory://preview-1',
+  sha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  mimeType: mimeType,
+  byteLength: 16,
+  width: 1200,
+  height: 1600,
+  pageIndex: 0,
 );
 
 AiProviderProfile _profile({AiTransport transport = AiTransport.serverProxy}) =>
