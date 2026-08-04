@@ -379,7 +379,8 @@ final class ExtractAndValidateAiProposal<T> {
     if (primaryBindings.length != 1 ||
         !validatorMatches ||
         primaryProvider.homeId != manifest.batch.homeId ||
-        validatorProvider?.homeId != manifest.batch.homeId) {
+        (validatorProvider != null &&
+            validatorProvider.homeId != manifest.batch.homeId)) {
       throw const AiOrchestrationViolation(
         code: 'provider_manifest_mismatch',
         safeMessage:
