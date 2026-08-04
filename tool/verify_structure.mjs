@@ -129,12 +129,21 @@ const dartFiles = (await walk(path.join(root, 'lib'))).filter((file) =>
   file.endsWith('.dart'),
 );
 const violations = [];
+const compositionRoots = new Set([
+  'lib/main.dart',
+  'lib/app/production_bootstrap_app.dart',
+]);
 for (const file of dartFiles) {
   const source = await readFile(file, 'utf8');
-  const relativePath = path.relative(root, file);
-  const isFeature = relativePath.startsWith(`lib${path.sep}features${path.sep}`);
+  const relativePath = path.relative(root, file).split(path.sep).join('/');
+  const isFeature = relativePath.startsWith('lib/features/');
+  const isInfrastructure = relativePath.includes('/infrastructure/');
   const isWidget = source.includes('package:flutter/');
-  if (!isFeature && !isWidget) {
+  const isCompositionRoot = compositionRoots.has(relativePath);
+  if (
+    (!isFeature || isInfrastructure) &&
+    (!isWidget || isCompositionRoot)
+  ) {
     continue;
   }
   for (const forbidden of [
@@ -158,9 +167,14 @@ assert(
 
 const dependencyViolations = [];
 const generatedClientAdapters = new Set([
+  'lib/app/production_bootstrap_app.dart',
   'lib/core/networking/api_client_factory.dart',
   'lib/core/networking/generated_api_connectivity_probe.dart',
   'lib/core/synchronization/generated_sync_gateway.dart',
+  'lib/features/ai_integration/infrastructure/api17_ai_gateway.dart',
+  'lib/features/ai_integration/infrastructure/api17_server_credential_provisioning.dart',
+  'lib/features/homes/infrastructure/api17_home_transport.dart',
+  'lib/features/identity/infrastructure/api17_identity_transport.dart',
 ]);
 const synchronizationPolicyFiles = new Set([
   'lib/core/synchronization/sync_models.dart',
@@ -170,7 +184,10 @@ const synchronizationPolicyFiles = new Set([
 for (const file of dartFiles) {
   const source = await readFile(file, 'utf8');
   const relativePath = path.relative(root, file).split(path.sep).join('/');
-  if (relativePath.startsWith('lib/app/')) {
+  if (
+    relativePath.startsWith('lib/app/') &&
+    !compositionRoots.has(relativePath)
+  ) {
     for (const forbidden of [
       '/sync_coordinator.dart',
       '/database/',

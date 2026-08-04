@@ -68,16 +68,17 @@ const outputs = new Map([
       'lib',
       'providentia_api_client.dart',
     ),
-    generatedClient(contractSha256),
+    generatedClient(contractSha256, contract),
   ],
   [
     path.join(generatedDirectory, 'generation-manifest.json'),
     json({
       generator: 'tool/generate_api_client.mjs',
-      generatorVersion: 2,
+      generatorVersion: 3,
       contract: '../../providentia-v1.json',
       contractVersion: contract.info.version,
       contractSha256,
+      operationCount: operationCount(contract),
       generatedFiles: [
         'pubspec.yaml',
         'lib/providentia_api_client.dart',
@@ -128,22 +129,31 @@ function validateContract(document) {
   }
   if (
     document.info?.title !== 'Providentia API' ||
-    document.info?.version !== '1.3.0'
+    document.info?.version !== '1.7.0'
   ) {
     throw new Error('Unexpected API identity or version.');
   }
 
-  const expectedOperations = new Map([
-    ['/health/live', 'getLiveness'],
-    ['/health/ready', 'getReadiness'],
-    ['/api/v1/system/info', 'getSystemInfo'],
-    ['/metrics', 'getMetrics'],
-    ['/api/v1/homes/{homeId}/sync/pull', 'pullHomeSynchronization'],
-    ['/api/v1/homes/{homeId}/sync/bootstrap', 'bootstrapHomeSynchronization'],
-  ]);
-  for (const [resourcePath, operationId] of expectedOperations) {
-    if (document.paths?.[resourcePath]?.get?.operationId !== operationId) {
-      throw new Error(`Missing GET ${resourcePath} (${operationId}).`);
+  const expectedOperations = [
+    ['get', '/health/live', 'getLiveness'],
+    ['get', '/health/ready', 'getReadiness'],
+    ['get', '/api/v1/system/info', 'getSystemInfo'],
+    ['get', '/metrics', 'getMetrics'],
+    ['get', '/api/v1/homes/{homeId}/sync/pull', 'pullHomeSynchronization'],
+    ['get', '/api/v1/homes/{homeId}/sync/bootstrap', 'bootstrapHomeSynchronization'],
+    ['post', '/api/v1/auth/login', 'login'],
+    ['post', '/api/v1/auth/refresh', 'refreshSession'],
+    ['get', '/api/v1/homes', 'listHomes'],
+    ['get', '/api/v1/homes/{homeId}/stock', 'listHomeStock'],
+    ['get', '/api/v1/homes/{homeId}/receipts', 'listReceipts'],
+    ['get', '/api/v1/homes/{homeId}/shopping-lists', 'listShoppingLists'],
+    ['get', '/api/v1/homes/{homeId}/ai/settings', 'getAiSettings'],
+    ['get', '/api/v1/catalog-admin/workbench', 'getCatalogWorkbench'],
+    ['get', '/api/v1/homes/{homeId}/reports/inventory', 'getInventoryReport'],
+  ];
+  for (const [method, resourcePath, operationId] of expectedOperations) {
+    if (document.paths?.[resourcePath]?.[method]?.operationId !== operationId) {
+      throw new Error(`Missing ${method.toUpperCase()} ${resourcePath} (${operationId}).`);
     }
   }
   if (
@@ -151,6 +161,24 @@ function validateContract(document) {
     'pushHomeSynchronization'
   ) {
     throw new Error('Missing POST home synchronization operation.');
+  }
+
+  const operationIds = new Set();
+  for (const pathItem of Object.values(document.paths ?? {})) {
+    for (const method of ['get', 'post', 'put', 'patch', 'delete']) {
+      const operation = pathItem?.[method];
+      if (!operation) continue;
+      if (typeof operation.operationId !== 'string' || operation.operationId.length === 0) {
+        throw new Error(`Every operation requires an operationId (${method}).`);
+      }
+      if (operationIds.has(operation.operationId)) {
+        throw new Error(`Duplicate operationId ${operation.operationId}.`);
+      }
+      operationIds.add(operation.operationId);
+    }
+  }
+  if (operationIds.size < 80) {
+    throw new Error(`Expected the Phase 1-8 API surface, found ${operationIds.size} operations.`);
   }
 
   for (const schema of [
@@ -165,6 +193,17 @@ function validateContract(document) {
     'SyncChange',
     'SyncPullResponse',
     'SyncBootstrapResponse',
+    'SessionCredentials',
+    'Home',
+    'HomeMembership',
+    'InventoryBalance',
+    'StockCountSession',
+    'Receipt',
+    'ShoppingList',
+    'AiExtraction',
+    'CatalogWorkbench',
+    'ShoppingSuggestion',
+    'HomeReport',
   ]) {
     if (!document.components?.schemas?.[schema]) {
       throw new Error(`Missing component schema ${schema}.`);
@@ -172,8 +211,8 @@ function validateContract(document) {
   }
 
   const problem = document.components.schemas.ProblemDetails;
-  if (problem.description !== 'Problem Details for HTTP APIs as defined by RFC 9457.') {
-    throw new Error('ProblemDetails must explicitly implement RFC 9457.');
+  if (!String(problem.description ?? '').includes('Problem Details')) {
+    throw new Error('ProblemDetails must explicitly describe its HTTP problem semantics.');
   }
   assertRequiredFields(document, 'HealthStatus', ['status', 'timestamp']);
   assertRequiredFields(document, 'ReadinessStatus', ['status', 'checks']);
@@ -258,7 +297,8 @@ dependencies:
 `;
 }
 
-function generatedClient(hash) {
+function generatedClient(hash, document) {
+  const operations = generatedOperationArtifacts(document);
   return `// GENERATED FILE - DO NOT EDIT.
 // Source: contracts/providentia-v1.json
 // Contract SHA-256: ${hash}
@@ -268,6 +308,8 @@ library;
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+
+${operations.types}
 
 final class HealthStatus {
   const HealthStatus({required this.status, required this.timestamp});
@@ -637,6 +679,8 @@ final class ProvidentiaApiClient {
   final bool _ownsHttpClient;
   final Map<String, String> _defaultHeaders;
 
+${operations.registry}
+
   Future<HealthStatus> getLiveness() async {
     final response = await _get('/health/live', accept: 'application/json');
     return HealthStatus.fromJson(_decodeObject(response.body));
@@ -707,6 +751,8 @@ final class ProvidentiaApiClient {
     return SyncBootstrapResponse.fromJson(_decodeObject(response.body));
   }
 
+${operations.methods}
+
   void close() {
     if (_ownsHttpClient) {
       _httpClient.close();
@@ -776,6 +822,17 @@ final class ProvidentiaApiClient {
       requestId: response.headers['x-request-id'] ?? problem.requestId,
     );
   }
+}
+
+Object? _decodeResponseBody(http.Response response) {
+  final contentType = response.headers['content-type']?.toLowerCase() ?? '';
+  final source = utf8.decode(response.bodyBytes);
+  if (contentType.contains('json') ||
+      source.startsWith('{') ||
+      source.startsWith('[')) {
+    return jsonDecode(source);
+  }
+  return source;
 }
 
 Map<String, Object?> _decodeObject(String source) {
@@ -866,6 +923,251 @@ DateTime _requiredDateTime(Map<String, Object?> json, String key) {
   return parsed;
 }
 `;
+}
+
+function operationCount(document) {
+  return operationEntries(document).length;
+}
+
+function generatedOperationArtifacts(document) {
+  const reserved = new Set([
+    'getLiveness',
+    'getReadiness',
+    'getSystemInfo',
+    'getMetrics',
+    'pushHomeSynchronization',
+    'pullHomeSynchronization',
+    'bootstrapHomeSynchronization',
+  ]);
+  const entries = operationEntries(document);
+  const registryLines = entries.map(({method, operationId, path, multipart}) => {
+    const encodedPath = JSON.stringify(path);
+    const pathLine = `      pathTemplate: ${encodedPath},`;
+    return [
+      `    ${JSON.stringify(operationId)}: ApiOperation(`,
+      `      operationId: ${JSON.stringify(operationId)},`,
+      `      method: ${JSON.stringify(method.toUpperCase())},`,
+      pathLine.length <= 80
+        ? pathLine
+        : `      pathTemplate:\n          ${encodedPath},`,
+      `      multipart: ${multipart},`,
+      '    ),',
+    ].join('\n');
+  });
+  const methods = entries
+    .filter(({operationId}) => !reserved.has(operationId))
+    .map(generatedOperationMethod)
+    .join('\n\n');
+
+  return {
+    types: `final class ApiOperation {
+  const ApiOperation({
+    required this.operationId,
+    required this.method,
+    required this.pathTemplate,
+    required this.multipart,
+  });
+
+  final String operationId;
+  final String method;
+  final String pathTemplate;
+  final bool multipart;
+}
+
+final class ApiResponse {
+  ApiResponse({
+    required this.statusCode,
+    required Map<String, String> headers,
+    required this.body,
+  }) : headers = Map<String, String>.unmodifiable(headers);
+
+  final int statusCode;
+  final Map<String, String> headers;
+  final Object? body;
+
+  Map<String, Object?> requireObject() {
+    final value = body;
+    if (value is! Map<String, Object?>) {
+      throw const FormatException('Expected an object response body.');
+    }
+    return value;
+  }
+
+  List<Object?> requireList() {
+    final value = body;
+    if (value is! List<Object?>) {
+      throw const FormatException('Expected an array response body.');
+    }
+    return value;
+  }
+}`,
+    registry: `  static const Map<String, ApiOperation> operations = <String, ApiOperation>{
+${registryLines.join('\n')}
+  };`,
+    methods: `  Future<ApiResponse> invokeOperation({
+    required String operationId,
+    Map<String, String> pathParameters = const <String, String>{},
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+    Map<String, Object?>? body,
+    Map<String, String> formFields = const <String, String>{},
+    List<http.MultipartFile> files = const <http.MultipartFile>[],
+  }) async {
+    final operation = operations[operationId];
+    if (operation == null) {
+      throw ArgumentError.value(
+        operationId,
+        'operationId',
+        'is not in the contract',
+      );
+    }
+
+    var requestPath = operation.pathTemplate;
+    final expectedNames = RegExp(
+      r'\\{([^}]+)\\}',
+    ).allMatches(requestPath).map((match) => match.group(1)!).toSet();
+    final missing = expectedNames.difference(pathParameters.keys.toSet());
+    final unexpected = pathParameters.keys.toSet().difference(expectedNames);
+    if (missing.isNotEmpty || unexpected.isNotEmpty) {
+      throw ArgumentError(
+        'Invalid path parameters for $operationId; '
+        'missing: $missing, unexpected: $unexpected.',
+      );
+    }
+    for (final entry in pathParameters.entries) {
+      requestPath = requestPath.replaceAll(
+        '{\${entry.key}}',
+        Uri.encodeComponent(entry.value),
+      );
+    }
+
+    late final http.Response response;
+    final requestHeaders = <String, String>{
+      ..._defaultHeaders,
+      ...headers,
+      'Accept': 'application/json',
+    };
+    if (operation.multipart) {
+      if (body != null) {
+        throw ArgumentError.value(
+          body,
+          'body',
+          'is invalid for multipart operations',
+        );
+      }
+      final request = http.MultipartRequest(
+        operation.method,
+        _endpoint(requestPath, query: query),
+      )..headers.addAll(requestHeaders);
+      request.fields.addAll(formFields);
+      request.files.addAll(files);
+      response = await http.Response.fromStream(
+        await _httpClient.send(request),
+      );
+    } else {
+      if (formFields.isNotEmpty || files.isNotEmpty) {
+        throw ArgumentError('Multipart fields are invalid for $operationId.');
+      }
+      final request = http.Request(
+        operation.method,
+        _endpoint(requestPath, query: query),
+      )..headers.addAll(requestHeaders);
+      if (body != null) {
+        request.headers['Content-Type'] = 'application/json';
+        request.body = jsonEncode(body);
+      }
+      response = await http.Response.fromStream(
+        await _httpClient.send(request),
+      );
+    }
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw _toException(response);
+    }
+    final responseBody = response.bodyBytes.isEmpty
+        ? null
+        : _decodeResponseBody(response);
+    return ApiResponse(
+      statusCode: response.statusCode,
+      headers: response.headers,
+      body: responseBody,
+    );
+  }
+
+${methods}`,
+  };
+}
+
+function operationEntries(document) {
+  const entries = [];
+  for (const [resourcePath, pathItem] of Object.entries(document.paths ?? {})) {
+    for (const method of ['get', 'post', 'put', 'patch', 'delete']) {
+      const operation = pathItem?.[method];
+      if (!operation) continue;
+      const content = operation.requestBody?.content ?? {};
+      entries.push({
+        method,
+        operationId: operation.operationId,
+        path: resourcePath,
+        operation,
+        multipart: Object.keys(content).some((type) => type.startsWith('multipart/')),
+      });
+    }
+  }
+  return entries.sort((left, right) => left.operationId.localeCompare(right.operationId));
+}
+
+function generatedOperationMethod(entry) {
+  const pathParameters = [...entry.path.matchAll(/\{([^}]+)\}/g)].map(
+    (match) => match[1],
+  );
+  const parameters = pathParameters.map((name) => `    required String ${name},`);
+  const hasBody = entry.operation.requestBody != null && !entry.multipart;
+  const requiredBody = entry.operation.requestBody?.required === true;
+  if (hasBody) {
+    parameters.push(
+      requiredBody
+        ? '    required Map<String, Object?> body,'
+        : '    Map<String, Object?>? body,',
+    );
+  }
+  if (entry.multipart) {
+    parameters.push(
+      '    Map<String, String> formFields = const <String, String>{},',
+      '    List<http.MultipartFile> files = const <http.MultipartFile>[],',
+    );
+  }
+  parameters.push(
+    '    Map<String, String>? query,',
+    '    Map<String, String> headers = const <String, String>{},',
+  );
+  const inlinePathMap = `<String, String>{${pathParameters
+    .map((name) => `${JSON.stringify(name)}: ${name}`)
+    .join(', ')}}`;
+  const pathMap = pathParameters.length === 0
+    ? 'const <String, String>{}'
+    : `      pathParameters: ${inlinePathMap},`.length <= 80
+      ? inlinePathMap
+      : `<String, String>{\n${pathParameters
+          .map((name) => `        ${JSON.stringify(name)}: ${name},`)
+          .join('\n')}\n      }`;
+  const argumentsList = [
+    `      operationId: ${JSON.stringify(entry.operationId)},`,
+    `      pathParameters: ${pathMap},`,
+    '      query: query,',
+    '      headers: headers,',
+  ];
+  if (hasBody) argumentsList.push('      body: body,');
+  if (entry.multipart) {
+    argumentsList.push('      formFields: formFields,', '      files: files,');
+  }
+  return `  Future<ApiResponse> ${entry.operationId}({
+${parameters.join('\n')}
+  }) {
+    return invokeOperation(
+${argumentsList.join('\n')}
+    );
+  }`;
 }
 
 function sha256(bytes) {

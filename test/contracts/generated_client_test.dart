@@ -150,5 +150,98 @@ void main() {
 
       expect(await client.getMetrics(), 'providentia_up 1\n');
     });
+
+    test('publishes the complete API 1.7 operation registry', () {
+      expect(ProvidentiaApiClient.operations, hasLength(86));
+      expect(
+        ProvidentiaApiClient.operations['createAiExtraction'],
+        isA<ApiOperation>()
+            .having((operation) => operation.method, 'method', 'POST')
+            .having(
+              (operation) => operation.pathTemplate,
+              'path',
+              '/api/v1/homes/{homeId}/ai/extractions',
+            )
+            .having((operation) => operation.multipart, 'multipart', true),
+      );
+      expect(
+        ProvidentiaApiClient.operations.keys,
+        containsAll(<String>[
+          'login',
+          'refreshSession',
+          'createHome',
+          'listHomeStock',
+          'commitReceipt',
+          'createShoppingSuggestionRun',
+          'getInventoryReport',
+        ]),
+      );
+    });
+
+    test('sends JSON bodies through generated operation methods', () async {
+      final client = ProvidentiaApiClient(
+        baseUri: Uri.parse('https://api.example.test'),
+        httpClient: MockClient((request) async {
+          expect(request.method, 'POST');
+          expect(request.url.path, '/api/v1/auth/login');
+          expect(
+            request.headers['Content-Type'],
+            startsWith('application/json'),
+          );
+          expect(jsonDecode(request.body), <String, Object?>{
+            'email': 'owner@example.test',
+            'password': 'correct horse battery staple',
+          });
+          return http.Response(
+            jsonEncode(<String, Object?>{'accessToken': 'redacted'}),
+            200,
+            headers: <String, String>{'content-type': 'application/json'},
+          );
+        }),
+      );
+
+      final response = await client.login(
+        body: <String, Object?>{
+          'email': 'owner@example.test',
+          'password': 'correct horse battery staple',
+        },
+      );
+
+      expect(response.requireObject()['accessToken'], 'redacted');
+    });
+
+    test('encodes path parameters and forwards query values', () async {
+      final client = ProvidentiaApiClient(
+        baseUri: Uri.parse('https://api.example.test/base'),
+        httpClient: MockClient((request) async {
+          expect(request.method, 'GET');
+          expect(
+            request.url.toString(),
+            'https://api.example.test/api/v1/homes/home%20one/stock?limit=50',
+          );
+          expect(request.url.queryParameters['limit'], '50');
+          return http.Response('[]', 200);
+        }),
+      );
+
+      final response = await client.listHomeStock(
+        homeId: 'home one',
+        query: <String, String>{'limit': '50'},
+      );
+
+      expect(response.requireList(), isEmpty);
+    });
+
+    test('rejects incomplete generated path parameters before transport', () {
+      final client = ProvidentiaApiClient(
+        baseUri: Uri.parse('https://api.example.test'),
+        httpClient: MockClient((_) async => http.Response('{}', 200)),
+      );
+
+      expect(
+        () => client.invokeOperation(operationId: 'getReceipt'),
+        throwsArgumentError,
+      );
+    });
   });
 }

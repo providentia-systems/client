@@ -26,7 +26,7 @@ archive_path="$download_directory/$ARCHIVE"
 curl --fail --location --retry 3 --output "$archive_path" \
   "$BASE_URL/stable/linux/$ARCHIVE"
 printf '%s  %s\n' "$SHA256" "$archive_path" | sha256sum --check --status
-tar --extract --xz --file "$archive_path" --directory "$install_parent"
+tar --no-same-owner --extract --xz --file "$archive_path" --directory "$install_parent"
 
 version_json=$(
   PUB_CACHE="$download_directory/pub-cache" \
