@@ -6,6 +6,9 @@ on:
       - agent/production-readiness-phases-9-10
     paths:
       - .github/workflows/source-workspace-bootstrap.yml
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
