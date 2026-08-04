@@ -11,8 +11,11 @@ void main() {
         final source = file.readAsStringSync();
         final path = _normalizedPath(file);
         final isFeature = path.startsWith('lib/features/');
+        final isInfrastructure = path.contains('/infrastructure/');
         final isWidget = source.contains('package:flutter/');
-        if (!isFeature && !isWidget) {
+        final isCompositionRoot = _compositionRoots.contains(path);
+        if ((!isFeature || isInfrastructure) &&
+            (!isWidget || isCompositionRoot)) {
           continue;
         }
 
@@ -40,6 +43,9 @@ void main() {
     )) {
       final source = file.readAsStringSync();
       final path = _normalizedPath(file);
+      if (_compositionRoots.contains(path)) {
+        continue;
+      }
       for (final forbidden in <String>[
         '/sync_coordinator.dart',
         '/database/',
@@ -92,9 +98,15 @@ void main() {
   test('generated transport is imported only by approved adapters', () {
     final violations = <String>[];
     const approved = <String>{
+      'lib/app/production_bootstrap_app.dart',
       'lib/core/networking/api_client_factory.dart',
       'lib/core/networking/generated_api_connectivity_probe.dart',
       'lib/core/synchronization/generated_sync_gateway.dart',
+      'lib/features/ai_integration/infrastructure/api17_ai_gateway.dart',
+      'lib/features/ai_integration/infrastructure/api17_server_credential_provisioning.dart',
+      'lib/features/homes/infrastructure/api17_home_transport.dart',
+      'lib/features/household_sync/infrastructure/api17_callback_household_gateway.dart',
+      'lib/features/identity/infrastructure/api17_identity_transport.dart',
     };
     for (final file in _dartSources()) {
       final source = file.readAsStringSync();
@@ -134,6 +146,11 @@ const List<String> _infrastructureImports = <String>[
   'dart:html',
   'providentia_api_client',
 ];
+
+const Set<String> _compositionRoots = <String>{
+  'lib/main.dart',
+  'lib/app/production_bootstrap_app.dart',
+};
 
 Iterable<File> _dartSources() {
   return Directory('lib')

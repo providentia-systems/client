@@ -78,7 +78,8 @@ final class AiTransmissionManifest {
       );
     }
     if (primaryProvider.homeId != batch.homeId ||
-        validatorProvider?.homeId != batch.homeId) {
+        (validatorProvider != null &&
+            validatorProvider.homeId != batch.homeId)) {
       throw const MediaPolicyViolation(
         code: 'provider_home_mismatch',
         safeMessage: 'The selected providers do not belong to this home.',
