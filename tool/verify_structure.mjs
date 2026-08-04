@@ -174,6 +174,7 @@ const generatedClientAdapters = new Set([
   'lib/features/ai_integration/infrastructure/api17_ai_gateway.dart',
   'lib/features/ai_integration/infrastructure/api17_server_credential_provisioning.dart',
   'lib/features/homes/infrastructure/api17_home_transport.dart',
+  'lib/features/household_sync/infrastructure/api17_callback_household_gateway.dart',
   'lib/features/identity/infrastructure/api17_identity_transport.dart',
 ]);
 const synchronizationPolicyFiles = new Set([
