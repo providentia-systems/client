@@ -290,7 +290,11 @@ final class HomeSessionManager {
     final remaining = _snapshot.homes
         .where((home) => home.id != homeId)
         .toList(growable: false);
-    if (_snapshot.activeHome?.id != homeId) {
+    final closesCurrentWorkspace =
+        _snapshot.activeHome?.id == homeId ||
+        (_snapshot.status == HomeSessionStatus.loading &&
+            _snapshot.homes.any((home) => home.id == homeId));
+    if (!closesCurrentWorkspace) {
       _emit(_snapshot.copyWith(homes: remaining));
       return;
     }
