@@ -252,6 +252,111 @@ void main() {
     );
     expect(requests.first.body, contains('sk-providentia-secret'));
   });
+
+  test('pending and stock-photo error responses fail closed', () async {
+    ProvidentiaApiClient extractionClient(Object response) => _client(
+      (request) async => request.method == 'POST'
+          ? _json(<String, Object?>{'id': 'extraction-1'}, statusCode: 201)
+          : _json(response),
+    );
+
+    final pending = Api17AiGateway(
+      client: extractionClient(<String, Object?>{
+        ..._extraction('receipt'),
+        'status': 'processing',
+      }),
+      mediaReader: _MediaReader(_bytes),
+    );
+    final pendingFailure =
+        await pending.extractReceipt(_request(AiExtractionKind.receipt))
+            as AiExtractionFailure<ReceiptProposal>;
+    expect(pendingFailure.code, 'extraction_processing');
+
+    final routeFailure = Api17AiGateway(
+      client: _client((_) async => throw StateError('must not call server')),
+      mediaReader: _MediaReader(_bytes),
+    );
+    final wrongRoute =
+        await routeFailure.extractStockPhoto(
+              _request(
+                AiExtractionKind.stockPhoto,
+                profile: _profile(transport: AiTransport.directNative),
+                privacyMode: AiPrivacyMode.strictLocal,
+              ),
+            )
+            as AiExtractionFailure<StockPhotoProposal>;
+    expect(wrongRoute.code, 'invalid_ai_route');
+
+    final rejected = Api17AiGateway(
+      client: _client(
+        (_) async =>
+            _json(<String, Object?>{'type': 'rate-limit'}, statusCode: 429),
+      ),
+      mediaReader: _MediaReader(_bytes),
+    );
+    final serverFailure =
+        await rejected.extractStockPhoto(_request(AiExtractionKind.stockPhoto))
+            as AiExtractionFailure<StockPhotoProposal>;
+    expect(serverFailure.code, 'server_429');
+
+    final malformed = Api17AiGateway(
+      client: extractionClient(<String, Object?>{
+        ..._extraction('stock'),
+        'result': 'invalid',
+      }),
+      mediaReader: _MediaReader(_bytes),
+    );
+    final invalid =
+        await malformed.extractStockPhoto(_request(AiExtractionKind.stockPhoto))
+            as AiExtractionFailure<StockPhotoProposal>;
+    expect(invalid.code, 'invalid_ai_response');
+  });
+
+  test('minimal optional receipt fields use deterministic fallbacks', () async {
+    final minimal = <String, Object?>{
+      'id': 'extraction-1',
+      'status': 'review_required',
+      'result': <String, Object?>{'documentType': 'invoice'},
+      'candidates': <Object?>[
+        <String, Object?>{
+          'position': 0,
+          'payload': <String, Object?>{
+            'description': 'Rice',
+            'quantity': '1',
+            'confidence': 0.5,
+            'fieldConfidence': <String, Object?>{},
+          },
+        },
+      ],
+    };
+    final gateway = Api17AiGateway(
+      client: _client(
+        (request) async => request.method == 'POST'
+            ? _json(<String, Object?>{'id': 'extraction-1'}, statusCode: 201)
+            : _json(minimal),
+      ),
+      mediaReader: _MediaReader(_bytes),
+    );
+
+    final result =
+        await gateway.extractReceipt(
+              _request(
+                AiExtractionKind.receipt,
+                media: <PreparedAiMedia>[_media(mimeType: 'image/png')],
+              ),
+            )
+            as AiExtractionSuccess<ReceiptProposal>;
+
+    expect(
+      result.proposal.classification,
+      ReceiptDocumentClassification.unknown,
+    );
+    expect(result.proposal.lines.single.rawText, 'Rice');
+    expect(result.proposal.lines.single.brand.value, isNull);
+    expect(result.proposal.lines.single.region, isNull);
+    expect(result.metadata.model, 'vision-production');
+    expect(result.metadata.inputTokens, isNull);
+  });
 }
 
 ProvidentiaApiClient _extractionClient({required String documentType}) {
