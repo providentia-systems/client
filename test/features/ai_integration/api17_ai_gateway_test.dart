@@ -357,6 +357,51 @@ void main() {
     expect(result.metadata.model, 'vision-production');
     expect(result.metadata.inputTokens, isNull);
   });
+
+  test(
+    'minimal stock fields and WebP media use deterministic fallbacks',
+    () async {
+      final minimal = <String, Object?>{
+        'id': 'extraction-1',
+        'status': 'review_required',
+        'result': <String, Object?>{'documentType': 'unknown'},
+        'candidates': <Object?>[
+          <String, Object?>{
+            'position': 0,
+            'payload': <String, Object?>{
+              'description': 'Rice',
+              'quantity': 'not-a-number',
+              'confidence': 0.5,
+            },
+          },
+        ],
+      };
+      final gateway = Api17AiGateway(
+        client: _client(
+          (request) async => request.method == 'POST'
+              ? _json(<String, Object?>{'id': 'extraction-1'}, statusCode: 201)
+              : _json(minimal),
+        ),
+        mediaReader: _MediaReader(_bytes),
+      );
+
+      final result =
+          await gateway.extractStockPhoto(
+                _request(
+                  AiExtractionKind.stockPhoto,
+                  media: <PreparedAiMedia>[_media(mimeType: 'image/webp')],
+                ),
+              )
+              as AiExtractionSuccess<StockPhotoProposal>;
+
+      expect(result.proposal.classification, StockImageClassification.unknown);
+      expect(result.proposal.candidates.single.productName.value, 'Rice');
+      expect(result.proposal.candidates.single.brand.value, isNull);
+      expect(result.proposal.candidates.single.quantityMinimum, 0);
+      expect(result.proposal.candidates.single.region, isNull);
+      expect(result.proposal.warnings, isEmpty);
+    },
+  );
 }
 
 ProvidentiaApiClient _extractionClient({required String documentType}) {
