@@ -15,13 +15,19 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0</string>
+	<string>$(FLUTTER_BUILD_NAME)</string>
 	<key>CFBundleSignature</key>
 	<string>????</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Providentia uses the camera to scan receipts and count pantry stock after you choose a capture workflow.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Providentia lets you select receipt and pantry images for private, reviewable extraction.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Providentia can save a captured image only when you explicitly choose to keep it.</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
