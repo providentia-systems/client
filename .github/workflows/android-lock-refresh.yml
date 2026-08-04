@@ -1,9 +1,7 @@
 name: Temporary Android dependency lock refresh
 
 on:
-  push:
-    branches:
-      - agent/production-readiness-phases-9-10
+  pull_request:
 
 permissions:
   contents: read
