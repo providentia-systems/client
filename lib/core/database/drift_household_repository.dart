@@ -35,13 +35,13 @@ final class BaselineImportReport {
   final int unresolvedRecentPurchaseRows;
 }
 
-/// Local Phase 5–8 projection adapter.
+/// Local fallback for Phase 5–8 controller projections.
 ///
-/// The pinned backend contract does not yet define inventory, purchase,
-/// shopping, or intelligence resources. This adapter therefore persists
-/// feature records locally without adding unsupported operations to the
-/// synchronization outbox. A future generated-contract adapter can implement
-/// the same feature ports after the backend publishes typed resources.
+/// API 1.7 publishes online household resources, but its generic synchronization
+/// contract still permits only home preferences and private notes. This adapter
+/// therefore preserves the richer controller aggregates locally without adding
+/// unsupported entity types to the synchronization outbox. Production-backed
+/// online reads and compatible commands live behind the household_sync ports.
 final class DriftHouseholdRepository
     implements InventoryRepository, PurchaseRepository, ShoppingRepository {
   DriftHouseholdRepository(this._database, {DateTime Function()? clock})
