@@ -186,3 +186,18 @@ jobs:
           path: ${{ matrix.artifact }}
           if-no-files-found: error
           retention-days: 7
+
+  source-workspace:
+    name: Package source workspace
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Upload source workspace
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: providentia-flutter-source
+          path: .
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
