@@ -6,18 +6,26 @@ import 'package:providentia/features/homes/domain/home_models.dart';
 /// Coordinates server-authorized homes with a non-authoritative local active
 /// home preference. Every selected home is revalidated against [HomeTransportPort].
 final class HomeSessionManager {
-  HomeSessionManager({
+  factory HomeSessionManager({
     required HomeTransportPort transport,
     required ActiveHomeStore activeHomeStore,
     void Function(String? homeId)? onActiveHomeChanged,
     void Function(String homeId)? onHomeAccessRevoked,
-  }) : _transport = transport,
-       _activeHomeStore = activeHomeStore,
-       _onActiveHomeChanged = onActiveHomeChanged,
-       _onHomeAccessRevoked = onHomeAccessRevoked,
-       _snapshot = HomeSessionSnapshot(
-         status: HomeSessionStatus.selectionRequired,
-       );
+  }) => HomeSessionManager._(
+    transport,
+    activeHomeStore,
+    onActiveHomeChanged,
+    onHomeAccessRevoked,
+  );
+
+  HomeSessionManager._(
+    this._transport,
+    this._activeHomeStore,
+    this._onActiveHomeChanged,
+    this._onHomeAccessRevoked,
+  ) : _snapshot = HomeSessionSnapshot(
+        status: HomeSessionStatus.selectionRequired,
+      );
 
   final HomeTransportPort _transport;
   final ActiveHomeStore _activeHomeStore;

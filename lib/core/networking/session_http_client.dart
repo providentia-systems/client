@@ -11,12 +11,13 @@ import 'package:providentia/features/identity/domain/identity_models.dart';
 /// state-changing requests. A 401 performs one single-flight rotation and one
 /// replay; request bodies are finalized once and copied as bytes for safety.
 final class SessionHttpClient extends http.BaseClient {
-  SessionHttpClient({
+  factory SessionHttpClient({
     required http.Client inner,
     required IdentitySessionManager sessions,
-    this.closeInner = true,
-  }) : _inner = inner,
-       _sessions = sessions;
+    bool closeInner = true,
+  }) => SessionHttpClient._(inner, sessions, closeInner);
+
+  SessionHttpClient._(this._inner, this._sessions, this.closeInner);
 
   final http.Client _inner;
   final IdentitySessionManager _sessions;
@@ -29,7 +30,7 @@ final class SessionHttpClient extends http.BaseClient {
       return _authenticationRequired(request, body);
     }
 
-    var response = await _inner.send(_copyRequest(request, body));
+    final response = await _inner.send(_copyRequest(request, body));
     if (response.statusCode != 401) {
       return response;
     }

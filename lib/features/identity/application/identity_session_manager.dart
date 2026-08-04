@@ -6,17 +6,27 @@ import 'package:providentia/features/identity/domain/identity_models.dart';
 /// Owns the authenticated session lifecycle without depending on Flutter,
 /// HTTP, secure-storage plugins, or the generated API client.
 final class IdentitySessionManager implements SessionAuthorizer {
-  IdentitySessionManager({
+  factory IdentitySessionManager({
     required IdentityTransportPort transport,
     required SessionCredentialStore credentialStore,
     required DeviceDescriptor device,
     DateTime Function()? clock,
-    this.refreshLeeway = const Duration(minutes: 2),
-  }) : _transport = transport,
-       _credentialStore = credentialStore,
-       _device = device,
-       _clock = clock ?? DateTime.now,
-       _snapshot = const IdentitySessionSnapshot.signedOut() {
+    Duration refreshLeeway = const Duration(minutes: 2),
+  }) => IdentitySessionManager._(
+    transport,
+    credentialStore,
+    device,
+    clock ?? DateTime.now,
+    refreshLeeway,
+  );
+
+  IdentitySessionManager._(
+    this._transport,
+    this._credentialStore,
+    this._device,
+    this._clock,
+    this.refreshLeeway,
+  ) : _snapshot = const IdentitySessionSnapshot.signedOut() {
     if (refreshLeeway.isNegative) {
       throw ArgumentError.value(
         refreshLeeway,

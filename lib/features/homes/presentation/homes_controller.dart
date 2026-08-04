@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import 'package:providentia/features/homes/application/home_ports.dart';
 import 'package:providentia/features/homes/application/home_session_manager.dart';
 import 'package:providentia/features/homes/domain/home_models.dart';
 
@@ -86,7 +85,7 @@ final class HomesController extends ChangeNotifier {
     try {
       await _manager.revokeInvitation(invitation);
     } on StateError catch (error) {
-      _localFailure(error.message?.toString() ?? 'The invitation changed.');
+      _localFailure(error.message.toString());
     } on UnsupportedError {
       _localFailure(
         'Invitation revocation is not available on this server version.',

@@ -29,13 +29,21 @@ typedef Api17CreateStockAdjustmentCall =
 /// callbacks that invoke `listHomeStock` and `createStockAdjustment` after the
 /// generated client promotion.
 final class Api17CallbackHouseholdGateway implements HouseholdApi17Gateway {
-  const Api17CallbackHouseholdGateway({
+  factory Api17CallbackHouseholdGateway({
     required SessionAuthorizer authorizer,
     required Api17ListHomeStockCall listHomeStock,
     required Api17CreateStockAdjustmentCall createStockAdjustment,
-  }) : _authorizer = authorizer,
-       _listHomeStock = listHomeStock,
-       _createStockAdjustment = createStockAdjustment;
+  }) => Api17CallbackHouseholdGateway._(
+    authorizer,
+    listHomeStock,
+    createStockAdjustment,
+  );
+
+  const Api17CallbackHouseholdGateway._(
+    this._authorizer,
+    this._listHomeStock,
+    this._createStockAdjustment,
+  );
 
   final SessionAuthorizer _authorizer;
   final Api17ListHomeStockCall _listHomeStock;

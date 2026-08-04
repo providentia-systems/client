@@ -9,16 +9,19 @@ import 'package:providentia_api_client/providentia_api_client.dart';
 /// isolated so it can be deleted when the approved challenge contract lands.
 final class Api17IdentityTransport
     implements IdentityTransportPort, LegacyPasswordIdentityTransportPort {
-  Api17IdentityTransport({
+  factory Api17IdentityTransport({
     required ProvidentiaApiClient client,
-    required this.sessionTransport,
-  }) : _client = client;
+    required ClientSessionTransport sessionTransport,
+  }) => Api17IdentityTransport._(client, sessionTransport);
+
+  Api17IdentityTransport._(this._client, this.sessionTransport);
 
   final ProvidentiaApiClient _client;
 
   @override
   final ClientSessionTransport sessionTransport;
 
+  @override
   Future<SessionGrant> loginWithPassword({
     required String email,
     required String password,
