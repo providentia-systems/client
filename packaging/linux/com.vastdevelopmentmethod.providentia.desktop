@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Providentia
+Comment=Household stock control
+Exec=providentia
+Icon=com.vastdevelopmentmethod.providentia
+Terminal=false
+Categories=Utility;
+StartupNotify=true
+X-AppImage-Name=Providentia

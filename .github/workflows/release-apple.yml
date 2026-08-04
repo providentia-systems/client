@@ -1,0 +1,162 @@
+name: Release Apple platforms
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semantic release version without a v prefix
+        required: true
+        type: string
+      publish:
+        description: Enforce signing, provisioning and notarization credentials
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-apple-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: macos-15
+    environment: production-release
+    outputs:
+      ready: ${{ steps.gate.outputs.ready }}
+      version: ${{ steps.gate.outputs.version }}
+    env:
+      P12: ${{ secrets.APPLE_SIGNING_CERTIFICATE_P12_BASE64 }}
+      P12_PASSWORD: ${{ secrets.APPLE_SIGNING_CERTIFICATE_PASSWORD }}
+      TEAM: ${{ secrets.APPLE_TEAM_ID }}
+      PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+      IOS_IDENTITY: ${{ secrets.APPLE_IOS_SIGNING_IDENTITY }}
+      MAC_IDENTITY: ${{ secrets.APPLE_MACOS_APPLICATION_IDENTITY }}
+      INSTALLER_IDENTITY: ${{ secrets.APPLE_MACOS_INSTALLER_IDENTITY }}
+      NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY_P8_BASE64 }}
+      NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+      NOTARY_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+      API_BASE_URL: ${{ vars.PRODUCTION_API_BASE_URL }}
+    steps:
+      - id: gate
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+          REQUESTED_PUBLISH: ${{ inputs.publish }}
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then version=$REQUESTED_VERSION; fi
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]] || exit 64
+          [[ "$API_BASE_URL" == https://* ]] || missing="${missing:-} PRODUCTION_API_BASE_URL"
+          for name in P12 P12_PASSWORD TEAM PROFILE IOS_IDENTITY MAC_IDENTITY INSTALLER_IDENTITY NOTARY_KEY NOTARY_KEY_ID NOTARY_ISSUER; do
+            [[ -n "${!name}" ]] || missing="${missing:-} ${name}"
+          done
+          publish=$([[ "$GITHUB_EVENT_NAME" == push || "$REQUESTED_PUBLISH" == true ]] && echo true || echo false)
+          if [[ -n "${missing:-}" ]]; then
+            echo "Apple release is unavailable; missing protected configuration:${missing}" >> "$GITHUB_STEP_SUMMARY"
+            [[ "$publish" == false ]] || exit 78
+            echo 'ready=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'ready=true' >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  signed-build:
+    needs: preflight
+    if: needs.preflight.outputs.ready == 'true'
+    runs-on: macos-15
+    environment: production-release
+    timeout-minutes: 90
+    env:
+      RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+      APPLE_SIGNING_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_SIGNING_CERTIFICATE_P12_BASE64 }}
+      APPLE_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_SIGNING_CERTIFICATE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Install pinned Flutter
+        run: |
+          tool/install_flutter_macos.sh "$RUNNER_TEMP/providentia-sdk"
+          echo "$RUNNER_TEMP/providentia-sdk/flutter/bin" >> "$GITHUB_PATH"
+      - name: Prepare protected keychain and provisioning profile
+        run: bash tool/release/prepare_apple_signing.sh
+      - name: Build and export signed iOS archive
+        env:
+          IOS_IDENTITY: ${{ secrets.APPLE_IOS_SIGNING_IDENTITY }}
+          IOS_EXPORT_METHOD: ${{ vars.IOS_EXPORT_METHOD }}
+        run: |
+          flutter pub get --enforce-lockfile
+          method=${IOS_EXPORT_METHOD:-app-store-connect}
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>${method}</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>teamID</key><string>${APPLE_TEAM_ID}</string>
+            <key>signingCertificate</key><string>${IOS_IDENTITY}</string>
+            <key>provisioningProfiles</key><dict>
+              <key>com.vastdevelopmentmethod.providentia</key><string>${IOS_PROFILE_UUID}</string>
+            </dict>
+          </dict></plist>
+          EOF
+          flutter build ipa --release \
+            --build-name "$RELEASE_VERSION" --build-number "$GITHUB_RUN_NUMBER" \
+            --export-options-plist "$RUNNER_TEMP/ExportOptions.plist" \
+            --dart-define PROVIDENTIA_ENVIRONMENT=production \
+            --dart-define PROVIDENTIA_API_BASE_URL='${{ vars.PRODUCTION_API_BASE_URL }}'
+          mkdir -p build/release/apple/artifacts
+          cp build/ios/ipa/*.ipa "build/release/apple/artifacts/Providentia-${RELEASE_VERSION}.ipa"
+          ditto -c -k --keepParent build/ios/archive/Runner.xcarchive \
+            "build/release/apple/artifacts/Providentia-${RELEASE_VERSION}.xcarchive.zip"
+          unzip -q "build/release/apple/artifacts/Providentia-${RELEASE_VERSION}.ipa" -d "$RUNNER_TEMP/ipa"
+          codesign --verify --deep --strict --verbose=2 "$RUNNER_TEMP/ipa/Payload/Runner.app"
+      - name: Build, sign and notarize macOS package
+        env:
+          MAC_IDENTITY: ${{ secrets.APPLE_MACOS_APPLICATION_IDENTITY }}
+          INSTALLER_IDENTITY: ${{ secrets.APPLE_MACOS_INSTALLER_IDENTITY }}
+          NOTARY_KEY_BASE64: ${{ secrets.APPLE_NOTARY_KEY_P8_BASE64 }}
+          NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        run: |
+          flutter build macos --release \
+            --build-name "$RELEASE_VERSION" --build-number "$GITHUB_RUN_NUMBER" \
+            --dart-define PROVIDENTIA_ENVIRONMENT=production \
+            --dart-define PROVIDENTIA_API_BASE_URL='${{ vars.PRODUCTION_API_BASE_URL }}'
+          app=build/macos/Build/Products/Release/Providentia.app
+          codesign --force --deep --options runtime --timestamp --sign "$MAC_IDENTITY" "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          pkg="build/release/apple/artifacts/Providentia-${RELEASE_VERSION}.pkg"
+          productbuild --component "$app" /Applications --sign "$INSTALLER_IDENTITY" "$pkg"
+          printf '%s' "$NOTARY_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
+          chmod 0600 "$RUNNER_TEMP/AuthKey.p8"
+          xcrun notarytool submit "$pkg" --key "$RUNNER_TEMP/AuthKey.p8" \
+            --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER" --wait
+          xcrun stapler staple "$pkg"
+          xcrun stapler validate "$pkg"
+          pkgutil --check-signature "$pkg"
+      - name: Generate SBOM, checksums and provenance
+        run: |
+          dart pub deps --json > "$RUNNER_TEMP/dart-dependencies.json"
+          node tool/release/generate_release_evidence.mjs \
+            --artifacts build/release/apple/artifacts \
+            --output build/release/apple/evidence \
+            --platform apple --version "$RELEASE_VERSION" \
+            --dependencies "$RUNNER_TEMP/dart-dependencies.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: providentia-apple-${{ needs.preflight.outputs.version }}-signed-notarized
+          path: build/release/apple
+          if-no-files-found: error
+          retention-days: 30
+
+  skipped:
+    needs: preflight
+    if: needs.preflight.outputs.ready != 'true'
+    runs-on: macos-15
+    steps:
+      - run: echo 'Apple publication was explicitly skipped because protected signing/provisioning/notarization configuration was absent.' >> "$GITHUB_STEP_SUMMARY"

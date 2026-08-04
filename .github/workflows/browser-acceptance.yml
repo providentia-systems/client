@@ -1,0 +1,79 @@
+name: Browser persistence and authentication acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: HTTPS URL of the deployed Providentia PWA
+        required: true
+        type: string
+      require_auth:
+        description: Require protected end-to-end cookie authentication
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-acceptance-${{ inputs.target_url }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    environment: production-acceptance
+    env:
+      TARGET_URL: ${{ inputs.target_url }}
+      REQUIRE_AUTH: ${{ inputs.require_auth }}
+      API_URL: ${{ secrets.E2E_API_BASE_URL }}
+      EMAIL: ${{ secrets.E2E_USER_EMAIL }}
+      PASSWORD: ${{ secrets.E2E_USER_PASSWORD }}
+    steps:
+      - run: |
+          [[ "$TARGET_URL" == https://* ]] || { echo 'A deployed HTTPS PWA URL is required.' >&2; exit 78; }
+          if [[ "$REQUIRE_AUTH" == true ]]; then
+            [[ "$API_URL" == https://* && -n "$EMAIL" && -n "$PASSWORD" ]] || {
+              echo 'Authenticated acceptance requires E2E_API_BASE_URL, E2E_USER_EMAIL and E2E_USER_PASSWORD.' >&2
+              exit 78
+            }
+          fi
+
+  browser-matrix:
+    needs: preflight
+    runs-on: ubuntu-24.04
+    environment: production-acceptance
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chrome, firefox, webkit, edge]
+    env:
+      E2E_REQUIRE_AUTH: ${{ inputs.require_auth && '1' || '0' }}
+      E2E_API_BASE_URL: ${{ secrets.E2E_API_BASE_URL }}
+      E2E_USER_EMAIL: ${{ secrets.E2E_USER_EMAIL }}
+      E2E_USER_PASSWORD: ${{ secrets.E2E_USER_PASSWORD }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Install pinned browser harness
+        run: |
+          npm install --no-save --no-package-lock playwright@1.54.2
+          case '${{ matrix.browser }}' in
+            chrome) npx playwright install --with-deps chrome ;;
+            edge) npx playwright install --with-deps msedge ;;
+            firefox) npx playwright install --with-deps firefox ;;
+            webkit) npx playwright install --with-deps webkit ;;
+          esac
+      - name: Verify persistence, PWA and authentication behavior
+        run: |
+          mkdir -p build/release/browser-evidence
+          node tool/release/verify_web_runtime.mjs \
+            '${{ inputs.target_url }}' '${{ matrix.browser }}' \
+            'build/release/browser-evidence/${{ matrix.browser }}.json'
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: browser-acceptance-${{ matrix.browser }}
+          path: build/release/browser-evidence/${{ matrix.browser }}.json
+          if-no-files-found: error
+          retention-days: 30

@@ -1,0 +1,125 @@
+name: Release Windows
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semantic release version without a v prefix
+        required: true
+        type: string
+      publish:
+        description: Enforce protected Windows signing credentials
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-windows-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: windows-2025
+    environment: production-release
+    outputs:
+      ready: ${{ steps.gate.outputs.ready }}
+      version: ${{ steps.gate.outputs.version }}
+    env:
+      PFX: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+      PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
+      PUBLISHER: ${{ secrets.WINDOWS_PACKAGE_PUBLISHER }}
+      THUMBPRINT: ${{ secrets.WINDOWS_EXPECTED_CERT_THUMBPRINT }}
+      IDENTITY: ${{ secrets.WINDOWS_PACKAGE_IDENTITY_NAME }}
+      API_BASE_URL: ${{ vars.PRODUCTION_API_BASE_URL }}
+    steps:
+      - id: gate
+        shell: pwsh
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+          REQUESTED_PUBLISH: ${{ inputs.publish }}
+        run: |
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') { $version = $env:REQUESTED_VERSION }
+          if ($version -notmatch '^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$') { throw 'Invalid release version.' }
+          $missing = @()
+          if ([string]::IsNullOrWhiteSpace($env:API_BASE_URL) -or -not $env:API_BASE_URL.StartsWith('https://')) {
+            $missing += 'PRODUCTION_API_BASE_URL'
+          }
+          foreach ($name in @('PFX','PFX_PASSWORD','PUBLISHER','THUMBPRINT','IDENTITY')) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) { $missing += $name }
+          }
+          $publish = $env:GITHUB_EVENT_NAME -eq 'push' -or $env:REQUESTED_PUBLISH -eq 'true'
+          if ($missing.Count -gt 0) {
+            "Windows signing unavailable; missing protected configuration: $($missing -join ', ')" >> $env:GITHUB_STEP_SUMMARY
+            if ($publish) { throw 'Protected Windows publication configuration is incomplete.' }
+            'ready=false' >> $env:GITHUB_OUTPUT
+          } else { 'ready=true' >> $env:GITHUB_OUTPUT }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+  signed-build:
+    needs: preflight
+    if: needs.preflight.outputs.ready == 'true'
+    runs-on: windows-2025
+    environment: production-release
+    timeout-minutes: 60
+    env:
+      RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Install pinned Flutter
+        shell: pwsh
+        run: |
+          ./tool/install_flutter_windows.ps1 -InstallParent "$env:RUNNER_TEMP/providentia-sdk"
+          "$env:RUNNER_TEMP/providentia-sdk/flutter/bin" >> $env:GITHUB_PATH
+      - name: Build Windows release
+        shell: pwsh
+        run: |
+          flutter pub get --enforce-lockfile
+          flutter build windows --release --build-name "$env:RELEASE_VERSION" --build-number "$env:GITHUB_RUN_NUMBER" `
+            --dart-define PROVIDENTIA_ENVIRONMENT=production `
+            --dart-define PROVIDENTIA_API_BASE_URL='${{ vars.PRODUCTION_API_BASE_URL }}'
+      - name: Restore certificate and create signed MSIX
+        shell: pwsh
+        env:
+          PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+          PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
+          PUBLISHER: ${{ secrets.WINDOWS_PACKAGE_PUBLISHER }}
+          THUMBPRINT: ${{ secrets.WINDOWS_EXPECTED_CERT_THUMBPRINT }}
+          IDENTITY: ${{ secrets.WINDOWS_PACKAGE_IDENTITY_NAME }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'providentia-release.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:PFX_BASE64))
+          ./tool/release/package_windows.ps1 `
+            -BundleDirectory build/windows/x64/runner/Release `
+            -Version $env:RELEASE_VERSION `
+            -OutputDirectory build/release/windows/artifacts `
+            -PackageIdentityName $env:IDENTITY -Publisher $env:PUBLISHER `
+            -PfxPath $pfx -PfxPassword $env:PFX_PASSWORD -ExpectedThumbprint $env:THUMBPRINT
+      - name: Generate SBOM, checksums and provenance
+        shell: pwsh
+        run: |
+          dart pub deps --json | Out-File -Encoding utf8 "$env:RUNNER_TEMP/dart-dependencies.json"
+          node tool/release/generate_release_evidence.mjs `
+            --artifacts build/release/windows/artifacts `
+            --output build/release/windows/evidence `
+            --platform windows --version $env:RELEASE_VERSION `
+            --dependencies "$env:RUNNER_TEMP/dart-dependencies.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: providentia-windows-${{ needs.preflight.outputs.version }}-signed
+          path: build/release/windows
+          if-no-files-found: error
+          retention-days: 30
+
+  skipped:
+    needs: preflight
+    if: needs.preflight.outputs.ready != 'true'
+    runs-on: windows-2025
+    steps:
+      - shell: pwsh
+        run: "'Windows publication was explicitly skipped because protected signing configuration was absent.' >> $env:GITHUB_STEP_SUMMARY"
