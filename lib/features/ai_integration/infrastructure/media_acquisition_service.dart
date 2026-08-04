@@ -12,27 +12,34 @@ final class MediaAcquisitionException implements Exception {
   final String safeMessage;
 }
 
+typedef MediaFilePicker =
+    Future<FilePickerResult?> Function({required bool allowMultiple});
+
 /// Camera, gallery and file-system acquisition with bounded in-memory bytes.
 /// Nothing is transmitted until preparation, disclosure and explicit consent.
 final class MediaAcquisitionService {
   factory MediaAcquisitionService({
     required RegisteredMediaSourceReader registry,
     ImagePicker? imagePicker,
+    MediaFilePicker? filePicker,
     int maximumSourceBytes = 25 * 1024 * 1024,
   }) => MediaAcquisitionService._(
     registry,
     imagePicker ?? ImagePicker(),
+    filePicker ?? _pickPlatformFiles,
     maximumSourceBytes,
   );
 
   MediaAcquisitionService._(
     this._registry,
     this._imagePicker,
+    this._filePicker,
     this.maximumSourceBytes,
   );
 
   final RegisteredMediaSourceReader _registry;
   final ImagePicker _imagePicker;
+  final MediaFilePicker _filePicker;
   final int maximumSourceBytes;
 
   Future<AiMediaAsset?> takePhoto({
@@ -77,21 +84,7 @@ final class MediaAcquisitionService {
     required AiExtractionKind purpose,
     bool allowMultiple = true,
   }) async {
-    final result = await FilePicker.pickFiles(
-      allowMultiple: allowMultiple,
-      withData: true,
-      type: FileType.custom,
-      allowedExtensions: const <String>[
-        'jpg',
-        'jpeg',
-        'png',
-        'webp',
-        'pdf',
-        'mp4',
-        'mov',
-        'webm',
-      ],
-    );
+    final result = await _filePicker(allowMultiple: allowMultiple);
     if (result == null) return const <AiMediaAsset>[];
     final assets = <AiMediaAsset>[];
     for (final file in result.files) {
@@ -155,6 +148,23 @@ final class MediaAcquisitionService {
     return asset;
   }
 }
+
+Future<FilePickerResult?> _pickPlatformFiles({required bool allowMultiple}) =>
+    FilePicker.pickFiles(
+      allowMultiple: allowMultiple,
+      withData: true,
+      type: FileType.custom,
+      allowedExtensions: const <String>[
+        'jpg',
+        'jpeg',
+        'png',
+        'webp',
+        'pdf',
+        'mp4',
+        'mov',
+        'webm',
+      ],
+    );
 
 String _mimeType(String? extension) => switch (extension?.toLowerCase()) {
   'jpg' || 'jpeg' => 'image/jpeg',
