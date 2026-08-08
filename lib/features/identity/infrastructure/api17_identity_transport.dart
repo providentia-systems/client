@@ -2,7 +2,7 @@ import 'package:providentia/features/identity/application/identity_ports.dart';
 import 'package:providentia/features/identity/domain/identity_models.dart';
 import 'package:providentia_api_client/providentia_api_client.dart';
 
-/// Compatibility transport for the currently published Laminas API 1.7.
+/// Compatibility transport for the client-pinned API 1.7 contract.
 ///
 /// The product-facing application boundary is passwordless-first, but API 1.7
 /// still authenticates with a password. This adapter keeps that compatibility

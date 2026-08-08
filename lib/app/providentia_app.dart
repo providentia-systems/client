@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:providentia/app/app_controller.dart';
 import 'package:providentia/app/household_features.dart';
@@ -11,12 +13,16 @@ class ProvidentiaApp extends StatefulWidget {
   const ProvidentiaApp({
     required this.controller,
     this.features,
+    this.onChangeHome,
+    this.onSignOut,
     this.onDispose,
     super.key,
   });
 
   final AppController controller;
   final HouseholdFeatures? features;
+  final Future<void> Function()? onChangeHome;
+  final Future<void> Function()? onSignOut;
   final VoidCallback? onDispose;
 
   @override
@@ -52,6 +58,8 @@ class _ProvidentiaAppState extends State<ProvidentiaApp> {
           return _AdaptiveShell(
             controller: widget.controller,
             features: widget.features,
+            onChangeHome: widget.onChangeHome,
+            onSignOut: widget.onSignOut,
           );
         },
       ),
@@ -60,10 +68,17 @@ class _ProvidentiaAppState extends State<ProvidentiaApp> {
 }
 
 class _AdaptiveShell extends StatelessWidget {
-  const _AdaptiveShell({required this.controller, required this.features});
+  const _AdaptiveShell({
+    required this.controller,
+    required this.features,
+    required this.onChangeHome,
+    required this.onSignOut,
+  });
 
   final AppController controller;
   final HouseholdFeatures? features;
+  final Future<void> Function()? onChangeHome;
+  final Future<void> Function()? onSignOut;
 
   static const double phoneBreakpoint = 700;
   static const double desktopBreakpoint = 1100;
@@ -83,6 +98,7 @@ class _AdaptiveShell extends StatelessWidget {
             key: const Key('phone-shell'),
             body: content,
             bottomNavigationBar: _BottomNavigation(controller: controller),
+            floatingActionButton: _accountActions,
           );
         }
 
@@ -99,6 +115,7 @@ class _AdaptiveShell extends StatelessWidget {
                 Expanded(child: content),
               ],
             ),
+            floatingActionButton: _accountActions,
           );
         }
 
@@ -114,8 +131,74 @@ class _AdaptiveShell extends StatelessWidget {
               Expanded(child: content),
             ],
           ),
+          floatingActionButton: _accountActions,
         );
       },
+    );
+  }
+
+  Widget? get _accountActions {
+    if (onChangeHome == null && onSignOut == null) {
+      return null;
+    }
+    return _AccountActionsButton(
+      onChangeHome: onChangeHome,
+      onSignOut: onSignOut,
+    );
+  }
+}
+
+enum _AccountAction { changeHome, signOut }
+
+class _AccountActionsButton extends StatelessWidget {
+  const _AccountActionsButton({
+    required this.onChangeHome,
+    required this.onSignOut,
+  });
+
+  final Future<void> Function()? onChangeHome;
+  final Future<void> Function()? onSignOut;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      elevation: 4,
+      color: ProvidentiaColors.surfaceStrong,
+      shape: const CircleBorder(),
+      child: PopupMenuButton<_AccountAction>(
+        key: const Key('account-actions'),
+        tooltip: 'Account actions',
+        icon: const Icon(Icons.person_outline_rounded),
+        onSelected: (action) {
+          final callback = switch (action) {
+            _AccountAction.changeHome => onChangeHome,
+            _AccountAction.signOut => onSignOut,
+          };
+          if (callback != null) {
+            unawaited(callback());
+          }
+        },
+        itemBuilder: (context) => <PopupMenuEntry<_AccountAction>>[
+          if (onChangeHome != null)
+            const PopupMenuItem<_AccountAction>(
+              value: _AccountAction.changeHome,
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.home_work_outlined),
+                title: Text('Change home'),
+              ),
+            ),
+          if (onSignOut != null)
+            const PopupMenuItem<_AccountAction>(
+              value: _AccountAction.signOut,
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.logout_rounded),
+                title: Text('Sign out'),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

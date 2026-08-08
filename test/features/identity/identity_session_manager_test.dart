@@ -173,6 +173,68 @@ void main() {
     },
   );
 
+  test(
+    'logout closes the local session before remote logout completes',
+    () async {
+      final logoutCompletion = Completer<void>();
+      final store = _MemoryCredentialStore();
+      final transport = _FakeIdentityTransport(
+        sessionTransport: ClientSessionTransport.nativeBearer,
+        grant: _nativeGrant(now),
+        logoutCompletion: logoutCompletion,
+      );
+      final manager = _manager(transport, store, now);
+      addTearDown(manager.dispose);
+      await manager.completeChallenge(
+        PasswordlessProof.magicLink(token: 'private-magic-link-token'),
+      );
+
+      final logout = manager.logout();
+
+      expect(manager.snapshot.status, IdentitySessionStatus.signedOut);
+      expect(manager.accessToken, isNull);
+      expect(store.stored, isNull);
+      expect(transport.logoutAccessTokens, <String?>['access-token']);
+
+      logoutCompletion.complete();
+      await logout;
+    },
+  );
+
+  test('logout fences and revokes a delayed refresh grant', () async {
+    final refreshCompletion = Completer<SessionGrant>();
+    final store = _MemoryCredentialStore();
+    final transport = _FakeIdentityTransport(
+      sessionTransport: ClientSessionTransport.nativeBearer,
+      grant: _nativeGrant(now),
+      refreshCompletion: refreshCompletion,
+    );
+    final manager = _manager(transport, store, now);
+    addTearDown(manager.dispose);
+    await manager.completeChallenge(
+      PasswordlessProof.magicLink(token: 'private-magic-link-token'),
+    );
+
+    final refresh = manager.tryRecover();
+    await Future<void>.delayed(Duration.zero);
+    expect(transport.refreshCalls, 1);
+
+    await manager.logout();
+    refreshCompletion.complete(
+      _nativeGrant(now, refreshToken: 'late-refresh-token'),
+    );
+
+    expect(await refresh, isFalse);
+    expect(manager.snapshot.status, IdentitySessionStatus.signedOut);
+    expect(manager.accessToken, isNull);
+    expect(store.stored, isNull);
+    expect(store.writes, 1);
+    expect(transport.logoutAccessTokens, <String?>[
+      'access-token',
+      'access-token',
+    ]);
+  });
+
   test('OpenAPI 1.7 password compatibility accepts a secure grant', () async {
     final store = _MemoryCredentialStore();
     final transport = _FakeIdentityTransport(
@@ -278,6 +340,7 @@ final class _FakeIdentityTransport
     this.refreshCompletion,
     this.refreshError,
     this.logoutError,
+    this.logoutCompletion,
   });
 
   @override
@@ -286,11 +349,13 @@ final class _FakeIdentityTransport
   final Completer<SessionGrant>? refreshCompletion;
   final IdentityTransportException? refreshError;
   final IdentityTransportException? logoutError;
+  final Completer<void>? logoutCompletion;
 
   int refreshCalls = 0;
   final List<String?> refreshTokens = <String?>[];
   final List<String> challengeEmails = <String>[];
   final List<String> passwordEmails = <String>[];
+  final List<String?> logoutAccessTokens = <String?>[];
   PasswordlessProof? lastProof;
 
   @override
@@ -320,8 +385,12 @@ final class _FakeIdentityTransport
 
   @override
   Future<void> logout({String? accessToken, String? csrfToken}) async {
+    logoutAccessTokens.add(accessToken);
     if (logoutError != null) {
       throw logoutError!;
+    }
+    if (logoutCompletion != null) {
+      await logoutCompletion!.future;
     }
   }
 

@@ -19,10 +19,6 @@ final class ApiClientFactory {
       baseUri: configuration.apiBaseUri,
       httpClient: transport,
       closeHttpClient: httpClient == null,
-      defaultHeaders: <String, String>{
-        if (configuration.developmentBearerToken != null)
-          'Authorization': 'Bearer ${configuration.developmentBearerToken!}',
-      },
     );
   }
 }

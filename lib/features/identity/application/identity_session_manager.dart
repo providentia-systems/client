@@ -12,12 +12,14 @@ final class IdentitySessionManager implements SessionAuthorizer {
     required DeviceDescriptor device,
     DateTime Function()? clock,
     Duration refreshLeeway = const Duration(minutes: 2),
+    Duration logoutTimeout = const Duration(seconds: 5),
   }) => IdentitySessionManager._(
     transport,
     credentialStore,
     device,
     clock ?? DateTime.now,
     refreshLeeway,
+    logoutTimeout,
   );
 
   IdentitySessionManager._(
@@ -26,12 +28,20 @@ final class IdentitySessionManager implements SessionAuthorizer {
     this._device,
     this._clock,
     this.refreshLeeway,
+    this.logoutTimeout,
   ) : _snapshot = const IdentitySessionSnapshot.signedOut() {
     if (refreshLeeway.isNegative) {
       throw ArgumentError.value(
         refreshLeeway,
         'refreshLeeway',
         'must not be negative',
+      );
+    }
+    if (logoutTimeout <= Duration.zero) {
+      throw ArgumentError.value(
+        logoutTimeout,
+        'logoutTimeout',
+        'must be positive',
       );
     }
     if (_transport.sessionTransport == ClientSessionTransport.nativeBearer &&
@@ -50,11 +60,13 @@ final class IdentitySessionManager implements SessionAuthorizer {
       StreamController<IdentitySessionSnapshot>.broadcast(sync: true);
 
   final Duration refreshLeeway;
+  final Duration logoutTimeout;
 
   IdentitySessionSnapshot _snapshot;
   SessionSecrets? _secrets;
   Future<bool>? _refreshInFlight;
   Future<void>? _restoreInFlight;
+  int _lifecycleGeneration = 0;
   bool _disposed = false;
 
   IdentitySessionSnapshot get snapshot => _snapshot;
@@ -79,7 +91,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
     if (existing != null) {
       return existing;
     }
-    final restore = _performRestore();
+    final restore = _performRestore(_lifecycleGeneration);
     _restoreInFlight = restore;
     return restore.whenComplete(() {
       if (identical(_restoreInFlight, restore)) {
@@ -94,6 +106,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
     if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(normalizedEmail)) {
       throw ArgumentError.value(email, 'email', 'must be a valid email');
     }
+    final generation = _beginAuthentication();
     _emit(
       IdentitySessionSnapshot(
         status: IdentitySessionStatus.authenticating,
@@ -104,23 +117,28 @@ final class IdentitySessionManager implements SessionAuthorizer {
       final receipt = await _transport.requestPasswordlessChallenge(
         email: normalizedEmail,
       );
-      _emit(
-        IdentitySessionSnapshot(
-          status: IdentitySessionStatus.challengeRequested,
-          challenge: receipt,
-          safeMessage:
-              'If the address can receive email, a sign-in link has been sent.',
-        ),
-      );
+      if (_isCurrent(generation)) {
+        _emit(
+          IdentitySessionSnapshot(
+            status: IdentitySessionStatus.challengeRequested,
+            challenge: receipt,
+            safeMessage:
+                'If the address can receive email, a sign-in link has been sent.',
+          ),
+        );
+      }
       return receipt;
     } on IdentityTransportException catch (error) {
-      _emitFailure(error.safeMessage);
+      if (_isCurrent(generation)) {
+        _emitFailure(error.safeMessage);
+      }
       rethrow;
     }
   }
 
   Future<void> completeChallenge(PasswordlessProof proof) async {
     _ensureOpen();
+    final generation = _beginAuthentication();
     _emit(
       _snapshot.copyWith(
         status: IdentitySessionStatus.authenticating,
@@ -132,24 +150,28 @@ final class IdentitySessionManager implements SessionAuthorizer {
         proof: proof,
         device: _device,
       );
-      await _acceptGrant(grant);
+      await _acceptGrant(grant, generation);
     } on IdentityTransportException catch (error) {
-      _emit(
-        _snapshot.copyWith(
-          status: error.invalidatesSession
-              ? IdentitySessionStatus.expired
-              : IdentitySessionStatus.failure,
-          safeMessage: error.safeMessage,
-        ),
-      );
+      if (_isCurrent(generation)) {
+        _emit(
+          _snapshot.copyWith(
+            status: error.invalidatesSession
+                ? IdentitySessionStatus.expired
+                : IdentitySessionStatus.failure,
+            safeMessage: error.safeMessage,
+          ),
+        );
+      }
       rethrow;
     } on IdentityCredentialStoreException catch (error) {
-      _emit(
-        IdentitySessionSnapshot(
-          status: IdentitySessionStatus.expired,
-          safeMessage: error.safeMessage,
-        ),
-      );
+      if (_isCurrent(generation)) {
+        _emit(
+          IdentitySessionSnapshot(
+            status: IdentitySessionStatus.expired,
+            safeMessage: error.safeMessage,
+          ),
+        );
+      }
       rethrow;
     }
   }
@@ -172,6 +194,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
         password.isEmpty) {
       throw ArgumentError('A valid email and password are required.');
     }
+    final generation = _beginAuthentication();
     _emit(
       _snapshot.copyWith(
         status: IdentitySessionStatus.authenticating,
@@ -184,24 +207,28 @@ final class IdentitySessionManager implements SessionAuthorizer {
         password: password,
         device: _device,
       );
-      await _acceptGrant(grant);
+      await _acceptGrant(grant, generation);
     } on IdentityTransportException catch (error) {
-      _emit(
-        _snapshot.copyWith(
-          status: error.invalidatesSession
-              ? IdentitySessionStatus.signedOut
-              : IdentitySessionStatus.failure,
-          safeMessage: error.safeMessage,
-        ),
-      );
+      if (_isCurrent(generation)) {
+        _emit(
+          _snapshot.copyWith(
+            status: error.invalidatesSession
+                ? IdentitySessionStatus.signedOut
+                : IdentitySessionStatus.failure,
+            safeMessage: error.safeMessage,
+          ),
+        );
+      }
       rethrow;
     } on IdentityCredentialStoreException catch (error) {
-      _emit(
-        IdentitySessionSnapshot(
-          status: IdentitySessionStatus.expired,
-          safeMessage: error.safeMessage,
-        ),
-      );
+      if (_isCurrent(generation)) {
+        _emit(
+          IdentitySessionSnapshot(
+            status: IdentitySessionStatus.expired,
+            safeMessage: error.safeMessage,
+          ),
+        );
+      }
       rethrow;
     }
   }
@@ -228,12 +255,12 @@ final class IdentitySessionManager implements SessionAuthorizer {
     return _startRefresh();
   }
 
-  Future<bool> _startRefresh() {
+  Future<bool> _startRefresh({int? generation}) {
     final existing = _refreshInFlight;
     if (existing != null) {
       return existing;
     }
-    final refresh = _performRefresh();
+    final refresh = _performRefresh(generation ?? _lifecycleGeneration);
     _refreshInFlight = refresh;
     return refresh.whenComplete(() {
       if (identical(_refreshInFlight, refresh)) {
@@ -244,17 +271,22 @@ final class IdentitySessionManager implements SessionAuthorizer {
 
   Future<void> logout() async {
     _ensureOpen();
+    _invalidateLifecycle();
+    final accessToken = _secrets?.accessToken;
+    final csrfToken = _secrets?.csrfToken;
+    _secrets = null;
+    _emit(const IdentitySessionSnapshot.signedOut());
+    final credentialClear = _bestEffortClearStore();
     try {
       await _transport.logout(
-        accessToken: _secrets?.accessToken,
-        csrfToken: _secrets?.csrfToken,
-      );
-    } on IdentityTransportException {
-      // Local credential removal is mandatory even if the remote session is
-      // already gone or the network is unavailable.
+        accessToken: accessToken,
+        csrfToken: csrfToken,
+      ).timeout(logoutTimeout);
+    } on Exception {
+      // The local session is already closed. Remote logout is bounded and
+      // best-effort when the session is gone or the network is unavailable.
     } finally {
-      await _clearSession();
-      _emit(const IdentitySessionSnapshot.signedOut());
+      await credentialClear;
     }
   }
 
@@ -288,6 +320,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
       csrfToken: _secrets?.csrfToken,
     );
     if (_snapshot.session?.sessionId == sessionId) {
+      _invalidateLifecycle();
       await _clearSession();
       _emit(const IdentitySessionSnapshot.signedOut());
       return;
@@ -323,18 +356,29 @@ final class IdentitySessionManager implements SessionAuthorizer {
     if (_disposed) {
       return;
     }
+    _invalidateLifecycle();
     _disposed = true;
+    _secrets = null;
     await _states.close();
   }
 
-  Future<void> _performRestore() async {
+  Future<void> _performRestore(int generation) async {
+    if (!_isCurrent(generation)) {
+      return;
+    }
     _emit(IdentitySessionSnapshot(status: IdentitySessionStatus.restoring));
     if (sessionTransport == ClientSessionTransport.nativeBearer) {
       StoredNativeSession? stored;
       try {
         stored = await _credentialStore.read();
       } on Exception {
+        if (!_isCurrent(generation)) {
+          return;
+        }
         await _bestEffortClearStore();
+        if (!_isCurrent(generation)) {
+          return;
+        }
         _emit(
           IdentitySessionSnapshot(
             status: IdentitySessionStatus.failure,
@@ -344,25 +388,39 @@ final class IdentitySessionManager implements SessionAuthorizer {
         );
         return;
       }
+      if (!_isCurrent(generation)) {
+        return;
+      }
       if (stored == null) {
         _emit(const IdentitySessionSnapshot.signedOut());
         return;
       }
       _secrets = SessionSecrets(refreshToken: stored.refreshToken);
     }
-    final recovered = await _startRefresh();
-    if (!recovered && _snapshot.status == IdentitySessionStatus.restoring) {
+    if (!_isCurrent(generation)) {
+      return;
+    }
+    final recovered = await _startRefresh(generation: generation);
+    if (!recovered &&
+        _isCurrent(generation) &&
+        _snapshot.status == IdentitySessionStatus.restoring) {
       _emit(const IdentitySessionSnapshot.signedOut());
     }
   }
 
-  Future<bool> _performRefresh() async {
+  Future<bool> _performRefresh(int generation) async {
+    if (!_isCurrent(generation)) {
+      return false;
+    }
     final refreshToken = sessionTransport == ClientSessionTransport.nativeBearer
         ? _secrets?.refreshToken
         : null;
     if (sessionTransport == ClientSessionTransport.nativeBearer &&
         (refreshToken == null || refreshToken.trim().isEmpty)) {
       await _clearSession();
+      if (!_isCurrent(generation)) {
+        return false;
+      }
       _emit(IdentitySessionSnapshot(status: IdentitySessionStatus.expired));
       return false;
     }
@@ -375,11 +433,17 @@ final class IdentitySessionManager implements SessionAuthorizer {
     );
     try {
       final grant = await _transport.refreshSession(refreshToken: refreshToken);
-      await _acceptGrant(grant);
-      return true;
+      final accepted = await _acceptGrant(grant, generation);
+      return accepted;
     } on IdentityTransportException catch (error) {
+      if (!_isCurrent(generation)) {
+        return false;
+      }
       if (error.invalidatesSession) {
         await _clearSession();
+        if (!_isCurrent(generation)) {
+          return false;
+        }
         _emit(
           IdentitySessionSnapshot(
             status: IdentitySessionStatus.expired,
@@ -396,17 +460,23 @@ final class IdentitySessionManager implements SessionAuthorizer {
       }
       return false;
     } on IdentityCredentialStoreException catch (error) {
-      _emit(
-        IdentitySessionSnapshot(
-          status: IdentitySessionStatus.expired,
-          safeMessage: error.safeMessage,
-        ),
-      );
+      if (_isCurrent(generation)) {
+        _emit(
+          IdentitySessionSnapshot(
+            status: IdentitySessionStatus.expired,
+            safeMessage: error.safeMessage,
+          ),
+        );
+      }
       return false;
     }
   }
 
-  Future<void> _acceptGrant(SessionGrant grant) async {
+  Future<bool> _acceptGrant(SessionGrant grant, int generation) async {
+    if (!_isCurrent(generation)) {
+      await _discardGrant(grant);
+      return false;
+    }
     if (grant.metadata.transport != sessionTransport) {
       throw const IdentityTransportException(
         kind: IdentityFailureKind.authentication,
@@ -424,6 +494,10 @@ final class IdentitySessionManager implements SessionAuthorizer {
           ),
         );
       } on Exception {
+        if (!_isCurrent(generation)) {
+          await _discardGrant(grant);
+          return false;
+        }
         await _bestEffortClearStore();
         _secrets = null;
         throw const IdentityCredentialStoreException(
@@ -433,6 +507,11 @@ final class IdentitySessionManager implements SessionAuthorizer {
     } else {
       await _bestEffortClearStore();
     }
+    if (!_isCurrent(generation)) {
+      await _bestEffortClearStore();
+      await _discardGrant(grant);
+      return false;
+    }
     _secrets = grant.secrets;
     _emit(
       IdentitySessionSnapshot(
@@ -440,6 +519,19 @@ final class IdentitySessionManager implements SessionAuthorizer {
         session: grant.metadata,
       ),
     );
+    return true;
+  }
+
+  Future<void> _discardGrant(SessionGrant grant) async {
+    try {
+      await _transport.logout(
+        accessToken: grant.secrets.accessToken,
+        csrfToken: grant.secrets.csrfToken,
+      ).timeout(logoutTimeout);
+    } on Exception {
+      // A stale grant can no longer change local authentication state. Remote
+      // revocation is bounded and best-effort for the same reason as logout.
+    }
   }
 
   Future<void> _clearSession() async {
@@ -455,6 +547,20 @@ final class IdentitySessionManager implements SessionAuthorizer {
       // should surface secure-store telemetry without logging values.
     }
   }
+
+  int _beginAuthentication() {
+    _invalidateLifecycle();
+    return _lifecycleGeneration;
+  }
+
+  void _invalidateLifecycle() {
+    _lifecycleGeneration++;
+    _refreshInFlight = null;
+    _restoreInFlight = null;
+  }
+
+  bool _isCurrent(int generation) =>
+      !_disposed && generation == _lifecycleGeneration;
 
   void _emitFailure(String safeMessage) {
     _emit(

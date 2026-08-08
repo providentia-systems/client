@@ -55,6 +55,40 @@ void main() {
     expect(find.byKey(const Key('identity-one-time-code')), findsOneWidget);
   });
 
+  testWidgets('API 1.7 compatibility UI exposes password login only', (
+    tester,
+  ) async {
+    final manager = IdentitySessionManager(
+      transport: _PresentationLegacyIdentityTransport(),
+      credentialStore: _PresentationCredentialStore(),
+      device: DeviceDescriptor(
+        id: 'device-1',
+        name: 'Test device',
+        platform: 'test',
+      ),
+    );
+    final controller = IdentityController(manager);
+    addTearDown(() async {
+      controller.dispose();
+      await manager.dispose();
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PasswordlessSignInPage(
+          controller: controller,
+          restoreOnStart: false,
+          passwordlessSignInAvailable: false,
+        ),
+      ),
+    );
+
+    expect(find.byKey(const Key('identity-password')), findsOneWidget);
+    expect(find.text('Sign in securely'), findsOneWidget);
+    expect(find.byKey(const Key('identity-toggle-password')), findsNothing);
+    expect(find.textContaining('sign-in link'), findsNothing);
+  });
+
   testWidgets('home page creates and opens the first authorized home', (
     tester,
   ) async {
@@ -107,7 +141,7 @@ final class _PresentationCredentialStore implements SessionCredentialStore {
   Future<void> write(StoredNativeSession session) async => _stored = session;
 }
 
-final class _PresentationIdentityTransport implements IdentityTransportPort {
+class _PresentationIdentityTransport implements IdentityTransportPort {
   @override
   ClientSessionTransport get sessionTransport =>
       ClientSessionTransport.nativeBearer;
@@ -162,6 +196,22 @@ final class _PresentationIdentityTransport implements IdentityTransportPort {
     String? accessToken,
     String? csrfToken,
   }) async {}
+}
+
+final class _PresentationLegacyIdentityTransport
+    extends _PresentationIdentityTransport
+    implements LegacyPasswordIdentityTransportPort {
+  @override
+  Future<SessionGrant> loginWithPassword({
+    required String email,
+    required String password,
+    required DeviceDescriptor device,
+  }) {
+    return completePasswordlessChallenge(
+      proof: PasswordlessProof.magicLink(token: 'compatibility-test'),
+      device: device,
+    );
+  }
 }
 
 final class _PresentationActiveHomeStore implements ActiveHomeStore {

@@ -54,20 +54,22 @@ the backend contract, process-death recovery, bounded retry, five exact server
 result classifications, atomic page-and-cursor application, and explicit sync
 outcomes for presentation.
 
-Inventory counts, receipt capture, purchase history, recommendations and
-shopping-list workflows remain Phase 5 and are labeled as deferred in the
-shell.
+Phase 5–8 inventory, purchasing, shopping, intelligence, catalog, and reporting
+models and workspaces now exist. In the current production composition, the
+visible household inventory, purchase, and list workflows are still backed
+primarily by local Drift projections. Identity, session, authorized-home
+selection, health checks, and the narrow synchronization gateway are connected
+to the backend. A visible workspace is therefore not, by itself, evidence of
+end-to-end server integration.
 
 ## Runtime configuration
 
-Public values such as `PROVIDENTIA_API_BASE_URL`,
-`PROVIDENTIA_ENVIRONMENT`, and the development home UUID enter the application
-through `--dart-define`. The API URL must use HTTPS except for loopback
-development.
+The public values `PROVIDENTIA_API_BASE_URL` and `PROVIDENTIA_ENVIRONMENT`
+enter the application through `--dart-define`. The API value is a server origin,
+not an `/api` path prefix, and must use HTTPS except for loopback development.
 
-The short-lived `PROVIDENTIA_DEV_BEARER_TOKEN` is a narrowly scoped exception:
-the configuration rejects it unless the environment is `development` and the
-API is loopback. It exists only for the backend-to-Flutter integration golden
-path, is compiled into that development build, and is forbidden for
-production. Database credentials, production tokens, AI provider keys, server
-encryption keys, and queue credentials must never be compiled into Flutter.
+Authentication is established only through the interactive identity session.
+No bearer token or home ID is accepted as runtime bootstrap configuration.
+Database credentials, tokens, AI provider keys, server encryption keys, and
+queue credentials must never be compiled into Flutter. See
+[local development](local-development.md) for the supported launch topology.

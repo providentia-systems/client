@@ -8,12 +8,14 @@ final class PasswordlessSignInPage extends StatefulWidget {
   const PasswordlessSignInPage({
     required this.controller,
     this.restoreOnStart = true,
+    this.passwordlessSignInAvailable = true,
     this.authenticatedChild,
     super.key,
   });
 
   final IdentityController controller;
   final bool restoreOnStart;
+  final bool passwordlessSignInAvailable;
   final Widget? authenticatedChild;
 
   @override
@@ -185,7 +187,8 @@ final class _PasswordlessSignInPageState extends State<PasswordlessSignInPage> {
               _usePassword ? 'Sign in securely' : 'Email me a sign-in link',
             ),
           ),
-          if (widget.controller.supportsLegacyPassword)
+          if (widget.controller.supportsLegacyPassword &&
+              widget.passwordlessSignInAvailable)
             TextButton(
               key: const Key('identity-toggle-password'),
               onPressed: widget.controller.isBusy

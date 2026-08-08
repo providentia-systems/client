@@ -1,5 +1,10 @@
 # Phase 5–8 implementation report
 
+> Historical snapshot: API `1.3.0` below is the contract used for this phase
+> report, not the current client pin. See [Contracts](contracts.md) and
+> [Local development](local-development.md) for the current API and composed
+> client/backend boundary.
+
 ## Scope and decision
 
 This change implements the client-owned domain, application, presentation, and

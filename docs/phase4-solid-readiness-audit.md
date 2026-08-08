@@ -1,5 +1,10 @@
 # Phase 4 SOLID and clean-code readiness audit
 
+> Historical snapshot: contract versions, operation counts, and composition
+> claims below describe the audited Phase 4 commit. See
+> [Contracts](contracts.md) and [Local development](local-development.md) for
+> the current API pin and runnable boundary.
+
 ## Decision
 
 The Flutter client is a well-structured Phase 3–4 prototype, not spaghetti

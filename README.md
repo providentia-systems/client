@@ -9,9 +9,11 @@ architecture tests, and a full CI build matrix.
 
 Phases 5–8 add household inventory, count sessions, purchase history, shopping
 lists, AI review policies, catalog moderation models, explainable suggestions,
-price intelligence, reporting, and evaluation. The pinned API `1.3.0` does not
-yet expose those resources, so their feature ports currently use an explicit
-local projection and never invent generic sync entity types. See
+price intelligence, reporting, and evaluation. The client pins API `1.7.0`
+with 86 generated operations. Backend `main` currently publishes API `1.10.0`;
+the client remains on its reviewed pin until a deliberate contract update.
+Most household workspaces currently use an explicit local projection and do
+not provide an end-to-end test of the newer backend resources. See
 [docs/phases5-8-contract-release-plan.md](docs/phases5-8-contract-release-plan.md)
 for the backend release sequence.
 
@@ -46,44 +48,39 @@ node tool/generate_api_client.mjs --check
 
 Generated files are never hand-edited.
 
-On the first dependency-changing branch, GitHub produces `pubspec.lock` and
-then the reviewable Drift implementation, exported schemas, web worker, and
-phone golden through guarded, exact-scope workflows. Until those bot commits
-land, those generated paths are intentionally absent and the ordinary quality
-job is expected to wait/fail closed rather than accepting local placeholders.
+`pubspec.lock`, the reviewable Drift implementation, exported schemas, web
+worker, and phone golden are committed repository artifacts. Dependency or
+schema changes must regenerate them through the guarded, exact-scope workflows;
+the ordinary quality job fails closed when a required artifact is missing or
+stale rather than accepting a local placeholder.
 
 ## Development golden path
 
-Start the backend development stack and its setup script first. Use the
-authorized `homeId` and short-lived development access token printed by that
-script:
+Start the backend development stack first. Its setup script creates and
+verifies a development account and writes the email/password handoff. Then run
+Chrome on the fixed, backend-allowlisted `http://localhost:8081` origin:
 
 ```bash
 flutter run -d chrome \
+  --web-hostname=localhost \
+  --web-port=8081 \
   --web-header=Cross-Origin-Opener-Policy=same-origin \
   --web-header=Cross-Origin-Embedder-Policy=require-corp \
   --dart-define=PROVIDENTIA_ENVIRONMENT=development \
-  --dart-define=PROVIDENTIA_API_BASE_URL=http://localhost:8080 \
-  --dart-define=PROVIDENTIA_DEV_HOME_ID=<home-uuid> \
-  --dart-define=PROVIDENTIA_DEV_BEARER_TOKEN=<short-lived-dev-token>
+  --dart-define=PROVIDENTIA_API_BASE_URL=http://localhost:8080
 ```
 
-The development home UUID selects the local database partition; it does not
-grant access. The backend still derives membership and authorization from the
-token. On web, the HTTP client also sends credentialed cookie requests so
-same-origin and explicitly configured cross-origin development sessions work.
+Log in through the client with the handoff email and password. The interactive
+session is the only authentication path; build-time bearer tokens and home IDs
+are not supported. The native refresh token is kept in platform secure storage,
+the access token remains in memory, and web authentication uses credentialed
+cookies.
 
-`PROVIDENTIA_DEV_BEARER_TOKEN` is accepted only when the environment is exactly
-`development` and the API host is loopback. It is compiled into that
-development build: never use a production token, never commit the launch
-command, and revoke/discard the token after the session. Production clients
-must obtain credentials through the authenticated session flow and secure
-platform storage; tokens are never stored in Drift.
-
-Launching without the development defines renders a clear configuration and
-sign-in-required shell instead of crashing. Production authentication and
-active-home selection remain the follow-on UI that replaces this development
-bootstrap.
+See [local development](docs/local-development.md) for the exact backend
+handoff, Linux and Android commands, normal-user provisioning, role boundaries,
+and current end-to-end limitations. Invalid API settings render a safe
+configuration screen. The defaults are already valid for a backend on
+`http://localhost:8080`.
 
 ## Build commands
 
@@ -106,6 +103,8 @@ Start with [docs/index.md](docs/index.md). The permanent owner decisions are in
 [docs/project-memory.md](docs/project-memory.md), the current SOLID and Phase 4
 readiness decision is in
 [docs/phase4-solid-readiness-audit.md](docs/phase4-solid-readiness-audit.md),
+the runnable backend/client handoff is in
+[docs/local-development.md](docs/local-development.md),
 the Phase 5–8 backend boundary is in
 [docs/phases5-8-contract-release-plan.md](docs/phases5-8-contract-release-plan.md),
 and the exact support claims are in

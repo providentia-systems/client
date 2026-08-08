@@ -120,6 +120,7 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp> {
           highContrastTheme: ProvidentiaTheme.light(highContrast: true),
           home: PasswordlessSignInPage(
             controller: _identityController,
+            passwordlessSignInAvailable: false,
             authenticatedChild: HomeSelectionPage(
               controller: _homesController,
               activeHomeBuilder: (context, home) => _ConnectedHomeWorkspace(
@@ -127,6 +128,8 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp> {
                 home: home,
                 database: _database,
                 api: _authorizedApi,
+                onChangeHome: _homesController.returnToChooser,
+                onSignOut: _signOut,
               ),
             ),
           ),
@@ -163,6 +166,12 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp> {
         };
 
   String get _deviceName => kIsWeb ? 'Providentia web' : 'Providentia app';
+
+  Future<void> _signOut() async {
+    final logout = _identityController.logout();
+    await _homesController.returnToChooser();
+    await logout;
+  }
 }
 
 final class _ConnectedHomeWorkspace extends StatefulWidget {
@@ -170,12 +179,16 @@ final class _ConnectedHomeWorkspace extends StatefulWidget {
     required this.home,
     required this.database,
     required this.api,
+    required this.onChangeHome,
+    required this.onSignOut,
     super.key,
   });
 
   final HomeSummary home;
   final AppDatabase database;
   final ProvidentiaApiClient api;
+  final Future<void> Function() onChangeHome;
+  final Future<void> Function() onSignOut;
 
   @override
   State<_ConnectedHomeWorkspace> createState() =>
@@ -232,7 +245,12 @@ final class _ConnectedHomeWorkspaceState
             body: Center(child: CircularProgressIndicator()),
           );
         }
-        return ProvidentiaApp(controller: _app, features: _features);
+        return ProvidentiaApp(
+          controller: _app,
+          features: _features,
+          onChangeHome: widget.onChangeHome,
+          onSignOut: widget.onSignOut,
+        );
       },
     );
   }

@@ -77,6 +77,39 @@ void main() {
   );
 
   test(
+    'returning to the chooser clears active state without granting access',
+    () async {
+      final store = _MemoryActiveHomeStore(value: 'home-a');
+      final changed = <String?>[];
+      final transport = _FakeHomeTransport(
+        homes: <HomeSummary>[_home('home-a', 'Home A')],
+      );
+      final manager = HomeSessionManager(
+        transport: transport,
+        activeHomeStore: store,
+        onActiveHomeChanged: changed.add,
+      );
+      addTearDown(manager.dispose);
+      await manager.load(sessionActiveHomeId: 'home-a');
+
+      await manager.returnToChooser();
+
+      expect(manager.snapshot.status, HomeSessionStatus.selectionRequired);
+      expect(manager.snapshot.activeHome, isNull);
+      expect(manager.snapshot.memberships, isEmpty);
+      expect(manager.snapshot.homes.single.id, 'home-a');
+      expect(store.value, isNull);
+      expect(changed, <String?>['home-a', null]);
+      expect(transport.switches, isEmpty);
+
+      await manager.selectHome('home-a');
+
+      expect(transport.switches, <String>['home-a']);
+      expect(manager.snapshot.status, HomeSessionStatus.ready);
+    },
+  );
+
+  test(
     'creating a home selects and persists the authorized response',
     () async {
       final store = _MemoryActiveHomeStore();

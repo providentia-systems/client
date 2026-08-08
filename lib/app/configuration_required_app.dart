@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:providentia/core/design_system/providentia_theme.dart';
 
-/// Launchable fallback while production sign-in and active-home selection are
-/// completed. It deliberately contains no credentials or persistence access.
+/// Launchable fallback for invalid public API connection configuration.
+/// It deliberately contains no credentials or persistence access.
 final class ConfigurationRequiredApp extends StatelessWidget {
   const ConfigurationRequiredApp({required this.safeMessage, super.key});
 
@@ -34,18 +34,17 @@ final class ConfigurationRequiredApp extends StatelessWidget {
                         Semantics(
                           header: true,
                           child: Text(
-                            'Sign-in setup required',
+                            'API connection setup required',
                             style: Theme.of(context).textTheme.headlineMedium,
                             textAlign: TextAlign.center,
                           ),
                         ),
                         const SizedBox(height: 12),
                         const Text(
-                          'This build is ready to launch, but no authenticated '
-                          'home has been selected. For the development '
-                          'prototype, start it with the loopback home and '
-                          'short-lived token printed by the backend setup '
-                          'script. Production sign-in remains a follow-on UI.',
+                          'The API connection settings for this build are '
+                          'invalid. Set PROVIDENTIA_API_BASE_URL to an absolute '
+                          'HTTPS server origin, or use HTTP only for loopback '
+                          'development, then restart the app.',
                           textAlign: TextAlign.center,
                         ),
                         const SizedBox(height: 16),

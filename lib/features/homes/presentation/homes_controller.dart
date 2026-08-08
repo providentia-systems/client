@@ -32,6 +32,8 @@ final class HomesController extends ChangeNotifier {
     }
   }
 
+  Future<void> returnToChooser() => _manager.returnToChooser();
+
   Future<void> createHome({
     required String name,
     required String locale,
