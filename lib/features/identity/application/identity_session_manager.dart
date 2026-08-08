@@ -278,10 +278,9 @@ final class IdentitySessionManager implements SessionAuthorizer {
     _emit(const IdentitySessionSnapshot.signedOut());
     final credentialClear = _bestEffortClearStore();
     try {
-      await _transport.logout(
-        accessToken: accessToken,
-        csrfToken: csrfToken,
-      ).timeout(logoutTimeout);
+      await _transport
+          .logout(accessToken: accessToken, csrfToken: csrfToken)
+          .timeout(logoutTimeout);
     } on Exception {
       // The local session is already closed. Remote logout is bounded and
       // best-effort when the session is gone or the network is unavailable.
@@ -524,10 +523,12 @@ final class IdentitySessionManager implements SessionAuthorizer {
 
   Future<void> _discardGrant(SessionGrant grant) async {
     try {
-      await _transport.logout(
-        accessToken: grant.secrets.accessToken,
-        csrfToken: grant.secrets.csrfToken,
-      ).timeout(logoutTimeout);
+      await _transport
+          .logout(
+            accessToken: grant.secrets.accessToken,
+            csrfToken: grant.secrets.csrfToken,
+          )
+          .timeout(logoutTimeout);
     } on Exception {
       // A stale grant can no longer change local authentication state. Remote
       // revocation is bounded and best-effort for the same reason as logout.
