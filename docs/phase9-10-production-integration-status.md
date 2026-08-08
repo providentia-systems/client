@@ -1,9 +1,8 @@
 # Phase 9–10 production integration status
 
-Date: 2026-08-04  
-Flutter target: `1.0.0+10`  
-Authoritative backend review: `providentia-laminas` main and draft PR #5,
-read-only
+Date: 2026-08-08
+Flutter target: `1.0.0+10`
+Authoritative backend review: `providentia-systems/backend` main
 
 ## Corrected contract baseline
 
@@ -21,7 +20,11 @@ contract operation registry and callable method for every published operation.
 The generated transport remains behind application-owned adapters because
 several API 1.7 responses are intentionally free-form.
 
-## Implemented in this phase
+## Implemented code boundaries
+
+This table records adapters and application-owned capabilities. It does not
+mean every row is constructed by the current production composition or
+reachable from the visible client UI.
 
 | Capability | Client implementation |
 |---|---|
@@ -34,9 +37,9 @@ several API 1.7 responses are intentionally free-form.
 | Devices | Stable client device ID plus list/revoke session flows |
 | Homes | List, create, select/switch, membership list, role change, invite, accept, leave |
 | Revoked access | Active workspace closes and late responses are generation-fenced |
-| Online household boundary | Authoritative API 1.7 home-stock reads and idempotent home-level adjustments, with strict cross-home response checks |
-| AI credentials | Flutter entry to write-only, encrypted, home/provider-scoped Laminas vault |
-| API 1.7 extraction | Concrete one-image server-proxy gateway with mandatory review response mapping |
+| Online household boundary | Adapter for authoritative API 1.7 home-stock reads and idempotent home-level adjustments; not used by the current visible household workspace |
+| AI credentials | Adapter and presentation boundary for the write-only, encrypted, home/provider-scoped vault; not reachable in the current composition |
+| API 1.7 extraction | One-image server-proxy adapter with mandatory review response mapping; not reachable in the current composition |
 | Media acquisition | Camera, gallery, supported file selection, and short-video capture boundary |
 | Image privacy | Decode/re-encode, orientation normalization, resize, metadata removal, exact SHA-256 consent binding |
 | Multi-page/media model | Ordered image/PDF-page/video-frame batches with bounded size/count/duration policies |
@@ -50,6 +53,11 @@ several API 1.7 responses are intentionally free-form.
 
 These are not optional client TODOs. They require a new released Laminas
 contract, and this Flutter work intentionally does not invent them.
+
+The table describes the client-pinned API `1.7.0`. Backend `main` now publishes
+API `1.10.0` and closes some server-side gaps, but those operations are not a
+client capability until the pin, adapters, deep links, UI, and acceptance tests
+are deliberately upgraded together.
 
 | Gate | API 1.7 state | Required backend change |
 |---|---|---|
@@ -68,32 +76,34 @@ contract, and this Flutter work intentionally does not invent them.
 Two current contract defects also need correction before replacing the
 application-owned adapters with generated DTOs:
 
-1. `SessionCredentials` marks returned access, refresh and CSRF tokens as
-   `writeOnly`. They are response secrets and must remain readable by the
-   native/web session adapter without ever being logged.
+1. The client-pinned `SessionCredentials` marks returned access, refresh and
+   CSRF tokens as `writeOnly`. The companion backend documentation fix corrects
+   API 1.10 to mark them response-only; the reviewed client pin remains
+   immutable until its next contract upgrade.
 2. Cookie-authenticated mutation operations do not declare the required
    `X-CSRF-Token` header. The client supplies it, but the contract must describe
    it for independent clients and contract tests.
 
-## Connected acceptance path available now
+## Connected acceptance boundary
 
-Against deployed API 1.7, the following path is implementable and is the first
-live integration target:
+Against a development backend that retains API 1.7 compatibility, the current
+production composition can:
 
 1. Sign in with the API 1.7 password compatibility screen.
 2. Restore/rotate a native session or restore a browser cookie session.
 3. List authorized homes, create one if needed, and select its server-side
    active-home session.
-4. Provision a cloud AI credential from Flutter into the encrypted Laminas
-   vault. Flutter never reads it back.
-5. Prepare one receipt or stock image, confirm the exact transmission, call the
-   server proxy, and receive candidates for mandatory human review.
-6. Use the published online inventory, count, receipt, shopping and reporting
-   operations behind client repositories.
+4. Return to the authorized-home chooser and sign out from the household
+   workspace.
+5. Exercise health and the narrow allow-listed synchronization path.
 
-Step 6 is online-only until typed Phase 5–8 synchronization is released. Local
-Phase 5–8 projections must not be described as cross-device authoritative in
-that interim state.
+Cloud-AI credential setup, extraction, online inventory/count/receipt/shopping
+repositories, reporting, member administration, and platform administration
+are not reachable from the current composition. Their adapters and generated
+methods are implementation evidence, not an end-to-end client/backend test.
+
+Local Phase 5–8 projections must not be described as cross-device authoritative
+in this interim state.
 
 The existing Phase 5 controller contracts are not identical to API 1.7. In
 particular, they model location-scoped adjustments, richer count sessions, raw

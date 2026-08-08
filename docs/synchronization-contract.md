@@ -82,6 +82,6 @@ is absent; every later page must echo the committed cursor exactly.
 - Timeouts, 429, and classified 5xx responses remain in the durable outbox
   with exponential backoff and bounded jitter.
 - Access and refresh tokens are never persisted in Drift.
-- Browser requests use a credentialed client. The optional loopback
-  development bearer is injected only at the composition root and is forbidden
-  outside the development golden path.
+- Browser requests use the backend's credentialed cookie session and CSRF
+  contract. Native requests obtain their session through interactive sign-in;
+  no bearer token or home identifier is injected at build time.

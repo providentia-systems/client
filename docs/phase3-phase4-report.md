@@ -1,5 +1,10 @@
 # Flutter Phase 3–4 implementation report
 
+> Historical snapshot: contract versions, operation counts, and composition
+> claims below describe the Phase 3–4 handoff, not the current client. See
+> [Contracts](contracts.md) and [Local development](local-development.md) for
+> the current API pin and runnable boundary.
+
 ## Outcome
 
 Providentia now has an inspectable Fresh Market application shell and a

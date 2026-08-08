@@ -183,4 +183,37 @@ void main() {
 
     expect(FocusManager.instance.primaryFocus, isNotNull);
   });
+
+  testWidgets('composed workspace exposes change-home and sign-out actions', (
+    tester,
+  ) async {
+    var changeHomeCalls = 0;
+    var signOutCalls = 0;
+    await tester.pumpWidget(
+      ProvidentiaApp(
+        controller: AppController.preview(),
+        onChangeHome: () async {
+          changeHomeCalls++;
+        },
+        onSignOut: () async {
+          signOutCalls++;
+        },
+      ),
+    );
+
+    await tester.tap(find.byKey(const Key('account-actions')));
+    await tester.pumpAndSettle();
+    expect(find.text('Change home'), findsOneWidget);
+    expect(find.text('Sign out'), findsOneWidget);
+
+    await tester.tap(find.text('Change home'));
+    await tester.pumpAndSettle();
+    expect(changeHomeCalls, 1);
+
+    await tester.tap(find.byKey(const Key('account-actions')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Sign out'));
+    await tester.pumpAndSettle();
+    expect(signOutCalls, 1);
+  });
 }

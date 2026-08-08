@@ -142,6 +142,32 @@ final class HomeSessionManager {
     );
   }
 
+  /// Closes the current workspace and returns to the authorized-home chooser.
+  ///
+  /// This only clears the local preference. It never treats the cached home
+  /// list as an authorization grant: opening a home still calls
+  /// [HomeTransportPort.switchActiveHome] and validates the server response.
+  Future<void> returnToChooser() async {
+    _ensureOpen();
+    _generation++;
+    final homes = _snapshot.homes;
+    String? safeMessage;
+    try {
+      await _activeHomeStore.clear();
+    } on Exception {
+      safeMessage =
+          'The saved home preference could not be cleared. Choose an authorized home to continue.';
+    }
+    _onActiveHomeChanged?.call(null);
+    _emit(
+      HomeSessionSnapshot(
+        status: HomeSessionStatus.selectionRequired,
+        homes: homes,
+        safeMessage: safeMessage,
+      ),
+    );
+  }
+
   Future<void> refreshGovernance() async {
     final active = _requireActiveHome();
     final generation = ++_generation;

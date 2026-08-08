@@ -4,14 +4,16 @@
 
 The Flutter client must not invent transport operations that are absent from
 the backend-owned OpenAPI artifact. The contract pinned in this repository is
-API `1.3.0`, SHA-256
-`2c5581964c7d3f23584c52ebd1ec4961b188990e4397aaed9322d98e34550024`.
-It permits synchronization only for `home-preference` and `private-note`.
+API `1.7.0`, SHA-256
+`0d9f9472b1af44c0bde5dfcd18489dc8fc07cd2a783dadcd9496a13d5de97786`.
+Backend `main` currently publishes API `1.10.0`. The generic synchronization
+allowlist remains limited to `home-preference` and `private-note`.
 
 Inventory, purchasing, shopping, AI extraction, catalog moderation, and
-reporting records therefore remain behind application-owned ports until the
-backend publishes typed resources. They must never be sent as made-up entity
-types through the generic synchronization endpoint.
+reporting records remain behind application-owned ports until each client
+adapter deliberately adopts a compatible typed backend resource. They must
+never be sent as made-up entity types through the generic synchronization
+endpoint. Generated operations alone do not make a workflow reachable.
 
 This is a fail-closed compatibility rule, not a reason to put HTTP calls in
 widgets or to hand-edit the generated Dart client.
@@ -19,7 +21,7 @@ widgets or to hand-edit the generated Dart client.
 ## Required release order
 
 1. Implement and test the resource in
-   `vast-development-method/providentia-laminas`.
+   `providentia-systems/backend`.
 2. Publish a semantically versioned, immutable OpenAPI artifact.
 3. Prove server conformance, tenant authorization, idempotency, pagination,
    revision, and Problem Details behavior.

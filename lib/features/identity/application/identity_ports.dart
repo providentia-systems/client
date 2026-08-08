@@ -38,11 +38,12 @@ final class IdentityCredentialStoreException implements Exception {
 
 /// Application-owned identity transport.
 ///
-/// These passwordless operations are the approved forward contract. OpenAPI
-/// 1.7 currently publishes password register/login/verification only, so its
-/// adapter must report passwordless as unavailable until the backend publishes
-/// challenge and completion endpoints. Nothing here implies those endpoints
-/// are executable against 1.7.
+/// These passwordless operations are the approved forward contract. The
+/// client-pinned OpenAPI 1.7 publishes password register/login/verification
+/// only, so its adapter must report passwordless as unavailable until the
+/// client adopts the newer backend challenge/completion contract and deep-link
+/// flow. Nothing here implies those endpoints are executable against the 1.7
+/// pin.
 abstract interface class IdentityTransportPort {
   ClientSessionTransport get sessionTransport;
 
@@ -73,7 +74,7 @@ abstract interface class IdentityTransportPort {
   });
 }
 
-/// Temporary compatibility capability for the published OpenAPI 1.7
+/// Temporary compatibility capability for the client-pinned OpenAPI 1.7
 /// password login. Product code can remove this interface after passwordless
 /// challenge endpoints are released and deployed.
 abstract interface class LegacyPasswordIdentityTransportPort {
