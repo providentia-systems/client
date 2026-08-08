@@ -41,10 +41,7 @@ class RuntimeConfiguration {
   final Uri apiBaseUri;
   final String environment;
 
-  static Uri _validateApiBaseUri(
-    String value, {
-    required String environment,
-  }) {
+  static Uri _validateApiBaseUri(String value, {required String environment}) {
     final uri = Uri.parse(value);
     final isLoopback =
         uri.host == 'localhost' || uri.host == '127.0.0.1' || uri.host == '::1';
@@ -55,9 +52,7 @@ class RuntimeConfiguration {
       );
     }
     if (uri.scheme != 'https' &&
-        !(uri.scheme == 'http' &&
-            isLoopback &&
-            environment == 'development')) {
+        !(uri.scheme == 'http' && isLoopback && environment == 'development')) {
       throw const FormatException(
         'PROVIDENTIA_API_BASE_URL must use HTTPS outside loopback development.',
       );
