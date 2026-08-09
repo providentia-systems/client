@@ -26,17 +26,24 @@
 Domain, app-store, and trademark due diligence remains mandatory before public
 launch. It does not reopen the owner-selected name.
 
-## Current integration note — 2026-08-08
+## Current integration note — 2026-08-09
 
-- The client pins OpenAPI `1.7.0` (86 generated operations); backend `main`
-  publishes `1.10.0`. Updating the client pin remains an explicit reviewed
-  change.
-- The current composed sign-in is email/password compatibility against a local
-  development backend. Production password login is disabled by default while
-  the client adoption of the backend's published passwordless contract and its
-  deep-link flow are pending.
-- Account creation, verification, invitation-based user provisioning, and
-  platform-role grants are backend-owned workflows for now.
+- The client pins the reviewed OpenAPI `1.11.0` onboarding/session boundary and
+  generates 155 operations. Contract, lock, manifest, and generated Dart are
+  updated as one deliberate change.
+- Product onboarding is email-only login-link authentication. The originating
+  client owns a private poll token, state, and PKCE verifier; the emailed link
+  can be approved in any browser; the originating client polls and exchanges.
+  A platform return link is only a convenience, never the authoritative
+  handoff, and session credentials do not appear in URLs.
+- The backend creates a verified account only after approval. A new person gets
+  exactly one editable `My home` and becomes its `owner`; an existing person
+  restores the same account and memberships without another default home.
+- Web sessions use sliding 30-day inactivity and native sessions use sliding
+  60-day inactivity, subject to backend enforcement. Signed-in devices and
+  revocation are visible from the account screen.
+- Recipient invitations, home selection/settings/governance, and
+  platform-administrator management are composed client workflows.
 - Home roles (`owner`, `manager`, `member`, `viewer`) and platform roles are
   separate authorization domains. A platform role grants no private home
   access.

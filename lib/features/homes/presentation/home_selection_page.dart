@@ -10,6 +10,8 @@ final class HomeSelectionPage extends StatefulWidget {
     this.sessionActiveHomeId,
     this.loadOnStart = true,
     this.activeHomeBuilder,
+    this.accountPageBuilder,
+    this.onSignOut,
     super.key,
   });
 
@@ -18,6 +20,8 @@ final class HomeSelectionPage extends StatefulWidget {
   final bool loadOnStart;
   final Widget Function(BuildContext context, HomeSummary home)?
   activeHomeBuilder;
+  final WidgetBuilder? accountPageBuilder;
+  final Future<void> Function()? onSignOut;
 
   @override
   State<HomeSelectionPage> createState() => _HomeSelectionPageState();
@@ -44,6 +48,26 @@ final class _HomeSelectionPageState extends State<HomeSelectionPage> {
   }
 
   @override
+  void didUpdateWidget(covariant HomeSelectionPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!widget.loadOnStart) {
+      return;
+    }
+    if (oldWidget.controller != widget.controller || !oldWidget.loadOnStart) {
+      unawaited(
+        widget.controller.load(sessionActiveHomeId: widget.sessionActiveHomeId),
+      );
+      return;
+    }
+    if (oldWidget.sessionActiveHomeId == widget.sessionActiveHomeId) {
+      return;
+    }
+    unawaited(
+      widget.controller.reconcileSessionActiveHome(widget.sessionActiveHomeId),
+    );
+  }
+
+  @override
   void dispose() {
     _name.dispose();
     _locale.dispose();
@@ -63,6 +87,31 @@ final class _HomeSelectionPageState extends State<HomeSelectionPage> {
         }
         return Scaffold(
           key: const Key('home-selection-page'),
+          appBar: widget.accountPageBuilder == null && widget.onSignOut == null
+              ? null
+              : AppBar(
+                  title: const Text('Providentia'),
+                  actions: <Widget>[
+                    if (widget.accountPageBuilder != null)
+                      IconButton(
+                        key: const Key('home-chooser-account-access'),
+                        tooltip: 'Account & access',
+                        onPressed: () => Navigator.of(context).push<void>(
+                          MaterialPageRoute<void>(
+                            builder: widget.accountPageBuilder!,
+                          ),
+                        ),
+                        icon: const Icon(Icons.manage_accounts_outlined),
+                      ),
+                    if (widget.onSignOut != null)
+                      IconButton(
+                        key: const Key('home-chooser-sign-out'),
+                        tooltip: 'Sign out',
+                        onPressed: () => unawaited(widget.onSignOut!()),
+                        icon: const Icon(Icons.logout_rounded),
+                      ),
+                  ],
+                ),
           body: SafeArea(
             child: Center(
               child: ConstrainedBox(
@@ -73,6 +122,18 @@ final class _HomeSelectionPageState extends State<HomeSelectionPage> {
                       padding: const EdgeInsets.fromLTRB(24, 32, 24, 16),
                       sliver: SliverToBoxAdapter(child: _header(snapshot)),
                     ),
+                    if (snapshot.pendingInvitations.isNotEmpty)
+                      SliverPadding(
+                        padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
+                        sliver: SliverList.separated(
+                          itemCount: snapshot.pendingInvitations.length,
+                          itemBuilder: (context, index) => _invitationCard(
+                            snapshot.pendingInvitations[index],
+                          ),
+                          separatorBuilder: (context, index) =>
+                              const SizedBox(height: 8),
+                        ),
+                      ),
                     if (snapshot.homes.isNotEmpty)
                       SliverPadding(
                         padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -158,6 +219,28 @@ final class _HomeSelectionPageState extends State<HomeSelectionPage> {
           trailing: const Icon(Icons.chevron_right_rounded),
           enabled: !widget.controller.isBusy,
           onTap: () => unawaited(widget.controller.selectHome(home.id)),
+        ),
+      ),
+    );
+  }
+
+  Widget _invitationCard(RecipientHomeInvitation invitation) {
+    return Card(
+      color: Theme.of(context).colorScheme.secondaryContainer,
+      child: ListTile(
+        key: Key('pending-home-invitation-${invitation.id}'),
+        leading: const Icon(Icons.mark_email_unread_outlined),
+        title: Text('Invitation to ${invitation.homeName}'),
+        subtitle: Text(
+          '${invitation.role.name} access · from ${invitation.inviterDisplayName ?? 'a home member'}',
+        ),
+        trailing: FilledButton(
+          onPressed: widget.controller.isBusy
+              ? null
+              : () => unawaited(
+                  widget.controller.acceptPendingInvitation(invitation),
+                ),
+          child: const Text('Accept'),
         ),
       ),
     );

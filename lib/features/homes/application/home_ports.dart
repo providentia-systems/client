@@ -34,6 +34,15 @@ abstract interface class HomeTransportPort {
 
   Future<HomeSummary> switchActiveHome(String homeId);
 
+  Future<HomeSummary> updateHome({
+    required String homeId,
+    required String name,
+    required String locale,
+    required String currency,
+    required String timezone,
+    required int expectedRevision,
+  });
+
   Future<List<HomeMembership>> listMemberships(String homeId);
 
   Future<void> changeMembershipRole({
@@ -49,17 +58,6 @@ abstract interface class HomeTransportPort {
     required HomeRole role,
   });
 
-  Future<HomeSummary> acceptInvitation(String token);
-
-  Future<void> leaveHome(String homeId);
-}
-
-/// Optional invitation administration extension.
-///
-/// OpenAPI 1.7 supports creating and accepting invitations, but does not yet
-/// publish invitation list or revoke operations. An adapter must implement
-/// this interface only after those operations are available in its contract.
-abstract interface class HomeInvitationAdministrationPort {
   Future<List<HomeInvitation>> listInvitations(String homeId);
 
   Future<void> revokeInvitation({
@@ -67,6 +65,24 @@ abstract interface class HomeInvitationAdministrationPort {
     required String invitationId,
     required int expectedRevision,
   });
+
+  Future<List<RecipientHomeInvitation>> listPendingInvitations();
+
+  Future<HomeSummary> acceptPendingInvitation({
+    required String invitationId,
+    required int expectedRevision,
+  });
+
+  Future<List<HomePermissionPolicy>> listPermissionPolicies(String homeId);
+
+  Future<HomePermissionPolicy> putPermissionPolicy({
+    required String homeId,
+    required HomeRole role,
+    required Set<String> permissions,
+    required int expectedRevision,
+  });
+
+  Future<void> leaveHome(String homeId);
 }
 
 /// Non-secret local preference. Implementations may use platform preferences

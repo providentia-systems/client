@@ -4,6 +4,70 @@ enum HomeRole { owner, manager, member, viewer }
 
 enum InvitationStatus { pending, accepted, revoked, expired }
 
+/// Backend-owned permission vocabulary used by the client only to hide or
+/// disable command surfaces. The backend remains the authorization authority.
+final class HomePermissions {
+  const HomePermissions._();
+
+  static const String homeRead = 'home.read';
+  static const String homeManage = 'home.manage';
+  static const String membersRead = 'members.read';
+  static const String membersInvite = 'members.invite';
+  static const String membersManage = 'members.manage';
+  static const String permissionsManage = 'permissions.manage';
+  static const String ownershipTransfer = 'ownership.transfer';
+  static const String inventoryRead = 'inventory.read';
+  static const String inventoryWrite = 'inventory.write';
+  static const String inventoryManage = 'inventory.manage';
+  static const String purchasesRead = 'purchases.read';
+  static const String purchasesWrite = 'purchases.write';
+  static const String shoppingRead = 'shopping.read';
+  static const String shoppingWrite = 'shopping.write';
+  static const String shoppingManage = 'shopping.manage';
+  static const String aiRead = 'ai.read';
+  static const String aiUse = 'ai.use';
+  static const String aiManage = 'ai.manage';
+  static const String reportsRead = 'reports.read';
+  static const String catalogContribute = 'catalog.contribute';
+  static const String catalogImport = 'catalog.import';
+  static const String catalogConsentManage = 'catalog.consent.manage';
+  static const String dataExport = 'data.export';
+  static const String dataErasure = 'data.erasure';
+  static const String billingRead = 'billing.read';
+  static const String billingManage = 'billing.manage';
+
+  /// The owner policy is immutable on the backend and always contains the
+  /// complete permission catalog. Other roles must have a server policy.
+  static const Set<String> owner = <String>{
+    homeRead,
+    homeManage,
+    membersRead,
+    membersInvite,
+    membersManage,
+    permissionsManage,
+    ownershipTransfer,
+    inventoryRead,
+    inventoryWrite,
+    inventoryManage,
+    purchasesRead,
+    purchasesWrite,
+    shoppingRead,
+    shoppingWrite,
+    shoppingManage,
+    aiRead,
+    aiUse,
+    aiManage,
+    reportsRead,
+    catalogContribute,
+    catalogImport,
+    catalogConsentManage,
+    dataExport,
+    dataErasure,
+    billingRead,
+    billingManage,
+  };
+}
+
 enum HomeSessionStatus {
   loading,
   selectionRequired,
@@ -123,6 +187,56 @@ final class HomeInvitation {
   bool get mayBeRevoked => status == InvitationStatus.pending;
 }
 
+final class RecipientHomeInvitation {
+  RecipientHomeInvitation({
+    required this.id,
+    required this.homeId,
+    required this.homeName,
+    required this.inviterUserId,
+    required this.role,
+    required this.expiresAt,
+    required this.revision,
+    this.inviterDisplayName,
+  }) {
+    _requireNonEmpty(id, 'id');
+    _requireNonEmpty(homeId, 'homeId');
+    _requireNonEmpty(homeName, 'homeName');
+    _requireNonEmpty(inviterUserId, 'inviterUserId');
+    if (revision < 1) {
+      throw ArgumentError.value(revision, 'revision', 'must be positive');
+    }
+  }
+
+  final String id;
+  final String homeId;
+  final String homeName;
+  final String inviterUserId;
+  final String? inviterDisplayName;
+  final HomeRole role;
+  final DateTime expiresAt;
+  final int revision;
+}
+
+final class HomePermissionPolicy {
+  HomePermissionPolicy({
+    required this.role,
+    required this.revision,
+    required Set<String> permissions,
+    required this.configurable,
+  }) : permissions = UnmodifiableSetView<String>(Set<String>.of(permissions)) {
+    if (revision < 0) {
+      throw ArgumentError.value(revision, 'revision', 'must not be negative');
+    }
+  }
+
+  final HomeRole role;
+  final int revision;
+  final Set<String> permissions;
+  final bool configurable;
+
+  bool allows(String permission) => permissions.contains(permission);
+}
+
 final class HomeSessionSnapshot {
   HomeSessionSnapshot({
     required this.status,
@@ -130,6 +244,10 @@ final class HomeSessionSnapshot {
     this.activeHome,
     List<HomeMembership> memberships = const <HomeMembership>[],
     List<HomeInvitation> invitations = const <HomeInvitation>[],
+    List<RecipientHomeInvitation> pendingInvitations =
+        const <RecipientHomeInvitation>[],
+    List<HomePermissionPolicy> permissionPolicies =
+        const <HomePermissionPolicy>[],
     this.revokedHomeId,
     this.safeMessage,
   }) : homes = UnmodifiableListView<HomeSummary>(List<HomeSummary>.of(homes)),
@@ -138,6 +256,12 @@ final class HomeSessionSnapshot {
        ),
        invitations = UnmodifiableListView<HomeInvitation>(
          List<HomeInvitation>.of(invitations),
+       ),
+       pendingInvitations = UnmodifiableListView<RecipientHomeInvitation>(
+         List<RecipientHomeInvitation>.of(pendingInvitations),
+       ),
+       permissionPolicies = UnmodifiableListView<HomePermissionPolicy>(
+         List<HomePermissionPolicy>.of(permissionPolicies),
        );
 
   final HomeSessionStatus status;
@@ -145,11 +269,36 @@ final class HomeSessionSnapshot {
   final HomeSummary? activeHome;
   final List<HomeMembership> memberships;
   final List<HomeInvitation> invitations;
+  final List<RecipientHomeInvitation> pendingInvitations;
+  final List<HomePermissionPolicy> permissionPolicies;
   final String? revokedHomeId;
   final String? safeMessage;
 
   bool get hasActiveHome =>
       status == HomeSessionStatus.ready && activeHome != null;
+
+  /// Effective permissions for the currently authorized home.
+  ///
+  /// Missing or malformed policies deny access for every non-owner role. This
+  /// is presentation-level defence in depth; every command is still checked by
+  /// the backend.
+  Set<String> get effectivePermissions {
+    final active = activeHome;
+    if (active == null) {
+      return const <String>{};
+    }
+    if (active.role == HomeRole.owner) {
+      return HomePermissions.owner;
+    }
+    for (final policy in permissionPolicies) {
+      if (policy.role == active.role) {
+        return policy.permissions;
+      }
+    }
+    return const <String>{};
+  }
+
+  bool allows(String permission) => effectivePermissions.contains(permission);
 
   HomeSessionSnapshot copyWith({
     HomeSessionStatus? status,
@@ -158,6 +307,8 @@ final class HomeSessionSnapshot {
     bool clearActiveHome = false,
     List<HomeMembership>? memberships,
     List<HomeInvitation>? invitations,
+    List<RecipientHomeInvitation>? pendingInvitations,
+    List<HomePermissionPolicy>? permissionPolicies,
     String? revokedHomeId,
     bool clearRevokedHome = false,
     String? safeMessage,
@@ -169,6 +320,8 @@ final class HomeSessionSnapshot {
       activeHome: clearActiveHome ? null : (activeHome ?? this.activeHome),
       memberships: memberships ?? this.memberships,
       invitations: invitations ?? this.invitations,
+      pendingInvitations: pendingInvitations ?? this.pendingInvitations,
+      permissionPolicies: permissionPolicies ?? this.permissionPolicies,
       revokedHomeId: clearRevokedHome
           ? null
           : (revokedHomeId ?? this.revokedHomeId),

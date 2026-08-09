@@ -13,19 +13,80 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
 
   final generated.ProvidentiaApiClient _client;
 
+  static const Set<String> _protocolTwoCommands = <String>{
+    'inventory.location.create',
+    'inventory.home-product.create',
+    'inventory.adjustment.create',
+    'inventory.count-session.create',
+    'inventory.count-line.upsert',
+    'inventory.count-session.close',
+    'purchasing.store.create',
+    'purchasing.receipt.create',
+    'purchasing.receipt-line.create',
+    'purchasing.receipt-line.approve',
+    'purchasing.receipt.commit',
+    'shopping.list.create',
+    'shopping.list-line.create',
+    'shopping.list-line.checked',
+  };
+
   @override
   Future<PullPage> bootstrap({required String homeId}) async {
     try {
-      final response = await _client.bootstrapHomeSynchronization(
-        homeId: homeId,
-      );
-      if (response.protocolVersion != 1) {
-        throw FormatException(
-          'Unsupported sync protocol version ${response.protocolVersion}.',
-        );
-      }
+      final records = <Map<String, Object?>>[];
       final seenEntities = <String>{};
-      final changes = response.records
+      String? cursor;
+      String? highWaterCursor;
+      String? snapshotCursor;
+      String? requestId;
+      var pages = 0;
+      while (snapshotCursor == null) {
+        pages++;
+        if (pages > 1000) {
+          throw const FormatException('Bootstrap returned too many pages.');
+        }
+        final response = await _client.bootstrapHomeSynchronization(
+          homeId: homeId,
+          cursor: cursor,
+        );
+        if (response.protocolVersion != 1) {
+          throw FormatException(
+            'Unsupported sync protocol version ${response.protocolVersion}.',
+          );
+        }
+        if (highWaterCursor != null &&
+            highWaterCursor != response.highWaterCursor) {
+          throw const FormatException(
+            'Bootstrap snapshot boundary changed between pages.',
+          );
+        }
+        highWaterCursor ??= response.highWaterCursor;
+        requestId = response.requestId;
+        records.addAll(response.records);
+        if (response.hasMore) {
+          final next = response.pageCursor;
+          if (next == null || next == cursor) {
+            throw const FormatException(
+              'Bootstrap page cursor did not advance.',
+            );
+          }
+          if (response.snapshotCursor != null) {
+            throw const FormatException(
+              'Bootstrap exposed its final cursor before the final page.',
+            );
+          }
+          cursor = next;
+          continue;
+        }
+        snapshotCursor = response.snapshotCursor;
+        if (snapshotCursor == null) {
+          throw const FormatException(
+            'Bootstrap final page omitted the snapshot cursor.',
+          );
+        }
+      }
+      final finalSnapshotCursor = snapshotCursor;
+      final changes = records
           .map((record) {
             final entityType = _requiredString(record, 'entityType');
             final entityId = _requiredString(record, 'entityId');
@@ -36,7 +97,7 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
             }
             final representation = _requiredObject(record, 'representation');
             return RemoteChange(
-              cursor: response.snapshotCursor,
+              cursor: finalSnapshotCursor,
               homeId: homeId,
               entityType: entityType,
               entityId: entityId,
@@ -48,15 +109,15 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
           })
           .toList(growable: false);
       return PullPage(
-        protocolVersion: response.protocolVersion,
+        protocolVersion: 1,
         // The first local cursor is absent. The repository deliberately
         // accepts this server-issued snapshot boundary only for bootstrap.
-        fromCursor: response.snapshotCursor,
+        fromCursor: finalSnapshotCursor,
         changes: changes,
-        pageCursor: response.snapshotCursor,
-        highWaterCursor: response.snapshotCursor,
+        pageCursor: finalSnapshotCursor,
+        highWaterCursor: highWaterCursor!,
         hasMore: false,
-        requestId: response.requestId,
+        requestId: requestId!,
       );
     } on generated.ProvidentiaApiException catch (error) {
       if (error.statusCode == 401) {
@@ -102,6 +163,17 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
     // adding/removing an operation produces a new batch identity. Individual
     // operation IDs remain the server's domain idempotency keys.
     final batchId = _batchId(operations);
+    final protocolTwoCount = operations
+        .where(
+          (operation) => _protocolTwoCommands.contains(operation.entityType),
+        )
+        .length;
+    if (protocolTwoCount != 0 && protocolTwoCount != operations.length) {
+      throw const FormatException(
+        'A synchronization batch cannot mix protocol versions.',
+      );
+    }
+    final protocolVersion = protocolTwoCount == operations.length ? 2 : 1;
     try {
       final response = await _client.pushHomeSynchronization(
         homeId: homeId,
@@ -109,9 +181,21 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
         batchId: batchId,
         deviceId: deviceId,
         lastPulledCursor: lastPulledCursor,
+        protocolVersion: protocolVersion,
         operations: operations
-            .map(
-              (operation) => generated.SyncOperation(
+            .map<generated.SyncCommand>((operation) {
+              if (protocolVersion == 2) {
+                return generated.SyncPantryCommand(
+                  operationId: operation.operationId,
+                  commandType: operation.entityType,
+                  entityId: operation.entityId,
+                  baseRevision: operation.baseRevision,
+                  clientTimestamp: operation.clientTimestamp,
+                  payloadSchemaVersion: operation.payloadSchemaVersion,
+                  payload: operation.payload,
+                );
+              }
+              return generated.SyncOperation(
                 operationId: operation.operationId,
                 entityType: operation.entityType,
                 entityId: operation.entityId,
@@ -120,11 +204,12 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
                 clientTimestamp: operation.clientTimestamp,
                 payloadSchemaVersion: operation.payloadSchemaVersion,
                 payload: operation.payload,
-              ),
-            )
+              );
+            })
             .toList(growable: false),
       );
-      if (response.protocolVersion != 1 || response.batchId != batchId) {
+      if (response.protocolVersion != protocolVersion ||
+          response.batchId != batchId) {
         throw const FormatException(
           'Synchronization response identity did not match the request.',
         );

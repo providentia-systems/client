@@ -141,6 +141,9 @@ void main() {
               'protocolVersion': 1,
               'requestId': 'request-bootstrap',
               'snapshotCursor': 'snapshot-cursor',
+              'pageCursor': null,
+              'highWaterCursor': 'snapshot-cursor',
+              'hasMore': false,
               'records': <Object?>[
                 <String, Object?>{
                   'entityType': 'home-preference',
@@ -164,6 +167,111 @@ void main() {
       expect(page.changes.single.payload['theme'], 'fresh');
     },
   );
+
+  test('bootstrap consumes every page at one high-water boundary', () async {
+    var calls = 0;
+    final client = generated.ProvidentiaApiClient(
+      baseUri: Uri.parse('https://api.example.test'),
+      httpClient: MockClient((request) async {
+        calls++;
+        if (calls == 1) {
+          expect(request.url.queryParameters, <String, String>{'limit': '250'});
+          return http.Response(
+            jsonEncode(<String, Object?>{
+              'protocolVersion': 1,
+              'requestId': 'bootstrap-page-1',
+              'snapshotCursor': null,
+              'pageCursor': 'next-page',
+              'highWaterCursor': 'snapshot-cursor',
+              'hasMore': true,
+              'records': <Object?>[_bootstrapRecord('entity-1', revision: 1)],
+            }),
+            200,
+          );
+        }
+        expect(request.url.queryParameters['cursor'], 'next-page');
+        return http.Response(
+          jsonEncode(<String, Object?>{
+            'protocolVersion': 1,
+            'requestId': 'bootstrap-page-2',
+            'snapshotCursor': 'snapshot-cursor',
+            'pageCursor': null,
+            'highWaterCursor': 'snapshot-cursor',
+            'hasMore': false,
+            'records': <Object?>[_bootstrapRecord('entity-2', revision: 2)],
+          }),
+          200,
+        );
+      }),
+    );
+
+    final page = await GeneratedSyncGateway(client).bootstrap(homeId: homeId);
+
+    expect(calls, 2);
+    expect(page.changes.map((change) => change.entityId), <String>[
+      'entity-1',
+      'entity-2',
+    ]);
+    expect(page.pageCursor, 'snapshot-cursor');
+  });
+
+  test('pantry command batches use sync push protocol 2', () async {
+    late Map<String, Object?> requestBody;
+    final client = generated.ProvidentiaApiClient(
+      baseUri: Uri.parse('https://api.example.test'),
+      httpClient: MockClient((request) async {
+        requestBody = jsonDecode(request.body) as Map<String, Object?>;
+        final command =
+            (requestBody['operations'] as List<Object?>).single
+                as Map<String, Object?>;
+        return http.Response(
+          jsonEncode(<String, Object?>{
+            'protocolVersion': 2,
+            'batchId': requestBody['batchId'],
+            'requestId': 'pantry-push',
+            'serverTime': '2026-08-09T12:00:00Z',
+            'results': <Object?>[
+              <String, Object?>{
+                'operationId': command['operationId'],
+                'status': 'accepted',
+                'revision': 1,
+                'changeCursor': 'cursor-1',
+              },
+            ],
+            'highWaterCursor': 'cursor-1',
+          }),
+          200,
+        );
+      }),
+    );
+
+    final response = await GeneratedSyncGateway(client).push(
+      homeId: homeId,
+      lastPulledCursor: null,
+      operations: <PendingClientOperation>[
+        PendingClientOperation(
+          operationId: operationId,
+          deviceId: deviceId,
+          homeId: homeId,
+          entityType: 'inventory.adjustment.create',
+          entityId: '0198a0b1-c2d3-7e4f-b456-789abcdef012',
+          operationType: 'create',
+          clientTimestamp: DateTime.utc(2026, 8, 9, 12),
+          payloadSchemaVersion: 1,
+          payload: const <String, Object?>{'delta': 1},
+          retryCount: 0,
+        ),
+      ],
+    );
+
+    final command =
+        (requestBody['operations'] as List<Object?>).single
+            as Map<String, Object?>;
+    expect(requestBody['protocolVersion'], 2);
+    expect(command['commandType'], 'inventory.adjustment.create');
+    expect(command, isNot(contains('entityType')));
+    expect(response.results.single.kind, PushResultKind.acknowledged);
+  });
 
   test(
     'HTTP 403 blocks each pushed operation as authorization failure',
@@ -466,3 +574,15 @@ PendingClientOperation _operation({
     retryCount: 0,
   );
 }
+
+Map<String, Object?> _bootstrapRecord(
+  String entityId, {
+  required int revision,
+}) => <String, Object?>{
+  'entityType': 'home-preference',
+  'entityId': entityId,
+  'revision': revision,
+  'representationSchemaVersion': 1,
+  'representation': <String, Object?>{'revision': revision},
+  'serverTimestamp': '2026-08-09T12:00:00Z',
+};

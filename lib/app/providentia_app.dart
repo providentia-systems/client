@@ -5,24 +5,79 @@ import 'package:providentia/app/app_controller.dart';
 import 'package:providentia/app/household_features.dart';
 import 'package:providentia/core/design_system/providentia_theme.dart';
 import 'package:providentia/core/synchronization/sync_models.dart';
+import 'package:providentia/features/homes/domain/home_models.dart';
+import 'package:providentia/features/inventory/presentation/inventory_controller.dart';
 import 'package:providentia/features/inventory/presentation/inventory_workspace.dart';
+import 'package:providentia/features/purchasing/presentation/purchasing_controller.dart';
 import 'package:providentia/features/purchasing/presentation/purchasing_workspace.dart';
+import 'package:providentia/features/shopping/presentation/shopping_controller.dart';
 import 'package:providentia/features/shopping/presentation/shopping_workspace.dart';
+
+/// Presentation capabilities derived from the active home policy returned by
+/// the backend. Unknown or absent permissions remain denied.
+final class HouseholdWorkspaceAccess {
+  const HouseholdWorkspaceAccess({
+    required this.inventoryRead,
+    required this.inventoryWrite,
+    required this.purchasesRead,
+    required this.purchasesWrite,
+    required this.shoppingRead,
+    required this.shoppingWrite,
+  });
+
+  factory HouseholdWorkspaceAccess.fromPermissions(Set<String> permissions) {
+    return HouseholdWorkspaceAccess(
+      inventoryRead: permissions.contains(HomePermissions.inventoryRead),
+      inventoryWrite: permissions.contains(HomePermissions.inventoryWrite),
+      purchasesRead: permissions.contains(HomePermissions.purchasesRead),
+      purchasesWrite: permissions.contains(HomePermissions.purchasesWrite),
+      shoppingRead: permissions.contains(HomePermissions.shoppingRead),
+      shoppingWrite: permissions.contains(HomePermissions.shoppingWrite),
+    );
+  }
+
+  static const HouseholdWorkspaceAccess denied = HouseholdWorkspaceAccess(
+    inventoryRead: false,
+    inventoryWrite: false,
+    purchasesRead: false,
+    purchasesWrite: false,
+    shoppingRead: false,
+    shoppingWrite: false,
+  );
+
+  final bool inventoryRead;
+  final bool inventoryWrite;
+  final bool purchasesRead;
+  final bool purchasesWrite;
+  final bool shoppingRead;
+  final bool shoppingWrite;
+
+  bool mayRead(AppSection section) => switch (section) {
+    AppSection.home => true,
+    AppSection.stock => inventoryRead,
+    AppSection.purchases => purchasesRead,
+    AppSection.lists => shoppingRead,
+  };
+}
 
 class ProvidentiaApp extends StatefulWidget {
   const ProvidentiaApp({
     required this.controller,
     this.features,
+    this.access = HouseholdWorkspaceAccess.denied,
     this.onChangeHome,
     this.onSignOut,
+    this.accountPageBuilder,
     this.onDispose,
     super.key,
   });
 
   final AppController controller;
   final HouseholdFeatures? features;
+  final HouseholdWorkspaceAccess access;
   final Future<void> Function()? onChangeHome;
   final Future<void> Function()? onSignOut;
+  final WidgetBuilder? accountPageBuilder;
   final VoidCallback? onDispose;
 
   @override
@@ -34,7 +89,29 @@ class _ProvidentiaAppState extends State<ProvidentiaApp> {
   void initState() {
     super.initState();
     widget.controller.start();
-    widget.features?.start();
+    _startReadableFeatures();
+  }
+
+  @override
+  void didUpdateWidget(covariant ProvidentiaApp oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _startReadableFeatures();
+  }
+
+  void _startReadableFeatures() {
+    final features = widget.features;
+    if (features == null) {
+      return;
+    }
+    if (widget.access.inventoryRead) {
+      features.inventory.start();
+    }
+    if (widget.access.purchasesRead) {
+      features.purchasing.start();
+    }
+    if (widget.access.shoppingRead) {
+      features.shopping.start();
+    }
   }
 
   @override
@@ -58,8 +135,10 @@ class _ProvidentiaAppState extends State<ProvidentiaApp> {
           return _AdaptiveShell(
             controller: widget.controller,
             features: widget.features,
+            access: widget.access,
             onChangeHome: widget.onChangeHome,
             onSignOut: widget.onSignOut,
+            accountPageBuilder: widget.accountPageBuilder,
           );
         },
       ),
@@ -71,14 +150,18 @@ class _AdaptiveShell extends StatelessWidget {
   const _AdaptiveShell({
     required this.controller,
     required this.features,
+    required this.access,
     required this.onChangeHome,
     required this.onSignOut,
+    required this.accountPageBuilder,
   });
 
   final AppController controller;
   final HouseholdFeatures? features;
+  final HouseholdWorkspaceAccess access;
   final Future<void> Function()? onChangeHome;
   final Future<void> Function()? onSignOut;
+  final WidgetBuilder? accountPageBuilder;
 
   static const double phoneBreakpoint = 700;
   static const double desktopBreakpoint = 1100;
@@ -91,6 +174,7 @@ class _AdaptiveShell extends StatelessWidget {
         final content = _ContentViewport(
           controller: controller,
           features: features,
+          access: access,
         );
 
         if (width < phoneBreakpoint) {
@@ -138,26 +222,31 @@ class _AdaptiveShell extends StatelessWidget {
   }
 
   Widget? get _accountActions {
-    if (onChangeHome == null && onSignOut == null) {
+    if (onChangeHome == null &&
+        onSignOut == null &&
+        accountPageBuilder == null) {
       return null;
     }
     return _AccountActionsButton(
       onChangeHome: onChangeHome,
       onSignOut: onSignOut,
+      accountPageBuilder: accountPageBuilder,
     );
   }
 }
 
-enum _AccountAction { changeHome, signOut }
+enum _AccountAction { manageAccess, changeHome, signOut }
 
 class _AccountActionsButton extends StatelessWidget {
   const _AccountActionsButton({
     required this.onChangeHome,
     required this.onSignOut,
+    required this.accountPageBuilder,
   });
 
   final Future<void> Function()? onChangeHome;
   final Future<void> Function()? onSignOut;
+  final WidgetBuilder? accountPageBuilder;
 
   @override
   Widget build(BuildContext context) {
@@ -170,7 +259,19 @@ class _AccountActionsButton extends StatelessWidget {
         tooltip: 'Account actions',
         icon: const Icon(Icons.person_outline_rounded),
         onSelected: (action) {
+          if (action == _AccountAction.manageAccess) {
+            final builder = accountPageBuilder;
+            if (builder != null) {
+              unawaited(
+                Navigator.of(
+                  context,
+                ).push<void>(MaterialPageRoute<void>(builder: builder)),
+              );
+            }
+            return;
+          }
           final callback = switch (action) {
+            _AccountAction.manageAccess => null,
             _AccountAction.changeHome => onChangeHome,
             _AccountAction.signOut => onSignOut,
           };
@@ -179,6 +280,15 @@ class _AccountActionsButton extends StatelessWidget {
           }
         },
         itemBuilder: (context) => <PopupMenuEntry<_AccountAction>>[
+          if (accountPageBuilder != null)
+            const PopupMenuItem<_AccountAction>(
+              value: _AccountAction.manageAccess,
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.manage_accounts_outlined),
+                title: Text('Account & access'),
+              ),
+            ),
           if (onChangeHome != null)
             const PopupMenuItem<_AccountAction>(
               value: _AccountAction.changeHome,
@@ -204,10 +314,15 @@ class _AccountActionsButton extends StatelessWidget {
 }
 
 class _ContentViewport extends StatelessWidget {
-  const _ContentViewport({required this.controller, required this.features});
+  const _ContentViewport({
+    required this.controller,
+    required this.features,
+    required this.access,
+  });
 
   final AppController controller;
   final HouseholdFeatures? features;
+  final HouseholdWorkspaceAccess access;
 
   @override
   Widget build(BuildContext context) {
@@ -216,19 +331,32 @@ class _ContentViewport extends StatelessWidget {
       AppSection.home => _HomeWorkspace(
         controller: controller,
         features: features,
+        access: access,
       ),
       AppSection.stock =>
         features == null
             ? const _UnavailableWorkspace(title: 'Stock')
-            : InventoryWorkspace(controller: features!.inventory),
+            : !access.inventoryRead
+            ? const _AccessDeniedWorkspace(title: 'Stock')
+            : access.inventoryWrite
+            ? InventoryWorkspace(controller: features!.inventory)
+            : _ReadOnlyInventoryWorkspace(controller: features!.inventory),
       AppSection.purchases =>
         features == null
             ? const _UnavailableWorkspace(title: 'Purchases')
-            : PurchasingWorkspace(controller: features!.purchasing),
+            : !access.purchasesRead
+            ? const _AccessDeniedWorkspace(title: 'Purchases')
+            : access.purchasesWrite
+            ? PurchasingWorkspace(controller: features!.purchasing)
+            : _ReadOnlyPurchasingWorkspace(controller: features!.purchasing),
       AppSection.lists =>
         features == null
             ? const _UnavailableWorkspace(title: 'Lists')
-            : ShoppingWorkspace(controller: features!.shopping),
+            : !access.shoppingRead
+            ? const _AccessDeniedWorkspace(title: 'Lists')
+            : access.shoppingWrite
+            ? ShoppingWorkspace(controller: features!.shopping)
+            : _ReadOnlyShoppingWorkspace(controller: features!.shopping),
     };
 
     return SafeArea(
@@ -244,10 +372,15 @@ class _ContentViewport extends StatelessWidget {
 }
 
 class _HomeWorkspace extends StatelessWidget {
-  const _HomeWorkspace({required this.controller, required this.features});
+  const _HomeWorkspace({
+    required this.controller,
+    required this.features,
+    required this.access,
+  });
 
   final AppController controller;
   final HouseholdFeatures? features;
+  final HouseholdWorkspaceAccess access;
 
   @override
   Widget build(BuildContext context) {
@@ -289,7 +422,8 @@ class _HomeWorkspace extends StatelessWidget {
                     ),
                     const SizedBox(height: 20),
                     _QuickActions(
-                      enabled: features != null,
+                      receiptEnabled: features != null && access.purchasesWrite,
+                      stockEnabled: features != null && access.inventoryWrite,
                       onReceipt: () =>
                           controller.selectSection(AppSection.purchases),
                       onStockPhoto: () =>
@@ -297,7 +431,10 @@ class _HomeWorkspace extends StatelessWidget {
                     ),
                     const SizedBox(height: 20),
                     if (features == null)
-                      const _OverviewGrid(features: null)
+                      const _OverviewGrid(
+                        features: null,
+                        access: HouseholdWorkspaceAccess.denied,
+                      )
                     else
                       ListenableBuilder(
                         listenable: Listenable.merge(<Listenable>[
@@ -308,14 +445,20 @@ class _HomeWorkspace extends StatelessWidget {
                         builder: (context, _) => Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: <Widget>[
-                            _OverviewGrid(features: features),
-                            const SizedBox(height: 20),
-                            _RecentStockPanel(features: features!),
+                            _OverviewGrid(features: features, access: access),
+                            if (access.inventoryRead) ...<Widget>[
+                              const SizedBox(height: 20),
+                              _RecentStockPanel(features: features!),
+                            ],
                           ],
                         ),
                       ),
                     const SizedBox(height: 20),
-                    _WorkspacePanel(controller: controller, features: features),
+                    _WorkspacePanel(
+                      controller: controller,
+                      features: features,
+                      access: access,
+                    ),
                     const SizedBox(height: 20),
                     const _ContractBoundaryNotice(),
                   ],
@@ -331,12 +474,14 @@ class _HomeWorkspace extends StatelessWidget {
 
 class _QuickActions extends StatelessWidget {
   const _QuickActions({
-    required this.enabled,
+    required this.receiptEnabled,
+    required this.stockEnabled,
     required this.onReceipt,
     required this.onStockPhoto,
   });
 
-  final bool enabled;
+  final bool receiptEnabled;
+  final bool stockEnabled;
   final VoidCallback onReceipt;
   final VoidCallback onStockPhoto;
 
@@ -348,13 +493,13 @@ class _QuickActions extends StatelessWidget {
       children: <Widget>[
         FilledButton.icon(
           key: const Key('receipt-capture-action'),
-          onPressed: enabled ? onReceipt : null,
+          onPressed: receiptEnabled ? onReceipt : null,
           icon: const Icon(Icons.receipt_long_outlined),
           label: const Text('Review a receipt'),
         ),
         OutlinedButton.icon(
           key: const Key('stock-photo-action'),
-          onPressed: enabled ? onStockPhoto : null,
+          onPressed: stockEnabled ? onStockPhoto : null,
           icon: const Icon(Icons.add_a_photo_outlined),
           label: const Text('Count from photos'),
         ),
@@ -542,14 +687,15 @@ class _SyncStatusCard extends StatelessWidget {
 }
 
 class _OverviewGrid extends StatelessWidget {
-  const _OverviewGrid({required this.features});
+  const _OverviewGrid({required this.features, required this.access});
 
   final HouseholdFeatures? features;
+  final HouseholdWorkspaceAccess access;
 
   @override
   Widget build(BuildContext context) {
-    final inventory = features?.inventory.state;
-    final purchasing = features?.purchasing.state;
+    final inventory = access.inventoryRead ? features?.inventory.state : null;
+    final purchasing = access.purchasesRead ? features?.purchasing.state : null;
     final cards = <_OverviewData>[
       _OverviewData(
         icon: Icons.inventory_2_outlined,
@@ -715,10 +861,15 @@ class _OverviewCard extends StatelessWidget {
 }
 
 class _WorkspacePanel extends StatelessWidget {
-  const _WorkspacePanel({required this.controller, required this.features});
+  const _WorkspacePanel({
+    required this.controller,
+    required this.features,
+    required this.access,
+  });
 
   final AppController controller;
   final HouseholdFeatures? features;
+  final HouseholdWorkspaceAccess access;
 
   @override
   Widget build(BuildContext context) {
@@ -759,7 +910,7 @@ class _WorkspacePanel extends StatelessWidget {
                 icon: workspace.$1,
                 title: workspace.$2,
                 detail: workspace.$3,
-                enabled: features != null,
+                enabled: features != null && access.mayRead(workspace.$4),
                 onTap: () => controller.selectSection(workspace.$4),
               ),
           ],
@@ -842,14 +993,184 @@ class _ContractBoundaryNotice extends StatelessWidget {
       child: const Padding(
         padding: EdgeInsets.all(14),
         child: Text(
-          'Inventory, purchases, lists, and intelligence projections remain '
-          'local on this device until the backend publishes their generated '
-          'contract. Providentia will not sync them through an invented or '
-          'unversioned endpoint.',
+          'Inventory, purchases, and lists are saved locally first and then '
+          'synchronized through the pinned, generated backend contract when '
+          'the service is available.',
         ),
       ),
     );
   }
+}
+
+class _ReadOnlyInventoryWorkspace extends StatelessWidget {
+  const _ReadOnlyInventoryWorkspace({required this.controller});
+
+  final InventoryController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: controller,
+      builder: (context, _) => ListView(
+        key: const Key('read-only-inventory-workspace'),
+        padding: const EdgeInsets.all(20),
+        children: <Widget>[
+          Text('Stock', style: Theme.of(context).textTheme.headlineLarge),
+          const SizedBox(height: 12),
+          const _ReadOnlyNotice(),
+          if (controller.state.safeError != null) ...<Widget>[
+            const SizedBox(height: 12),
+            Text(controller.state.safeError!),
+          ],
+          const SizedBox(height: 12),
+          for (final item in controller.visibleItems)
+            Card(
+              child: ListTile(
+                title: Text(item.canonicalName),
+                subtitle: Text('${item.packSize} · ${item.category}'),
+                trailing: Text(
+                  item.currentQuantity == null
+                      ? 'Not counted'
+                      : '${item.currentQuantity} ${item.unit}',
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReadOnlyPurchasingWorkspace extends StatelessWidget {
+  const _ReadOnlyPurchasingWorkspace({required this.controller});
+
+  final PurchasingController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: controller,
+      builder: (context, _) => ListView(
+        key: const Key('read-only-purchasing-workspace'),
+        padding: const EdgeInsets.all(20),
+        children: <Widget>[
+          Text('Purchases', style: Theme.of(context).textTheme.headlineLarge),
+          const SizedBox(height: 12),
+          const _ReadOnlyNotice(),
+          if (controller.state.safeError != null) ...<Widget>[
+            const SizedBox(height: 12),
+            Text(controller.state.safeError!),
+          ],
+          const SizedBox(height: 12),
+          for (final group in controller.recentGroups)
+            Card(
+              child: ListTile(
+                title: Text(group.storeName),
+                subtitle: Text(
+                  '${group.lines.length} purchase line${group.lines.length == 1 ? '' : 's'}',
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReadOnlyShoppingWorkspace extends StatelessWidget {
+  const _ReadOnlyShoppingWorkspace({required this.controller});
+
+  final ShoppingController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: controller,
+      builder: (context, _) {
+        final state = controller.state;
+        final list = state.list;
+        return ListView(
+          key: const Key('read-only-shopping-workspace'),
+          padding: const EdgeInsets.all(20),
+          children: <Widget>[
+            Text(
+              'Shopping list',
+              style: Theme.of(context).textTheme.headlineLarge,
+            ),
+            const SizedBox(height: 12),
+            const _ReadOnlyNotice(),
+            if (state.safeError != null) ...<Widget>[
+              const SizedBox(height: 12),
+              Text(state.safeError!),
+            ],
+            if (list != null) ...<Widget>[
+              const SizedBox(height: 12),
+              for (final line in list.lines)
+                ListTile(
+                  leading: Icon(
+                    line.checked
+                        ? Icons.check_box_rounded
+                        : Icons.check_box_outline_blank_rounded,
+                  ),
+                  title: Text(line.name),
+                  subtitle: Text(
+                    line.explanation ?? 'Household shopping-list item',
+                  ),
+                ),
+            ],
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _ReadOnlyNotice extends StatelessWidget {
+  const _ReadOnlyNotice();
+
+  @override
+  Widget build(BuildContext context) => const Card(
+    key: Key('household-read-only-notice'),
+    child: ListTile(
+      leading: Icon(Icons.visibility_outlined),
+      title: Text('Read-only access'),
+      subtitle: Text(
+        'Your home role can view this information but cannot change it.',
+      ),
+    ),
+  );
+}
+
+class _AccessDeniedWorkspace extends StatelessWidget {
+  const _AccessDeniedWorkspace({required this.title});
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) => Center(
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 520),
+      child: Card(
+        key: const Key('household-access-denied'),
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              const Icon(Icons.lock_outline_rounded, size: 52),
+              const SizedBox(height: 16),
+              Text(title, style: Theme.of(context).textTheme.headlineMedium),
+              const SizedBox(height: 10),
+              const Text(
+                'Your current home role does not allow this information to be viewed.',
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 class _UnavailableWorkspace extends StatelessWidget {

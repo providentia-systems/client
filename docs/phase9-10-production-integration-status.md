@@ -1,150 +1,98 @@
 # Phase 9–10 production integration status
 
-Date: 2026-08-08
-Flutter target: `1.0.0+10`
-Authoritative backend review: `providentia-systems/backend` main
+- Date: 2026-08-09
+- Flutter target: `1.0.0+10`
+- Authoritative backend review: `providentia-systems/backend` API `1.11.0`
 
-## Corrected contract baseline
+## Contract baseline
 
-The earlier Phase 8 review was based on the Flutter repository's stale API
-1.3.0 copy. Laminas main already publishes OpenAPI 3.1 contract version 1.7.0:
+The Flutter repository pins the reviewed OpenAPI `1.11.0` artifact, validates
+its SHA-256 lock, and deterministically generates a callable Dart method and
+operation-registry entry for all 155 published operations. Generated transport
+stays behind application-owned adapters so authentication, authorization,
+session storage, and home lifecycle rules are explicit and testable.
 
-- source: `contracts/openapi/providentia-v1.json`
-- SHA-256: `0d9f9472b1af44c0bde5dfcd18489dc8fc07cd2a783dadcd9496a13d5de97786`
-- 86 operations and 101 component schemas
-- online resources through inventory, counts, receipts, shopping, AI,
-  catalog administration, intelligence, and reports
+The synchronization gateway retains protocol-v2 push and paged bootstrap. A
+contract update may not regress those semantics while adopting onboarding.
 
-Flutter now pins those exact bytes, verifies the hash, and generates a
-contract operation registry and callable method for every published operation.
-The generated transport remains behind application-owned adapters because
-several API 1.7 responses are intentionally free-form.
+## Composed production boundary
 
-## Implemented code boundaries
-
-This table records adapters and application-owned capabilities. It does not
-mean every row is constructed by the current production composition or
-reachable from the visible client UI.
-
-| Capability | Client implementation |
+| Capability | Current client implementation |
 |---|---|
-| API 1.7 | Exact contract pin, manifest/hash guard, 86-operation generated client |
-| Current authentication | API 1.7 password compatibility, native bearer sessions, web cookie sessions |
-| Approved authentication direction | Passwordless challenge/link/code application boundary and UI, ready for the forthcoming contract |
-| Refresh security | Single-flight rotation; a concurrent native refresh cannot reuse and revoke the session |
-| Native credentials | Refresh token only in OS secure storage; access token remains in memory |
-| Browser credentials | Secure HttpOnly cookies; no bearer or refresh token in browser storage; CSRF header on mutations |
-| Devices | Stable client device ID plus list/revoke session flows |
-| Homes | List, create, select/switch, membership list, role change, invite, accept, leave |
-| Revoked access | Active workspace closes and late responses are generation-fenced |
-| Online household boundary | Adapter for authoritative API 1.7 home-stock reads and idempotent home-level adjustments; not used by the current visible household workspace |
-| AI credentials | Adapter and presentation boundary for the write-only, encrypted, home/provider-scoped vault; not reachable in the current composition |
-| API 1.7 extraction | One-image server-proxy adapter with mandatory review response mapping; not reachable in the current composition |
-| Media acquisition | Camera, gallery, supported file selection, and short-video capture boundary |
-| Image privacy | Decode/re-encode, orientation normalization, resize, metadata removal, exact SHA-256 consent binding |
-| Multi-page/media model | Ordered image/PDF-page/video-frame batches with bounded size/count/duration policies |
-| Video policy | Audio excluded, deterministic quality selection, temporal spacing, near-duplicate removal |
-| Multiple AI | Primary plus optional independent validator, deterministic field comparison, timeout/cost ceilings |
-| Approval | Material disagreement and all successful extraction paths require human review; no automatic inventory mutation |
-| Release engineering | Fail-closed signing/package/deployment workflows for Android, Apple, Windows, Linux, web, and browser acceptance |
-| Supply chain | Checksums, CycloneDX SBOM, release manifest, and in-toto/SLSA-compatible provenance |
+| Login-link onboarding | Email is entered in the originating client; it creates private poll/state/PKCE proofs, starts a generic request, polls with lifecycle-aware backoff, and exchanges once after browser approval |
+| Cross-device approval | The email may be opened in any browser; a deep/platform link is optional and never carries or authorizes the client session |
+| Pending request safety | Protected short-lived storage, 15-minute request boundary plus server-authoritative final status check, cancel/resend/expiry UI, and restart after an ambiguous single-use exchange |
+| Current-user bootstrap | `GET /api/v1/me` supplies identity, current session, homes, roles, active home, pending invitations, and platform roles |
+| Session restoration | Approximately 15-minute access credentials; sliding 30-day web inactivity and 60-day native inactivity enforced by the backend |
+| Credential storage | Native refresh credential only in OS secure storage; access credential in memory; web session in Secure HttpOnly cookies with required CSRF |
+| Logout | Local state clears immediately; native submits the rotating refresh credential as proof, web submits cookie plus CSRF, and remote cleanup is bounded |
+| Signed-in devices | Current device is labelled; active sessions can be reviewed/revoked; revoked or expired rows are not shown as signed in |
+| Homes | First approved new person receives one editable `My home` as owner; sole default/active home auto-opens; multiple homes use the chooser |
+| Invitations | Recipient pending invitations are visible and accepted by expected revision; owner/manager invitation controls are permission-gated |
+| Home governance | Editable name/locale/currency/timezone; owner/manager/member/viewer sections and actions derive from server permission policies |
+| Platform administration | Visible only for current users with the platform-administrator role; supports list/grant/confirmed revoke and handles the final-active-admin safeguard |
+| Browser/native platforms | Web, Android, iOS, Windows, macOS, and Linux share the same polling/exchange authority; platform return links are convenience only |
+| Release engineering | Fail-closed signing/package/deployment workflows remain for Android, Apple, Windows, Linux, web, and browser acceptance |
 
-## Backend contract gates that Flutter cannot close
-
-These are not optional client TODOs. They require a new released Laminas
-contract, and this Flutter work intentionally does not invent them.
-
-The table describes the client-pinned API `1.7.0`. Backend `main` now publishes
-API `1.10.0` and closes some server-side gaps, but those operations are not a
-client capability until the pin, adapters, deep links, UI, and acceptance tests
-are deliberately upgraded together.
-
-| Gate | API 1.7 state | Required backend change |
-|---|---|---|
-| Full offline Phase 5–8 sync | `SyncOperation.entityType` permits only `home-preference` and `private-note` | Typed sync payloads for inventory, counts, receipts, shopping, catalog proposals, preferences, private products, AI review, and feedback |
-| Bootstrap at scale | Untyped, unpaged snapshot | Typed pagination and stable resume semantics |
-| Lost response recovery | No operation-status lookup | Idempotency/operation status query |
-| Passwordless identity | Password register/login/reset only | Challenge request and magic-link/code completion operations plus app/universal-link contract |
-| Multiple provider profiles | One provider/model setting and credential per provider ID | Profile CRUD, same-provider instances, roles, permissions, primary/validator/failover, budgets and probe status |
-| Batch AI media | One image, receipt or stock | Multi-photo/PDF/video-frame batch request and exact consent manifest |
-| Queued AI | Synchronous extraction under a 30-second PHP limit | `202` job creation, status/recovery, cancellation and idempotency |
-| Transactional AI approval | Candidate review is separate from receipt/count commands | Idempotent reviewed extraction-to-domain commit |
-| Optional private media backup | Server never persists uploaded media | Retention, quota, export and deletion contract |
-| Billing | No subscription/entitlement operations | Product, entitlement, subscription, invoice and webhook-backed state APIs |
-| Invitation administration | Create/accept only | List and revoke operations |
-
-Two current contract defects also need correction before replacing the
-application-owned adapters with generated DTOs:
-
-1. The client-pinned `SessionCredentials` marks returned access, refresh and
-   CSRF tokens as `writeOnly`. The companion backend documentation fix corrects
-   API 1.10 to mark them response-only; the reviewed client pin remains
-   immutable until its next contract upgrade.
-2. Cookie-authenticated mutation operations do not declare the required
-   `X-CSRF-Token` header. The client supplies it, but the contract must describe
-   it for independent clients and contract tests.
+Only the login-link workflow is production onboarding evidence; development
+compatibility surfaces do not satisfy this acceptance boundary.
 
 ## Connected acceptance boundary
 
-Against a development backend that retains API 1.7 compatibility, the current
-production composition can:
+Against the API `1.11.0` development stack, the production composition can:
 
-1. Sign in with the API 1.7 password compatibility screen.
-2. Restore/rotate a native session or restore a browser cookie session.
-3. List authorized homes, create one if needed, and select its server-side
-   active-home session.
-4. Return to the authorized-home chooser and sign out from the household
-   workspace.
-5. Exercise health and the narrow allow-listed synchronization path.
+1. start and approve a neutral login-link request for a new or existing email;
+2. complete the private exchange in the originating client and bootstrap the
+   authoritative account;
+3. restore/rotate native or browser sessions, list devices, revoke a device,
+   and sign out deterministically;
+4. auto-open one authorized default/active home or choose between multiple
+   homes;
+5. rename the onboarding home and manage permitted memberships, invitations,
+   roles, and policies;
+6. accept recipient invitations without disturbing an unrelated active home;
+7. manage platform administrators when the current user's platform role
+   allows it; and
+8. exercise health plus protocol-v2/paged synchronization foundations.
 
-Cloud-AI credential setup, extraction, online inventory/count/receipt/shopping
-repositories, reporting, member administration, and platform administration
-are not reachable from the current composition. Their adapters and generated
-methods are implementation evidence, not an end-to-end client/backend test.
+The backend's canonical
+[client/user testing runbook](https://github.com/providentia-systems/backend/blob/main/docs/deployment/client-user-testing.md)
+is the acceptance source for browser fragment capture, cross-device approval,
+concurrent requests, expiry races, session duration, invitation lifecycle,
+role isolation, and final-administrator protection.
 
-Local Phase 5–8 projections must not be described as cross-device authoritative
-in this interim state.
+## Remaining production gates
 
-The existing Phase 5 controller contracts are not identical to API 1.7. In
-particular, they model location-scoped adjustments, richer count sessions, raw
-purchase/price rows, atomic shopping-list replacement, and feedback without a
-server suggestion identifier. The staged online repository therefore exposes
-authoritative stock reads and the compatible home-level adjustment operation,
-and fails every incompatible legacy method explicitly. Production composition
-continues to use the local projection for those incompatible workflows until
-the controller models and Laminas sync contract converge; it does not silently
-drop location, revision, or idempotency semantics.
+The current login-link and account-management boundary does not make every
+Phase 5–8 workspace cross-device authoritative. Inventory, count, receipt,
+shopping, catalog, private-product, AI-review, and feedback models must finish
+their typed synchronization adoption and two-device convergence evidence.
 
-## Release evidence versus release automation
+Production publication also remains fail-closed until external release
+evidence is supplied through reviewer-protected environments:
 
-The repository now contains executable release automation. It does **not**
-claim that signed or store-distributed artifacts exist. Production publication
-remains fail-closed until the following external evidence is supplied through
-reviewer-protected GitHub environments:
-
-- Android upload/signing key and Play signing configuration
+- Android upload/signing key and Play signing configuration;
 - Apple distribution certificate, provisioning profile, App Store Connect
-  issuer/key, macOS Developer ID and notarization credentials
-- Windows trusted code-signing certificate
-- Linux signing identity and publication destination
-- production web origin, deployment hook, TLS and same-site API topology
-- privacy policy/support URLs and store metadata
-- physical Android/iOS device evidence and real Safari/macOS validation
+  issuer/key, macOS Developer ID, and notarization credentials;
+- Windows trusted code-signing certificate;
+- Linux signing identity and publication destination;
+- production web origin, deployment hook, TLS, same-site API topology, and
+  credentialed CORS;
+- privacy-policy/support URLs and store metadata; and
+- physical Android/iOS and independent Safari/macOS acceptance evidence.
 
-The production edge must not send `Permissions-Policy: camera=()` to the PWA.
-The current Laminas PR #5 Caddy baseline does so; camera capture will fail if
-the web client is served behind that header. Cookie auth also requires a
-same-site PWA/API deployment because the cookies are Secure, host-only and
-SameSite=Strict.
+The production edge must permit the camera for PWA capture and preserve the
+same-site cookie topology required by browser sessions.
 
 ## Phase exit criteria
 
-Phase 9 exits only when the API 1.7 connected path above passes against a live
-Laminas deployment, including refresh, retry, revoked membership and
+Phase 9 exits when the complete API `1.11.0` login-link, session, home,
+invitation, role, and administration path passes against a live deployment on
+every selected platform, including expiry, retry, revoked membership, and
 cross-home isolation.
 
-Phase 10 exits only after the new backend contracts close the listed gates,
-two-device offline tests prove no duplicate movements, queued AI recovery is
-idempotent, and every selected platform has signed artifacts plus independent
-device/browser acceptance evidence. Workflows and placeholders are not release
-evidence.
+Phase 10 exits only after typed synchronization closes the remaining household
+gates, two-device offline tests prove no duplicate movements, queued AI
+recovery is idempotent, and every selected platform has signed artifacts plus
+independent device/browser acceptance evidence. Workflows and placeholders are
+not release evidence.

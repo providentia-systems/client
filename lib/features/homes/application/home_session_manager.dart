@@ -3,6 +3,15 @@ import 'dart:async';
 import 'package:providentia/features/homes/application/home_ports.dart';
 import 'package:providentia/features/homes/domain/home_models.dart';
 
+typedef ActiveHomeMutationCoordinator =
+    Future<HomeSummary> Function({
+      required String homeId,
+      required Future<HomeSummary> Function() mutation,
+    });
+
+typedef ActiveHomeClearMutationCoordinator =
+    Future<void> Function({required Future<void> Function() mutation});
+
 /// Coordinates server-authorized homes with a non-authoritative local active
 /// home preference. Every selected home is revalidated against [HomeTransportPort].
 final class HomeSessionManager {
@@ -11,11 +20,15 @@ final class HomeSessionManager {
     required ActiveHomeStore activeHomeStore,
     void Function(String? homeId)? onActiveHomeChanged,
     void Function(String homeId)? onHomeAccessRevoked,
+    ActiveHomeMutationCoordinator? coordinateActiveHomeMutation,
+    ActiveHomeClearMutationCoordinator? coordinateActiveHomeClearMutation,
   }) => HomeSessionManager._(
     transport,
     activeHomeStore,
     onActiveHomeChanged,
     onHomeAccessRevoked,
+    coordinateActiveHomeMutation,
+    coordinateActiveHomeClearMutation,
   );
 
   HomeSessionManager._(
@@ -23,6 +36,8 @@ final class HomeSessionManager {
     this._activeHomeStore,
     this._onActiveHomeChanged,
     this._onHomeAccessRevoked,
+    this._coordinateActiveHomeMutation,
+    this._coordinateActiveHomeClearMutation,
   ) : _snapshot = HomeSessionSnapshot(
         status: HomeSessionStatus.selectionRequired,
       );
@@ -31,6 +46,8 @@ final class HomeSessionManager {
   final ActiveHomeStore _activeHomeStore;
   final void Function(String? homeId)? _onActiveHomeChanged;
   final void Function(String homeId)? _onHomeAccessRevoked;
+  final ActiveHomeMutationCoordinator? _coordinateActiveHomeMutation;
+  final ActiveHomeClearMutationCoordinator? _coordinateActiveHomeClearMutation;
   final StreamController<HomeSessionSnapshot> _states =
       StreamController<HomeSessionSnapshot>.broadcast(sync: true);
 
@@ -42,43 +59,137 @@ final class HomeSessionManager {
 
   Stream<HomeSessionSnapshot> get states => _states.stream;
 
-  Future<void> load({String? sessionActiveHomeId}) async {
+  Future<void> load({
+    String? sessionActiveHomeId,
+    bool sessionActiveHomeIsAuthoritative = false,
+  }) async {
     _ensureOpen();
     final generation = ++_generation;
+    final previouslyActiveHomeId = _snapshot.activeHome?.id;
+    final previouslyAuthorizedIds = _snapshot.homes
+        .map((home) => home.id)
+        .toSet();
+    final reportedRevokedIds = <String>{};
     _emit(HomeSessionSnapshot(status: HomeSessionStatus.loading));
     try {
       final homes = await _transport.listHomes();
       if (generation != _generation) {
         return;
       }
+      _emit(
+        HomeSessionSnapshot(status: HomeSessionStatus.loading, homes: homes),
+      );
+
+      // The homes list is authoritative. Process removals before any unrelated
+      // invitation request can fail or time out, so revoked household data is
+      // closed and purged immediately.
+      final authorizedIds = homes.map((home) => home.id).toSet();
+      for (final revokedHomeId in previouslyAuthorizedIds.difference(
+        authorizedIds,
+      )) {
+        if (reportedRevokedIds.add(revokedHomeId)) {
+          _notifyHomeAccessRevoked(revokedHomeId);
+        }
+      }
+      if (sessionActiveHomeId != null &&
+          !authorizedIds.contains(sessionActiveHomeId) &&
+          reportedRevokedIds.add(sessionActiveHomeId)) {
+        _notifyHomeAccessRevoked(sessionActiveHomeId);
+      }
+      var storedHomeId = await _activeHomeStore.read();
+      if (generation != _generation) {
+        return;
+      }
+      if (storedHomeId != null &&
+          !authorizedIds.contains(storedHomeId) &&
+          reportedRevokedIds.add(storedHomeId)) {
+        _notifyHomeAccessRevoked(storedHomeId);
+      }
+      if (sessionActiveHomeIsAuthoritative &&
+          storedHomeId != sessionActiveHomeId) {
+        try {
+          await _activeHomeStore.clear();
+        } on Exception {
+          // A local preference is not an authorization grant.
+        }
+        storedHomeId = null;
+      }
+
+      var pendingInvitations = const <RecipientHomeInvitation>[];
+      String? invitationLoadMessage;
+      try {
+        pendingInvitations = await _transport.listPendingInvitations();
+      } on HomeTransportException catch (error) {
+        invitationLoadMessage = error.safeMessage;
+      } on Exception {
+        invitationLoadMessage =
+            'Home invitations could not be loaded. Your authorized homes remain available.';
+      }
+      if (generation != _generation) {
+        return;
+      }
       if (homes.isEmpty) {
-        await _activeHomeStore.clear();
-        _onActiveHomeChanged?.call(null);
+        String? preferenceMessage;
+        try {
+          await _activeHomeStore.clear();
+        } on Exception {
+          preferenceMessage =
+              'The saved home preference could not be cleared, but it cannot grant access.';
+        }
         _emit(
           HomeSessionSnapshot(
             status: HomeSessionStatus.selectionRequired,
             homes: homes,
+            pendingInvitations: pendingInvitations,
+            safeMessage: _combinedMessage(
+              invitationLoadMessage,
+              preferenceMessage,
+            ),
           ),
         );
+        if (sessionActiveHomeId != null ||
+            (!sessionActiveHomeIsAuthoritative &&
+                previouslyActiveHomeId != null)) {
+          await _coordinateAuthoritativeActiveHomeClear();
+        }
+        if (generation != _generation) {
+          return;
+        }
+        _onActiveHomeChanged?.call(null);
         return;
       }
 
-      final storedHomeId = await _activeHomeStore.read();
-      if (generation != _generation) {
-        return;
+      if (storedHomeId != null && !authorizedIds.contains(storedHomeId)) {
+        try {
+          await _activeHomeStore.clear();
+        } on Exception {
+          // A stale preference is not an authorization grant.
+        }
       }
-      final candidateId = _authorizedCandidate(
-        homes,
-        sessionActiveHomeId,
-        storedHomeId,
-      );
+      final candidateId = sessionActiveHomeIsAuthoritative
+          ? sessionActiveHomeId != null &&
+                    authorizedIds.contains(sessionActiveHomeId)
+                ? sessionActiveHomeId
+                : null
+          : _authorizedCandidate(homes, sessionActiveHomeId, storedHomeId);
       if (candidateId == null) {
         _emit(
           HomeSessionSnapshot(
             status: HomeSessionStatus.selectionRequired,
             homes: homes,
+            pendingInvitations: pendingInvitations,
+            safeMessage: invitationLoadMessage,
           ),
         );
+        if (sessionActiveHomeId != null ||
+            (!sessionActiveHomeIsAuthoritative &&
+                previouslyActiveHomeId != null)) {
+          await _coordinateAuthoritativeActiveHomeClear();
+          if (generation != _generation) {
+            return;
+          }
+          _onActiveHomeChanged?.call(null);
+        }
         return;
       }
       await _activate(
@@ -86,6 +197,8 @@ final class HomeSessionManager {
         homes: homes,
         notifyBackend: candidateId != sessionActiveHomeId,
         generation: generation,
+        pendingInvitations: pendingInvitations,
+        safeMessage: invitationLoadMessage,
       );
     } on HomeTransportException catch (error) {
       if (generation == _generation) {
@@ -93,14 +206,40 @@ final class HomeSessionManager {
       }
     } on Exception {
       if (generation == _generation) {
-        _emit(
-          HomeSessionSnapshot(
-            status: HomeSessionStatus.failure,
-            safeMessage: 'Your homes could not be loaded. Try again safely.',
-          ),
+        _handleUnexpectedFailure(
+          'Your homes could not be loaded. Try again safely.',
         );
       }
     }
+  }
+
+  /// Reconciles an active-home change broadcast by the shared web session.
+  ///
+  /// [load] first closes the old workspace, then reloads the authoritative
+  /// home list and adopts [homeId] without sending a second switch mutation.
+  Future<void> reconcileSessionActiveHome(String? homeId) {
+    _ensureOpen();
+    if (_snapshot.status == HomeSessionStatus.ready &&
+        _snapshot.activeHome?.id == homeId) {
+      return Future<void>.value();
+    }
+    return load(
+      sessionActiveHomeId: homeId,
+      sessionActiveHomeIsAuthoritative: true,
+    );
+  }
+
+  /// Immediately drops authenticated presentation state after session loss.
+  /// Persisted household rows remain home-isolated and require a future
+  /// authenticated authorization check before they can be reopened.
+  void handleAuthenticationLost() {
+    if (_disposed) {
+      return;
+    }
+    _generation++;
+    unawaited(_activeHomeStore.clear().catchError((_) {}));
+    _onActiveHomeChanged?.call(null);
+    _emit(HomeSessionSnapshot(status: HomeSessionStatus.selectionRequired));
   }
 
   Future<HomeSummary?> createHome(CreateHomeCommand command) async {
@@ -123,6 +262,13 @@ final class HomeSessionManager {
     } on HomeTransportException catch (error) {
       if (generation == _generation) {
         await _handleTransportFailure(error);
+      }
+      return null;
+    } on Exception {
+      if (generation == _generation) {
+        _handleUnexpectedFailure(
+          'The home could not be created safely. Try again.',
+        );
       }
       return null;
     }
@@ -151,6 +297,7 @@ final class HomeSessionManager {
     _ensureOpen();
     _generation++;
     final homes = _snapshot.homes;
+    final pendingInvitations = _snapshot.pendingInvitations;
     String? safeMessage;
     try {
       await _activeHomeStore.clear();
@@ -158,11 +305,11 @@ final class HomeSessionManager {
       safeMessage =
           'The saved home preference could not be cleared. Choose an authorized home to continue.';
     }
-    _onActiveHomeChanged?.call(null);
     _emit(
       HomeSessionSnapshot(
         status: HomeSessionStatus.selectionRequired,
         homes: homes,
+        pendingInvitations: pendingInvitations,
         safeMessage: safeMessage,
       ),
     );
@@ -172,13 +319,25 @@ final class HomeSessionManager {
     final active = _requireActiveHome();
     final generation = ++_generation;
     try {
-      final memberships = await _transport.listMemberships(active.id);
-      final invitationTransport = _transport is HomeInvitationAdministrationPort
-          ? _transport as HomeInvitationAdministrationPort
-          : null;
-      final invitations = invitationTransport == null
-          ? _snapshot.invitations
-          : await invitationTransport.listInvitations(active.id);
+      final permissionPolicies = await _transport.listPermissionPolicies(
+        active.id,
+      );
+      HomePermissionPolicy? activePolicy;
+      for (final policy in permissionPolicies) {
+        if (policy.role == active.role) {
+          activePolicy = policy;
+          break;
+        }
+      }
+      final effectivePermissions = active.role == HomeRole.owner
+          ? const <String>{'members.read', 'members.invite'}
+          : activePolicy?.permissions ?? const <String>{};
+      final memberships = effectivePermissions.contains('members.read')
+          ? await _transport.listMemberships(active.id)
+          : const <HomeMembership>[];
+      final invitations = effectivePermissions.contains('members.invite')
+          ? await _transport.listInvitations(active.id)
+          : const <HomeInvitation>[];
       if (generation != _generation || _snapshot.activeHome?.id != active.id) {
         return;
       }
@@ -186,12 +345,19 @@ final class HomeSessionManager {
         _snapshot.copyWith(
           memberships: memberships,
           invitations: invitations,
+          permissionPolicies: permissionPolicies,
           clearMessage: true,
         ),
       );
     } on HomeTransportException catch (error) {
       if (generation == _generation) {
         await _handleTransportFailure(error, fallbackHomeId: active.id);
+      }
+    } on Exception {
+      if (generation == _generation) {
+        _handleUnexpectedFailure(
+          'Home permissions could not be refreshed safely.',
+        );
       }
     }
   }
@@ -211,6 +377,51 @@ final class HomeSessionManager {
       await refreshGovernance();
     } on HomeTransportException catch (error) {
       await _handleTransportFailure(error, fallbackHomeId: active.id);
+    } on Exception {
+      _handleUnexpectedFailure('Member access could not be changed safely.');
+    }
+  }
+
+  Future<void> updateActiveHome({
+    required String name,
+    required String locale,
+    required String currency,
+    required String timezone,
+  }) async {
+    final active = _requireActiveHome();
+    final normalizedName = name.trim();
+    final normalizedLocale = locale.trim();
+    final normalizedCurrency = currency.trim().toUpperCase();
+    final normalizedTimezone = timezone.trim();
+    if (normalizedName.isEmpty ||
+        normalizedLocale.length < 2 ||
+        !RegExp(r'^[A-Z]{3}$').hasMatch(normalizedCurrency) ||
+        normalizedTimezone.isEmpty) {
+      throw ArgumentError('Home settings are incomplete.');
+    }
+    try {
+      final updated = await _transport.updateHome(
+        homeId: active.id,
+        name: normalizedName,
+        locale: normalizedLocale,
+        currency: normalizedCurrency,
+        timezone: normalizedTimezone,
+        expectedRevision: active.revision,
+      );
+      final homes = _snapshot.homes
+          .map((home) => home.id == updated.id ? updated : home)
+          .toList(growable: false);
+      _emit(
+        _snapshot.copyWith(
+          homes: homes,
+          activeHome: updated,
+          clearMessage: true,
+        ),
+      );
+    } on HomeTransportException catch (error) {
+      await _handleTransportFailure(error, fallbackHomeId: active.id);
+    } on Exception {
+      _handleUnexpectedFailure('Home settings could not be saved safely.');
     }
   }
 
@@ -244,38 +455,45 @@ final class HomeSessionManager {
     } on HomeTransportException catch (error) {
       await _handleTransportFailure(error, fallbackHomeId: active.id);
       return null;
+    } on Exception {
+      _handleUnexpectedFailure('The invitation could not be sent safely.');
+      return null;
     }
   }
 
   Future<void> revokeInvitation(HomeInvitation invitation) async {
     final active = _requireActiveHome();
-    final invitationTransport = _transport;
-    if (invitationTransport is! HomeInvitationAdministrationPort) {
-      throw UnsupportedError(
-        'Invitation revocation is not published by this server contract.',
-      );
-    }
-    final administration =
-        invitationTransport as HomeInvitationAdministrationPort;
     if (invitation.homeId != active.id || !invitation.mayBeRevoked) {
       throw StateError(
         'This invitation cannot be revoked from the active home.',
       );
     }
-    await administration.revokeInvitation(
-      homeId: active.id,
-      invitationId: invitation.id,
-      expectedRevision: invitation.revision,
-    );
-    await refreshGovernance();
+    try {
+      await _transport.revokeInvitation(
+        homeId: active.id,
+        invitationId: invitation.id,
+        expectedRevision: invitation.revision,
+      );
+      await refreshGovernance();
+    } on HomeTransportException catch (error) {
+      await _handleTransportFailure(error, fallbackHomeId: active.id);
+    } on Exception {
+      _handleUnexpectedFailure('The invitation could not be revoked safely.');
+    }
   }
 
-  Future<void> acceptInvitation(String token) async {
+  Future<void> acceptPendingInvitation(
+    RecipientHomeInvitation invitation,
+  ) async {
     _ensureOpen();
     final generation = ++_generation;
     try {
-      final accepted = await _transport.acceptInvitation(token.trim());
+      final accepted = await _transport.acceptPendingInvitation(
+        invitationId: invitation.id,
+        expectedRevision: invitation.revision,
+      );
       final homes = await _transport.listHomes();
+      final pendingInvitations = await _transport.listPendingInvitations();
       if (generation != _generation) {
         return;
       }
@@ -290,29 +508,83 @@ final class HomeSessionManager {
         homes: homes,
         notifyBackend: true,
         generation: generation,
+        pendingInvitations: pendingInvitations,
       );
     } on HomeTransportException catch (error) {
       if (generation == _generation) {
-        await _handleTransportFailure(error);
+        if (error.revoked) {
+          await _handleTransportFailure(error);
+        } else {
+          // A recipient invitation is not scoped to the currently open home.
+          // An expired/revoked invitation must not close an unrelated active
+          // workspace or discard its locally selected home.
+          _emit(
+            _snapshot.copyWith(
+              status: _snapshot.activeHome == null
+                  ? HomeSessionStatus.selectionRequired
+                  : HomeSessionStatus.ready,
+              safeMessage: error.safeMessage,
+            ),
+          );
+        }
       }
+    } on Exception {
+      if (generation == _generation) {
+        _handleUnexpectedFailure(
+          'The invitation could not be accepted safely.',
+        );
+      }
+    }
+  }
+
+  Future<void> updatePermissionPolicy({
+    required HomePermissionPolicy policy,
+    required Set<String> permissions,
+  }) async {
+    final active = _requireActiveHome();
+    try {
+      await _transport.putPermissionPolicy(
+        homeId: active.id,
+        role: policy.role,
+        permissions: permissions,
+        expectedRevision: policy.revision,
+      );
+      await refreshGovernance();
+    } on HomeTransportException catch (error) {
+      await _handleTransportFailure(error, fallbackHomeId: active.id);
+    } on Exception {
+      _handleUnexpectedFailure('Role permissions could not be saved safely.');
     }
   }
 
   Future<void> leaveActiveHome() async {
     final active = _requireActiveHome();
     try {
-      await _transport.leaveHome(active.id);
-      await handleMembershipRevoked(active.id);
+      final coordinate = _coordinateActiveHomeClearMutation;
+      if (coordinate == null) {
+        await _transport.leaveHome(active.id);
+      } else {
+        await coordinate(mutation: () => _transport.leaveHome(active.id));
+      }
+      await handleMembershipRevoked(
+        active.id,
+        identityAlreadyCleared: coordinate != null,
+      );
     } on HomeTransportException catch (error) {
       await _handleTransportFailure(error, fallbackHomeId: active.id);
+    } on Exception {
+      _handleUnexpectedFailure('The home could not be left safely.');
     }
   }
 
   /// Immediately removes an inaccessible home from presentation and prevents
   /// late responses from repopulating its private data.
-  Future<void> handleMembershipRevoked(String homeId) async {
+  Future<void> handleMembershipRevoked(
+    String homeId, {
+    bool identityAlreadyCleared = false,
+  }) async {
     _ensureOpen();
-    _generation++;
+    final generation = ++_generation;
     final remaining = _snapshot.homes
         .where((home) => home.id != homeId)
         .toList(growable: false);
@@ -321,21 +593,35 @@ final class HomeSessionManager {
         (_snapshot.status == HomeSessionStatus.loading &&
             _snapshot.homes.any((home) => home.id == homeId));
     if (!closesCurrentWorkspace) {
+      _notifyHomeAccessRevoked(homeId);
       _emit(_snapshot.copyWith(homes: remaining));
       return;
     }
-    await _activeHomeStore.clear();
-    _onActiveHomeChanged?.call(null);
-    _onHomeAccessRevoked?.call(homeId);
+    final pendingInvitations = _snapshot.pendingInvitations;
+    _notifyHomeAccessRevoked(homeId);
     _emit(
       HomeSessionSnapshot(
         status: HomeSessionStatus.accessRevoked,
         homes: remaining,
+        pendingInvitations: pendingInvitations,
         revokedHomeId: homeId,
         safeMessage:
             'Access to this home changed. Its private workspace has been closed.',
       ),
     );
+    try {
+      await _activeHomeStore.clear();
+    } on Exception {
+      // The preference is never an authorization grant. Continue closing the
+      // workspace even if local preference storage is temporarily unavailable.
+    }
+    if (!identityAlreadyCleared) {
+      await _coordinateAuthoritativeActiveHomeClear();
+    }
+    if (generation != _generation) {
+      return;
+    }
+    _onActiveHomeChanged?.call(null);
   }
 
   Future<void> dispose() async {
@@ -352,12 +638,35 @@ final class HomeSessionManager {
     required List<HomeSummary> homes,
     required bool notifyBackend,
     required int generation,
+    List<RecipientHomeInvitation>? pendingInvitations,
+    String? safeMessage,
   }) async {
-    _emit(HomeSessionSnapshot(status: HomeSessionStatus.loading, homes: homes));
+    _emit(
+      HomeSessionSnapshot(
+        status: HomeSessionStatus.loading,
+        homes: homes,
+        pendingInvitations: pendingInvitations ?? _snapshot.pendingInvitations,
+        safeMessage: safeMessage,
+      ),
+    );
     try {
-      final selected = notifyBackend
-          ? await _transport.switchActiveHome(homeId)
-          : homes.firstWhere((home) => home.id == homeId);
+      late final HomeSummary selected;
+      if (!notifyBackend) {
+        selected = homes.firstWhere((home) => home.id == homeId);
+      } else if (_coordinateActiveHomeMutation case final coordinate?) {
+        selected = await coordinate(
+          homeId: homeId,
+          mutation: () async {
+            final switched = await _transport.switchActiveHome(homeId);
+            if (generation != _generation) {
+              throw const _SupersededHomeMutation();
+            }
+            return switched;
+          },
+        );
+      } else {
+        selected = await _transport.switchActiveHome(homeId);
+      }
       if (generation != _generation) {
         return;
       }
@@ -368,8 +677,16 @@ final class HomeSessionManager {
           safeMessage: 'The selected home could not be authorized.',
         );
       }
+      // A non-owner role has no client-side capability until its current,
+      // backend-published policy has been loaded. Fetching this for owners as
+      // well keeps governance state consistent and revalidates home.read.
+      final permissionPolicies = await _transport.listPermissionPolicies(
+        selected.id,
+      );
+      if (generation != _generation) {
+        return;
+      }
       await _activeHomeStore.write(selected.id);
-      final memberships = await _transport.listMemberships(selected.id);
       if (generation != _generation) {
         return;
       }
@@ -379,12 +696,20 @@ final class HomeSessionManager {
           status: HomeSessionStatus.ready,
           homes: homes,
           activeHome: selected,
-          memberships: memberships,
+          pendingInvitations: _snapshot.pendingInvitations,
+          permissionPolicies: permissionPolicies,
+          safeMessage: safeMessage,
         ),
       );
     } on HomeTransportException catch (error) {
       if (generation == _generation) {
         await _handleTransportFailure(error, fallbackHomeId: homeId);
+      }
+    } on Exception {
+      if (generation == _generation) {
+        _handleUnexpectedFailure(
+          'The selected home could not be opened safely. Try again.',
+        );
       }
     }
   }
@@ -397,12 +722,17 @@ final class HomeSessionManager {
       final affectedHomeId =
           error.homeId ?? fallbackHomeId ?? _snapshot.activeHome?.id;
       if (affectedHomeId == null || affectedHomeId.trim().isEmpty) {
-        await _activeHomeStore.clear();
+        try {
+          await _activeHomeStore.clear();
+        } on Exception {
+          // Stale preferences never grant access and will be revalidated.
+        }
         _onActiveHomeChanged?.call(null);
         _emit(
           HomeSessionSnapshot(
             status: HomeSessionStatus.accessRevoked,
             homes: _snapshot.homes,
+            pendingInvitations: _snapshot.pendingInvitations,
             safeMessage:
                 'Home access changed. Select an authorized home to continue.',
           ),
@@ -414,10 +744,52 @@ final class HomeSessionManager {
     }
     _emit(
       _snapshot.copyWith(
-        status: HomeSessionStatus.failure,
+        status: _snapshot.activeHome == null
+            ? HomeSessionStatus.failure
+            : HomeSessionStatus.ready,
         safeMessage: error.safeMessage,
       ),
     );
+  }
+
+  void _handleUnexpectedFailure(String safeMessage) {
+    _emit(
+      _snapshot.copyWith(
+        status: _snapshot.activeHome == null
+            ? HomeSessionStatus.failure
+            : HomeSessionStatus.ready,
+        safeMessage: safeMessage,
+      ),
+    );
+  }
+
+  void _notifyHomeAccessRevoked(String homeId) {
+    try {
+      _onHomeAccessRevoked?.call(homeId);
+    } on Exception {
+      // Callback failures must never keep an inaccessible workspace open.
+    }
+  }
+
+  Future<void> _coordinateAuthoritativeActiveHomeClear() async {
+    final coordinate = _coordinateActiveHomeClearMutation;
+    if (coordinate == null) {
+      return;
+    }
+    try {
+      await coordinate(mutation: () async {});
+    } on Exception {
+      // Workspace closure and data purge remain authoritative even if a
+      // sibling-tab session mirror cannot be published immediately.
+    }
+  }
+
+  String? _combinedMessage(String? first, String? second) {
+    final messages = <String>[
+      if (first != null && first.isNotEmpty) first,
+      if (second != null && second.isNotEmpty) second,
+    ];
+    return messages.isEmpty ? null : messages.join(' ');
   }
 
   String? _authorizedCandidate(
@@ -458,4 +830,8 @@ final class HomeSessionManager {
       throw StateError('HomeSessionManager has been disposed.');
     }
   }
+}
+
+final class _SupersededHomeMutation implements Exception {
+  const _SupersededHomeMutation();
 }

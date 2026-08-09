@@ -26,6 +26,29 @@ final class SessionHttpClient extends http.BaseClient {
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
     final body = await request.finalize().toBytes();
+    if (_sessions.sessionTransport == ClientSessionTransport.webCookie &&
+        _changesState(request.method)) {
+      http.StreamedResponse? coordinatedResponse;
+      final authorized = await _sessions.coordinateWebStateChangingRequest((
+        recover,
+      ) async {
+        final response = await _inner.send(_copyRequest(request, body));
+        if (response.statusCode != 401) {
+          coordinatedResponse = response;
+          return;
+        }
+        await response.stream.drain<void>();
+        if (!await recover()) {
+          coordinatedResponse = _authenticationRequired(request, body);
+          return;
+        }
+        coordinatedResponse = await _inner.send(_copyRequest(request, body));
+      });
+      if (!authorized) {
+        return _authenticationRequired(request, body);
+      }
+      return coordinatedResponse!;
+    }
     if (!await _sessions.ensureFresh()) {
       return _authenticationRequired(request, body);
     }
@@ -43,7 +66,14 @@ final class SessionHttpClient extends http.BaseClient {
   }
 
   http.BaseRequest _copyRequest(http.BaseRequest source, List<int> body) {
-    final copy = http.Request(source.method, source.url)
+    final http.Request copy = source is http.Abortable
+        ? http.AbortableRequest(
+            source.method,
+            source.url,
+            abortTrigger: source.abortTrigger,
+          )
+        : http.Request(source.method, source.url);
+    copy
       ..followRedirects = source.followRedirects
       ..maxRedirects = source.maxRedirects
       ..persistentConnection = source.persistentConnection

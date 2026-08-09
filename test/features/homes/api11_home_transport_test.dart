@@ -1,0 +1,242 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:providentia/features/homes/application/home_ports.dart';
+import 'package:providentia/features/homes/domain/home_models.dart';
+import 'package:providentia/features/homes/infrastructure/api11_home_transport.dart';
+import 'package:providentia_api_client/providentia_api_client.dart';
+
+void main() {
+  test('required home fields never receive client-side defaults', () async {
+    for (final field in <String>[
+      'defaultLocale',
+      'defaultCurrency',
+      'defaultTimezone',
+      'role',
+    ]) {
+      final home = _homeJson()..remove(field);
+      final transport = Api11HomeTransport(
+        _client(
+          (_) async => _json(<String, Object?>{
+            'data': <Object?>[home],
+          }),
+        ),
+      );
+
+      await expectLater(
+        transport.listHomes(),
+        throwsA(
+          isA<HomeTransportException>()
+              .having(
+                (error) => error.kind,
+                'kind',
+                HomeFailureKind.unavailable,
+              )
+              .having(
+                (error) => error.safeMessage,
+                'safeMessage',
+                contains('read safely'),
+              ),
+        ),
+        reason: field,
+      );
+    }
+  });
+
+  test('malformed home UUID is rejected before it reaches routes', () async {
+    final home = _homeJson()..['id'] = 'not-a-uuid';
+    final transport = Api11HomeTransport(
+      _client(
+        (_) async => _json(<String, Object?>{
+          'data': <Object?>[home],
+        }),
+      ),
+    );
+
+    await expectLater(
+      transport.listHomes(),
+      throwsA(
+        isA<HomeTransportException>().having(
+          (error) => error.kind,
+          'kind',
+          HomeFailureKind.unavailable,
+        ),
+      ),
+    );
+  });
+
+  test('required permission list rejects null and duplicate values', () async {
+    for (final permissions in <Object?>[
+      null,
+      <Object?>['home.read', 'home.read'],
+    ]) {
+      final transport = Api11HomeTransport(
+        _client(
+          (_) async => _json(<String, Object?>{
+            'data': <Object?>[
+              <String, Object?>{
+                'role': 'member',
+                'revision': 1,
+                'permissions': permissions,
+                'configurable': true,
+              },
+            ],
+          }),
+        ),
+      );
+
+      await expectLater(
+        transport.listPermissionPolicies(_homeId),
+        throwsA(
+          isA<HomeTransportException>().having(
+            (error) => error.kind,
+            'kind',
+            HomeFailureKind.unavailable,
+          ),
+        ),
+      );
+    }
+  });
+
+  test('http client failures are normalized without leaking details', () async {
+    final transport = Api11HomeTransport(
+      _client((request) async {
+        throw http.ClientException('socket address and private detail');
+      }),
+    );
+
+    await expectLater(
+      transport.listHomes(),
+      throwsA(
+        isA<HomeTransportException>()
+            .having((error) => error.kind, 'kind', HomeFailureKind.network)
+            .having(
+              (error) => error.safeMessage,
+              'safeMessage',
+              isNot(contains('private detail')),
+            ),
+      ),
+    );
+  });
+
+  test('missing permission-policy home closes revoked workspace', () async {
+    final transport = Api11HomeTransport(_client((_) async => _problem(404)));
+
+    await expectLater(
+      transport.putPermissionPolicy(
+        homeId: _homeId,
+        role: HomeRole.member,
+        permissions: const <String>{'home.read'},
+        expectedRevision: 1,
+      ),
+      throwsA(
+        isA<HomeTransportException>().having(
+          (error) => error.kind,
+          'kind',
+          HomeFailureKind.membershipRevoked,
+        ),
+      ),
+    );
+  });
+
+  test(
+    'timed-out home switch is aborted before a later switch can land',
+    () async {
+      const delayedHomeId = '0198a0b1-c2d3-7e4f-8123-456789abcdaa';
+      const currentHomeId = '0198a0b1-c2d3-7e4f-8123-456789abcdab';
+      final landed = <String>[];
+      final aborted = <String>[];
+      final client = MockClient.streaming((request, _) async {
+        final homesSegment = request.url.pathSegments.indexOf('homes');
+        final homeId = request.url.pathSegments[homesSegment + 1];
+        if (homeId == delayedHomeId) {
+          final abortTrigger = (request as http.Abortable).abortTrigger!;
+          final outcome = await Future.any<String>(<Future<String>>[
+            Future<String>.delayed(
+              const Duration(milliseconds: 80),
+              () => 'response',
+            ),
+            abortTrigger.then((_) => 'abort'),
+          ]);
+          if (outcome == 'abort') {
+            aborted.add(homeId);
+            throw http.RequestAbortedException(request.url);
+          }
+        }
+        landed.add(homeId);
+        return _streamedJson(_homeJson()..['id'] = homeId);
+      });
+      final transport = Api11HomeTransport(
+        ProvidentiaApiClient(
+          baseUri: Uri.parse('https://api.example.test'),
+          httpClient: client,
+        ),
+        requestTimeout: const Duration(milliseconds: 10),
+      );
+
+      await expectLater(
+        transport.switchActiveHome(delayedHomeId),
+        throwsA(
+          isA<HomeTransportException>().having(
+            (error) => error.kind,
+            'kind',
+            HomeFailureKind.network,
+          ),
+        ),
+      );
+      final selected = await transport.switchActiveHome(currentHomeId);
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+
+      expect(selected.id, currentHomeId);
+      expect(aborted, <String>[delayedHomeId]);
+      expect(landed, <String>[currentHomeId]);
+    },
+  );
+}
+
+const String _homeId = '0198a0b1-c2d3-7e4f-8123-456789abcded';
+
+ProvidentiaApiClient _client(
+  Future<http.Response> Function(http.Request request) handler,
+) => ProvidentiaApiClient(
+  baseUri: Uri.parse('https://api.example.test'),
+  httpClient: MockClient(handler),
+);
+
+http.Response _json(Map<String, Object?> body) => http.Response(
+  jsonEncode(body),
+  200,
+  headers: const <String, String>{'content-type': 'application/json'},
+);
+
+http.StreamedResponse _streamedJson(Map<String, Object?> body) =>
+    http.StreamedResponse(
+      Stream<List<int>>.value(utf8.encode(jsonEncode(body))),
+      200,
+      headers: const <String, String>{'content-type': 'application/json'},
+    );
+
+http.Response _problem(int status) => http.Response(
+  jsonEncode(<String, Object?>{
+    'type': 'about:blank',
+    'title': 'Not found',
+    'status': status,
+    'detail': 'The resource is unavailable.',
+    'requestId': 'request-test',
+  }),
+  status,
+  headers: const <String, String>{'content-type': 'application/problem+json'},
+);
+
+Map<String, Object?> _homeJson() => <String, Object?>{
+  'id': _homeId,
+  'name': 'My home',
+  'defaultLocale': 'en-NA',
+  'defaultCurrency': 'NAD',
+  'defaultTimezone': 'Africa/Windhoek',
+  'role': 'member',
+  'revision': 1,
+};

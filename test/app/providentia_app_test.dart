@@ -15,7 +15,8 @@ void main() {
 
     expect(find.text('Providentia'), findsOneWidget);
     expect(find.text('Your pantry, ready'), findsOneWidget);
-    expect(find.textContaining('generated contract'), findsOneWidget);
+    expect(find.textContaining('saved locally first'), findsOneWidget);
+    expect(find.textContaining('generated backend contract'), findsOneWidget);
   });
 
   for (final viewport in <(String, Size, Key)>[
