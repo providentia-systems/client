@@ -9,11 +9,14 @@ architecture tests, and a full CI build matrix.
 
 Phases 5–8 add household inventory, count sessions, purchase history, shopping
 lists, AI review policies, catalog moderation models, explainable suggestions,
-price intelligence, reporting, and evaluation. The client pins API `1.7.0`
-with 86 generated operations. Backend `main` currently publishes API `1.10.0`;
-the client remains on its reviewed pin until a deliberate contract update.
-Most household workspaces currently use an explicit local projection and do
-not provide an end-to-end test of the newer backend resources. See
+price intelligence, reporting, and evaluation. The client now pins the
+backend's API `1.11.0` onboarding/session contract and generates 155 callable
+operations from the reviewed bytes. Email-only login-link onboarding,
+cross-device browser approval, persistent web/native sessions, current-user
+bootstrap, multiple homes, recipient invitations, home governance, signed-in
+devices, and platform-administrator controls are composed in the application.
+Most household inventory workspaces still use an explicit local projection and
+are not by themselves an end-to-end test of every backend resource. See
 [docs/phases5-8-contract-release-plan.md](docs/phases5-8-contract-release-plan.md)
 for the backend release sequence.
 
@@ -56,9 +59,9 @@ stale rather than accepting a local placeholder.
 
 ## Development golden path
 
-Start the backend development stack first. Its setup script creates and
-verifies a development account and writes the email/password handoff. Then run
-Chrome on the fixed, backend-allowlisted `http://localhost:8081` origin:
+Start the backend development stack first. It includes Mailpit and the
+notification worker needed to deliver login links. Then run Chrome on the
+fixed, backend-allowlisted `http://localhost:8081` origin:
 
 ```bash
 flutter run -d chrome \
@@ -70,16 +73,23 @@ flutter run -d chrome \
   --dart-define=PROVIDENTIA_API_BASE_URL=http://localhost:8080
 ```
 
-Log in through the client with the handoff email and password. The interactive
-session is the only authentication path; build-time bearer tokens and home IDs
-are not supported. The native refresh token is kept in platform secure storage,
-the access token remains in memory, and web authentication uses credentialed
-cookies.
+Enter an email in the client, open the delivered login link in Mailpit or the
+recipient mailbox, explicitly approve the request in the browser, and return to
+the originating client. With the loopback commands above, open Mailpit and the
+approval link on the same workstation (or an ADB-reversed device). A genuinely
+different device requires a reachable trusted HTTPS backend whose
+`PUBLIC_BASE_URL` matches the emailed origin. The originating client polls and
+exchanges its private PKCE proof, so a deep link is optional.
+Build-time bearer tokens and home IDs are not supported. Native refresh tokens
+are kept in platform secure storage, access tokens remain in memory, and web
+authentication uses credentialed HttpOnly cookies.
 
-See [local development](docs/local-development.md) for the exact backend
-handoff, Linux and Android commands, normal-user provisioning, role boundaries,
-and current end-to-end limitations. Invalid API settings render a safe
-configuration screen. The defaults are already valid for a backend on
+See [local development](docs/local-development.md) for the exact login-link
+acceptance flow, Linux and Android commands, session restoration, invitation
+and role checks, and current end-to-end limitations. The backend's canonical
+[client/user testing runbook](https://github.com/providentia-systems/backend/blob/main/docs/deployment/client-user-testing.md)
+covers the same contract from the server side. Invalid API settings render a
+safe configuration screen. The defaults are already valid for a backend on
 `http://localhost:8080`.
 
 ## Build commands

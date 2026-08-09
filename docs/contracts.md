@@ -13,19 +13,27 @@ local `providentia_api_client` Dart package.
 
 ## Current pin
 
-- Client OpenAPI version: `1.7.0`
+- Client OpenAPI version: `1.11.0`
 - Contract SHA-256:
-  `0d9f9472b1af44c0bde5dfcd18489dc8fc07cd2a783dadcd9496a13d5de97786`
-- Declared/generated operations: 86
-- Backend `main` OpenAPI version at this handoff: `1.10.0`
+  `6535298b37f99edb19d13afe1a2d36b8987ab4c051b091419eefe3ae8dbc469c`
+- Declared/generated operations: 155
 
-The version difference is intentional and visible. Generated methods show what
-the pinned server contract can express; they do not prove that an application
-adapter or a reachable UI flow uses every operation. In the current composition,
-password login, session restoration/logout, homes, memberships, health, and a
-narrow synchronization path have adapters. Registration, verification,
-password reset, user/invitation administration, and most newer household
-resources are not reachable client workflows yet.
+The login-link onboarding and account-management surface is deliberately
+adopted as one compatible boundary. Application-owned adapters compose:
+
+- generic email-only login-link start/status/cancel/exchange with client-owned
+  poll and PKCE proofs;
+- web cookie and native bearer refresh/logout, current-user bootstrap, and
+  device-session list/revoke;
+- active-home selection, editable home settings, recipient invitations,
+  memberships, roles, and permission policies; and
+- platform-administrator list/grant/revoke with revision conflict handling.
+
+Generated methods show what the pinned server contract can express; they do
+not prove that every household operation is reachable from a visible screen.
+The current inventory workspaces still include local projections while the
+typed synchronization boundary is adopted incrementally. Sync protocol v2 and
+paged bootstrap support are retained in the generated gateway.
 
 Use:
 

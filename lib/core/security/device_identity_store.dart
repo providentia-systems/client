@@ -1,16 +1,26 @@
 import 'dart:math';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:providentia/core/security/origin_lock.dart';
+import 'package:providentia/core/security/platform_origin_lock.dart';
 
 /// Stable, non-secret device identifier used to bind revocable sessions.
 final class DeviceIdentityStore {
-  DeviceIdentityStore({FlutterSecureStorage? storage})
-    : _storage = storage ?? const FlutterSecureStorage();
+  DeviceIdentityStore({
+    FlutterSecureStorage? storage,
+    this.originLock = const PlatformOriginLock(),
+  }) : _storage = storage ?? const FlutterSecureStorage();
 
   static const String _key = 'providentia.device-id.v1';
   final FlutterSecureStorage _storage;
+  final OriginLock originLock;
 
-  Future<String> getOrCreate() async {
+  Future<String> getOrCreate() => originLock.runExclusive<String>(
+    _getOrCreateInsideLock,
+    waitTimeout: const Duration(seconds: 15),
+  );
+
+  Future<String> _getOrCreateInsideLock() async {
     final existing = await _storage.read(key: _key);
     if (existing != null && _uuid.hasMatch(existing)) {
       return existing;
@@ -26,7 +36,11 @@ final class DeviceIdentityStore {
         '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
         '${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
     await _storage.write(key: _key, value: created);
-    return created;
+    final canonical = await _storage.read(key: _key);
+    if (canonical == null || !_uuid.hasMatch(canonical)) {
+      throw StateError('The device identity could not be persisted safely.');
+    }
+    return canonical;
   }
 }
 

@@ -21,45 +21,47 @@ final class IdentityController extends ChangeNotifier {
 
   bool get isBusy =>
       _snapshot.status == IdentitySessionStatus.restoring ||
-      _snapshot.status == IdentitySessionStatus.authenticating ||
+      _snapshot.status == IdentitySessionStatus.requestingLoginLink ||
+      _snapshot.status == IdentitySessionStatus.exchangingLoginLink ||
       _snapshot.status == IdentitySessionStatus.refreshing;
 
-  bool get supportsLegacyPassword => _manager.supportsLegacyPassword;
+  bool get supportsDevelopmentPassword => _manager.supportsDevelopmentPassword;
 
   Future<void> restore() => _manager.restore();
 
-  Future<void> requestSignInLink(String email) async {
+  Future<void> requestLoginLink(String email) async {
     try {
-      await _manager.requestChallenge(email);
+      await _manager.requestLoginLink(email);
     } on ArgumentError {
       _setLocalFailure('Enter a valid email address.');
     } on IdentityTransportException {
-      // The manager already published the transport's safe message.
+      // The manager already published a safe transport message.
+    } on IdentityCredentialStoreException catch (error) {
+      _setLocalFailure(error.safeMessage);
     }
   }
 
-  Future<void> submitCode(String code) async {
-    final challenge = _snapshot.challenge;
-    if (challenge == null) {
-      _setLocalFailure('Request a new sign-in link first.');
-      return;
-    }
+  Future<void> resendLoginLink() async {
     try {
-      await _manager.completeChallenge(
-        PasswordlessProof.oneTimeCode(
-          email: challenge.email,
-          code: code,
-          challengeId: challenge.challengeId,
-        ),
-      );
-    } on ArgumentError {
-      _setLocalFailure('Enter the complete one-time code.');
+      await _manager.resendLoginLink();
+    } on StateError {
+      _setLocalFailure('Enter your email address to request a login link.');
     } on IdentityTransportException {
-      // The manager already published the transport's safe message.
+      // The manager already published a safe transport message.
+    } on IdentityCredentialStoreException catch (error) {
+      _setLocalFailure(error.safeMessage);
     }
   }
 
-  Future<void> signInWithPassword({
+  Future<void> cancelLoginLink() => _manager.cancelLoginLink();
+
+  Future<void> checkLoginLinkNow() => _manager.pollLoginLinkNow();
+
+  void pauseLoginLinkPolling() => _manager.pauseLoginLinkPolling();
+
+  void resumeLoginLinkPolling() => _manager.resumeLoginLinkPolling();
+
+  Future<void> signInWithDevelopmentPassword({
     required String email,
     required String password,
   }) async {
@@ -68,27 +70,23 @@ final class IdentityController extends ChangeNotifier {
     } on ArgumentError {
       _setLocalFailure('Enter a valid email address and password.');
     } on UnsupportedError {
-      _setLocalFailure('Password sign-in is not available.');
+      _setLocalFailure('Development password sign-in is unavailable.');
     } on IdentityTransportException {
-      // The manager already published the transport's safe message.
+      // The manager already published a safe transport message.
     } on IdentityCredentialStoreException catch (error) {
       _setLocalFailure(error.safeMessage);
     }
   }
 
-  Future<void> completeMagicLink(String token) async {
+  Future<void> logout() => _manager.logout();
+
+  Future<void> refreshCurrentUser() async {
     try {
-      await _manager.completeChallenge(
-        PasswordlessProof.magicLink(token: token),
-      );
-    } on ArgumentError {
-      _setLocalFailure('This sign-in link is incomplete. Request a new link.');
-    } on IdentityTransportException {
-      // The manager already published the transport's safe message.
+      await _manager.refreshCurrentUser();
+    } on IdentityTransportException catch (error) {
+      _setLocalFailure(error.safeMessage);
     }
   }
-
-  Future<void> logout() => _manager.logout();
 
   Future<void> loadDeviceSessions() async {
     try {
@@ -106,11 +104,11 @@ final class IdentityController extends ChangeNotifier {
     }
   }
 
-  void useAnotherEmail() => _manager.clearChallenge();
-
   void _setLocalFailure(String safeMessage) {
     _snapshot = _snapshot.copyWith(
-      status: IdentitySessionStatus.failure,
+      status: _snapshot.isAuthenticated
+          ? IdentitySessionStatus.authenticated
+          : IdentitySessionStatus.failure,
       safeMessage: safeMessage,
     );
     notifyListeners();

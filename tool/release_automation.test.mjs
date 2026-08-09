@@ -23,6 +23,7 @@ const scripts = [
   'tool/release/package_windows.ps1',
   'tool/release/prepare_apple_signing.sh',
   'tool/release/verify_web_runtime.mjs',
+  'tool/release/login_link_acceptance_protocol.mjs',
 ];
 
 test('release workflows are immutable, protected and artifact strict', async () => {
@@ -72,10 +73,66 @@ test('platform signing is real and independently verified', async () => {
   assert.match(linuxPackage, new RegExp(`bundle/${binaryName}`, 'u'));
 
   const browser = await readFile(path.join(root, 'tool/release/verify_web_runtime.mjs'), 'utf8');
-  assert.match(browser, /auth\/login/u);
+  const browserWorkflow = await readFile(
+    path.join(root, '.github/workflows/browser-acceptance.yml'),
+    'utf8',
+  );
+  assert.match(browser, /auth\/login-links/u);
+  assert.match(browser, /createLoginLinkProof/u);
+  assert.match(browser, /extractApprovalLink/u);
+  assert.match(browser, /Approve login/u);
+  assert.match(browser, /scannerSafeReview/u);
+  assert.match(browser, /api\/v1\/me/u);
   assert.match(browser, /auth\/refresh/u);
   assert.match(browser, /auth\/logout/u);
-  assert.match(browser, /afterLogout\.status === 401/u);
+  assert.match(browser, /afterLogout\.status === 401 \|\| afterLogout\.status === 403/u);
+  assert.match(browserWorkflow, /playwright@1\.54\.2/u);
+  assert.match(browserWorkflow, /imapflow@1\.6\.6/u);
+  assert.match(browserWorkflow, /npm install --ignore-scripts --no-save --no-package-lock/u);
+  assert.match(browserWorkflow, /E2E_MAILBOX_IMAP_PASSWORD/u);
+  assert.match(browserWorkflow, /E2E_PUBLIC_BASE_URL/u);
+  assert.match(browserWorkflow, /authenticate: true/u);
+  assert.match(browserWorkflow, /authenticate: false/u);
+  assert.doesNotMatch(browser, /auth\/login(?:['"/])/u);
+  assert.doesNotMatch(
+    browserWorkflow,
+    new RegExp(['E2E', 'USER', 'PASSWORD'].join('_'), 'u'),
+  );
+});
+
+test('browser dispatch input never enters a shell script by interpolation', async () => {
+  const relative = '.github/workflows/browser-acceptance.yml';
+  const workflow = await readFile(path.join(root, relative), 'utf8');
+  const lines = workflow.split('\n');
+  const runScripts = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const run = lines[index].match(/^(\s*)(?:-\s+)?run:\s*\|\s*$/u);
+    if (!run) continue;
+    const indentation = run[1].length;
+    const body = [];
+    for (index += 1; index < lines.length; index += 1) {
+      const line = lines[index];
+      if (line.trim() && line.match(/^\s*/u)[0].length <= indentation) {
+        index -= 1;
+        break;
+      }
+      body.push(line);
+    }
+    runScripts.push(body.join('\n'));
+  }
+
+  assert(runScripts.length > 0, 'browser workflow must contain shell steps.');
+  for (const script of runScripts) {
+    assert.doesNotMatch(
+      script,
+      /\$\{\{\s*inputs\.target_url\s*\}\}/u,
+      'workflow_dispatch target_url must cross into shell only through env.',
+    );
+  }
+  assert.match(workflow, /^\s+TARGET_URL:\s*\$\{\{ inputs\.target_url \}\}\s*$/mu);
+  assert.match(workflow, /^\s+BROWSER:\s*\$\{\{ matrix\.browser \}\}\s*$/mu);
+  assert.match(workflow, /^\s+EVIDENCE_PATH:\s*build\/release\/browser-evidence\/\$\{\{ matrix\.browser \}\}\.json\s*$/mu);
+  assert.match(workflow, /"\$TARGET_URL" "\$BROWSER" "\$EVIDENCE_PATH"/u);
 });
 
 test('release scripts pass local syntax checks', async () => {

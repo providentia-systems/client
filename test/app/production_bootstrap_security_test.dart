@@ -1,0 +1,250 @@
+import 'dart:async';
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:providentia/app/production_bootstrap_app.dart';
+import 'package:providentia/features/administration/application/platform_administration_controller.dart';
+import 'package:providentia/features/administration/domain/platform_administrator_models.dart';
+import 'package:providentia/features/homes/application/home_ports.dart';
+import 'package:providentia/features/homes/application/home_session_manager.dart';
+import 'package:providentia/features/homes/domain/home_models.dart';
+import 'package:providentia/features/homes/presentation/homes_controller.dart';
+import 'package:providentia/features/identity/domain/identity_models.dart';
+
+void main() {
+  test('production composes revocation, policy, and cross-tab protections', () {
+    final source = File(
+      'lib/app/production_bootstrap_app.dart',
+    ).readAsStringSync();
+    final revocationSource = File(
+      'lib/features/homes/infrastructure/home_data_revocation.dart',
+    ).readAsStringSync();
+
+    expect(
+      source,
+      contains('sessionCoordination: PlatformSessionCoordination()'),
+    );
+    expect(source, contains('onHomeAccessRevoked: _scheduleRevokedHomePurge'));
+    expect(source, contains('coordinateActiveHomeMutation<HomeSummary>'));
+    expect(source, contains('coordinateActiveHomeMutation<void>'));
+    expect(
+      source,
+      contains('onAuthorizationLost: _handlePlatformAuthorizationLost'),
+    );
+    expect(source, contains('ProductionSessionSecurityBoundary'));
+    expect(source, contains('HouseholdWorkspaceAccess.fromPermissions'));
+    expect(source, contains('SyncAvailability.authorizationDenied'));
+    expect(source, contains('RevocationGuardedSynchronization'));
+    expect(source, contains('revokeAndWait(homeId)'));
+    expect(source, contains('RevokedHomeDataPurger'));
+    expect(
+      source.indexOf('identitySnapshot.session?.activeHomeId'),
+      lessThan(source.indexOf('identitySnapshot.currentUser?.activeHomeId')),
+    );
+    for (final table in <String>[
+      'localRecords',
+      'clientOperations',
+      'localSyncCursors',
+      'recordTombstones',
+      'localMediaMetadata',
+      'syncConflictRecords',
+    ]) {
+      expect(revocationSource, contains('_database.$table'), reason: table);
+    }
+  });
+
+  for (final scenario in <({String name, IdentitySessionSnapshot snapshot})>[
+    (
+      name: 'session expiry',
+      snapshot: IdentitySessionSnapshot(
+        status: IdentitySessionStatus.sessionExpired,
+      ),
+    ),
+    (
+      name: 'current-device revoke',
+      snapshot: const IdentitySessionSnapshot.signedOut(),
+    ),
+  ]) {
+    testWidgets(
+      '${scenario.name} clears protected snapshots and pops to sign-in root',
+      (tester) async {
+        final homeManager = HomeSessionManager(
+          transport: _SecurityHomeTransport(),
+          activeHomeStore: _SecurityActiveHomeStore(),
+        );
+        final homes = HomesController(homeManager);
+        final administration = PlatformAdministrationController(
+          _SecurityAdministrationTransport(),
+        );
+        addTearDown(() async {
+          homes.dispose();
+          administration.dispose();
+          await homeManager.dispose();
+        });
+        await homes.load(sessionActiveHomeId: 'home-a');
+        await administration.load();
+        final navigatorKey = GlobalKey<NavigatorState>();
+        final boundary = ProductionSessionSecurityBoundary(
+          navigatorKey: navigatorKey,
+          homesController: homes,
+          platformAdministrationController: administration,
+        );
+        await tester.pumpWidget(
+          MaterialApp(
+            navigatorKey: navigatorKey,
+            home: const Scaffold(body: Text('Sign-in root')),
+          ),
+        );
+        unawaited(
+          navigatorKey.currentState!.push<void>(
+            MaterialPageRoute<void>(
+              builder: (_) => const Scaffold(
+                body: Text('Protected account and device data'),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Protected account and device data'), findsOneWidget);
+        expect(homes.snapshot.activeHome, isNotNull);
+        expect(administration.snapshot.administrators, isNotEmpty);
+
+        boundary.handleIdentitySession(scenario.snapshot);
+        await tester.pumpAndSettle();
+
+        expect(find.text('Sign-in root'), findsOneWidget);
+        expect(find.text('Protected account and device data'), findsNothing);
+        expect(homes.snapshot.homes, isEmpty);
+        expect(homes.snapshot.activeHome, isNull);
+        expect(administration.snapshot.administrators, isEmpty);
+      },
+    );
+  }
+}
+
+final class _SecurityActiveHomeStore implements ActiveHomeStore {
+  String? value;
+
+  @override
+  Future<void> clear() async => value = null;
+
+  @override
+  Future<String?> read() async => value;
+
+  @override
+  Future<void> write(String homeId) async => value = homeId;
+}
+
+final class _SecurityHomeTransport implements HomeTransportPort {
+  final HomeSummary home = HomeSummary(
+    id: 'home-a',
+    name: 'My home',
+    locale: 'en-NA',
+    currency: 'NAD',
+    timezone: 'Africa/Windhoek',
+    role: HomeRole.owner,
+    revision: 1,
+  );
+
+  @override
+  Future<List<HomeSummary>> listHomes() async => <HomeSummary>[home];
+
+  @override
+  Future<List<RecipientHomeInvitation>> listPendingInvitations() async =>
+      const <RecipientHomeInvitation>[];
+
+  @override
+  Future<List<HomePermissionPolicy>> listPermissionPolicies(
+    String homeId,
+  ) async => const <HomePermissionPolicy>[];
+
+  @override
+  Future<HomeSummary> switchActiveHome(String homeId) async => home;
+
+  @override
+  Future<HomeSummary> createHome(CreateHomeCommand command) =>
+      throw UnimplementedError();
+
+  @override
+  Future<HomeSummary> updateHome({
+    required String homeId,
+    required String name,
+    required String locale,
+    required String currency,
+    required String timezone,
+    required int expectedRevision,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<List<HomeMembership>> listMemberships(String homeId) =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> changeMembershipRole({
+    required String homeId,
+    required String userId,
+    required HomeRole role,
+    required int expectedRevision,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<List<HomeInvitation>> listInvitations(String homeId) =>
+      throw UnimplementedError();
+
+  @override
+  Future<HomeInvitation> createInvitation({
+    required String homeId,
+    required String email,
+    required HomeRole role,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<void> revokeInvitation({
+    required String homeId,
+    required String invitationId,
+    required int expectedRevision,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<HomeSummary> acceptPendingInvitation({
+    required String invitationId,
+    required int expectedRevision,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<HomePermissionPolicy> putPermissionPolicy({
+    required String homeId,
+    required HomeRole role,
+    required Set<String> permissions,
+    required int expectedRevision,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<void> leaveHome(String homeId) => throw UnimplementedError();
+}
+
+final class _SecurityAdministrationTransport
+    implements PlatformAdministrationPort {
+  @override
+  Future<List<PlatformAdministrator>> listAdministrators() async =>
+      <PlatformAdministrator>[
+        PlatformAdministrator(
+          id: 'administrator-a',
+          email: 'admin@example.com',
+          status: PlatformAdministratorStatus.active,
+          revision: 1,
+          createdAt: DateTime.utc(2026, 8, 9),
+        ),
+      ];
+
+  @override
+  Future<PlatformAdministrator> grantAdministrator(String email) =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> revokeAdministrator({
+    required String administratorId,
+    required int expectedRevision,
+  }) => throw UnimplementedError();
+}

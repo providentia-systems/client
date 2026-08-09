@@ -74,7 +74,7 @@ const outputs = new Map([
     path.join(generatedDirectory, 'generation-manifest.json'),
     json({
       generator: 'tool/generate_api_client.mjs',
-      generatorVersion: 3,
+      generatorVersion: 4,
       contract: '../../providentia-v1.json',
       contractVersion: contract.info.version,
       contractSha256,
@@ -129,7 +129,7 @@ function validateContract(document) {
   }
   if (
     document.info?.title !== 'Providentia API' ||
-    document.info?.version !== '1.7.0'
+    document.info?.version !== '1.11.0'
   ) {
     throw new Error('Unexpected API identity or version.');
   }
@@ -142,7 +142,15 @@ function validateContract(document) {
     ['get', '/api/v1/homes/{homeId}/sync/pull', 'pullHomeSynchronization'],
     ['get', '/api/v1/homes/{homeId}/sync/bootstrap', 'bootstrapHomeSynchronization'],
     ['post', '/api/v1/auth/login', 'login'],
+    ['post', '/api/v1/auth/login-links', 'startLoginLink'],
+    ['post', '/api/v1/auth/login-links/{requestId}/status', 'getLoginLinkStatus'],
+    ['post', '/api/v1/auth/login-links/{requestId}/exchange', 'exchangeLoginLink'],
+    ['post', '/api/v1/auth/login-links/{requestId}/cancel', 'cancelLoginLink'],
     ['post', '/api/v1/auth/refresh', 'refreshSession'],
+    ['post', '/api/v1/auth/logout', 'logout'],
+    ['get', '/api/v1/me', 'getCurrentUser'],
+    ['get', '/api/v1/me/home-invitations', 'listPendingHomeInvitations'],
+    ['get', '/api/v1/platform/administrators', 'listPlatformAdministrators'],
     ['get', '/api/v1/homes', 'listHomes'],
     ['get', '/api/v1/homes/{homeId}/stock', 'listHomeStock'],
     ['get', '/api/v1/homes/{homeId}/receipts', 'listReceipts'],
@@ -177,8 +185,8 @@ function validateContract(document) {
       operationIds.add(operation.operationId);
     }
   }
-  if (operationIds.size < 80) {
-    throw new Error(`Expected the Phase 1-8 API surface, found ${operationIds.size} operations.`);
+  if (operationIds.size < 150) {
+    throw new Error(`Expected the API 1.11 surface, found ${operationIds.size} operations.`);
   }
 
   for (const schema of [
@@ -194,7 +202,18 @@ function validateContract(document) {
     'SyncPullResponse',
     'SyncBootstrapResponse',
     'SessionCredentials',
+    'LogoutRequest',
+    'LoginLinkStartRequest',
+    'LoginLinkStarted',
+    'LoginLinkStatus',
+    'LoginLinkExchangeRequest',
+    'CurrentUserBootstrap',
+    'PlatformRole',
+    'DeviceSession',
+    'RecipientHomeInvitation',
+    'PlatformAdministrator',
     'Home',
+    'UpdateHomeRequest',
     'HomeMembership',
     'InventoryBalance',
     'StockCountSession',
@@ -267,8 +286,118 @@ function validateContract(document) {
     'protocolVersion',
     'requestId',
     'snapshotCursor',
+    'pageCursor',
+    'highWaterCursor',
+    'hasMore',
     'records',
   ]);
+  assertRequiredFields(document, 'SessionCredentials', [
+    'sessionId',
+    'deviceId',
+    'accessExpiresAt',
+    'refreshExpiresAt',
+    'idleExpiresAt',
+    'refreshIdleTtlSeconds',
+    'transport',
+    'activeHomeId',
+    'userId',
+  ]);
+  assertRequiredFields(document, 'LoginLinkStartRequest', [
+    'requestId',
+    'email',
+    'pollChallenge',
+    'codeChallenge',
+    'codeChallengeMethod',
+    'state',
+    'installationId',
+    'deviceName',
+    'platform',
+    'transport',
+  ]);
+  assertRequiredFields(document, 'LoginLinkStarted', [
+    'accepted',
+    'requestId',
+    'expiresAt',
+    'pollIntervalSeconds',
+  ]);
+  assertRequiredFields(document, 'LoginLinkStatus', [
+    'requestId',
+    'status',
+    'expiresAt',
+  ]);
+  assertRequiredFields(document, 'LoginLinkExchangeRequest', [
+    'pollToken',
+    'codeVerifier',
+    'state',
+  ]);
+  assertRequiredFields(document, 'CurrentUserBootstrap', [
+    'userId',
+    'email',
+    'emailVerified',
+    'activeHomeId',
+    'homes',
+    'pendingInvitations',
+    'platformRoles',
+    'currentSession',
+  ]);
+  assertRequiredFields(document, 'DeviceSession', [
+    'id',
+    'deviceId',
+    'transport',
+    'current',
+    'accessExpiresAt',
+    'refreshExpiresAt',
+    'idleExpiresAt',
+    'createdAt',
+    'lastSeenAt',
+  ]);
+  assertRequiredFields(document, 'RecipientHomeInvitation', [
+    'id',
+    'homeId',
+    'homeName',
+    'inviterUserId',
+    'role',
+    'status',
+    'expiresAt',
+    'revision',
+  ]);
+
+  const expectedPlatformRoles = [
+    'platform_administrator',
+    'catalog_curator',
+    'catalog_reviewer',
+    'billing_operator',
+  ];
+  const platformRoles = document.components.schemas.PlatformRole.enum;
+  if (JSON.stringify(platformRoles) !== JSON.stringify(expectedPlatformRoles)) {
+    throw new Error('PlatformRole values changed; update identity authorization deliberately.');
+  }
+  const expectedLoginStatuses = [
+    'pending',
+    'approved',
+    'denied',
+    'exchanged',
+    'expired',
+    'cancelled',
+  ];
+  const loginStatuses = document.components.schemas.LoginLinkStatus.properties?.status?.enum;
+  if (JSON.stringify(loginStatuses) !== JSON.stringify(expectedLoginStatuses)) {
+    throw new Error('LoginLinkStatus values changed; update the lifecycle deliberately.');
+  }
+  const logout = document.paths['/api/v1/auth/logout'].post;
+  const logoutSchema = logout.requestBody?.content?.['application/json']?.schema?.$ref;
+  const refreshToken = document.components.schemas.LogoutRequest.properties?.refreshToken;
+  if (
+    logout.requestBody?.required !== false ||
+    logoutSchema !== '#/components/schemas/LogoutRequest' ||
+    refreshToken?.minLength !== 40 ||
+    refreshToken?.writeOnly !== true
+  ) {
+    throw new Error('Logout must keep its optional native refresh possession proof.');
+  }
+  if (document.components.schemas.UpdateHomeRequest.properties?.locale?.maxLength !== 16) {
+    throw new Error('UpdateHomeRequest locale boundary changed.');
+  }
 }
 
 function validateTokens(document) {
@@ -302,6 +431,7 @@ function generatedClient(hash, document) {
   return `// GENERATED FILE - DO NOT EDIT.
 // Source: contracts/providentia-v1.json
 // Contract SHA-256: ${hash}
+// ignore_for_file: use_null_aware_elements
 
 library;
 
@@ -396,7 +526,13 @@ final class SystemInfo {
   final String queueBroker;
 }
 
-final class SyncOperation {
+sealed class SyncCommand {
+  const SyncCommand();
+
+  Map<String, Object?> toJson();
+}
+
+final class SyncOperation extends SyncCommand {
   SyncOperation({
     required this.operationId,
     required this.entityType,
@@ -417,11 +553,43 @@ final class SyncOperation {
   final int payloadSchemaVersion;
   final Map<String, Object?> payload;
 
+  @override
   Map<String, Object?> toJson() => <String, Object?>{
     'operationId': operationId,
     'entityType': entityType,
     'entityId': entityId,
     'operationType': operationType,
+    'baseRevision': baseRevision,
+    'clientTimestamp': clientTimestamp.toUtc().toIso8601String(),
+    'payloadSchemaVersion': payloadSchemaVersion,
+    'payload': payload,
+  };
+}
+
+final class SyncPantryCommand extends SyncCommand {
+  SyncPantryCommand({
+    required this.operationId,
+    required this.commandType,
+    required this.entityId,
+    required this.baseRevision,
+    required this.clientTimestamp,
+    required this.payloadSchemaVersion,
+    required Map<String, Object?> payload,
+  }) : payload = Map<String, Object?>.unmodifiable(payload);
+
+  final String operationId;
+  final String commandType;
+  final String entityId;
+  final int? baseRevision;
+  final DateTime clientTimestamp;
+  final int payloadSchemaVersion;
+  final Map<String, Object?> payload;
+
+  @override
+  Map<String, Object?> toJson() => <String, Object?>{
+    'operationId': operationId,
+    'commandType': commandType,
+    'entityId': entityId,
     'baseRevision': baseRevision,
     'clientTimestamp': clientTimestamp.toUtc().toIso8601String(),
     'payloadSchemaVersion': payloadSchemaVersion,
@@ -584,6 +752,9 @@ final class SyncBootstrapResponse {
     required this.protocolVersion,
     required this.requestId,
     required this.snapshotCursor,
+    required this.pageCursor,
+    required this.highWaterCursor,
+    required this.hasMore,
     required this.records,
   });
 
@@ -591,14 +762,20 @@ final class SyncBootstrapResponse {
     return SyncBootstrapResponse(
       protocolVersion: _requiredInteger(json, 'protocolVersion'),
       requestId: _requiredString(json, 'requestId'),
-      snapshotCursor: _requiredString(json, 'snapshotCursor'),
+      snapshotCursor: _optionalString(json, 'snapshotCursor'),
+      pageCursor: _optionalString(json, 'pageCursor'),
+      highWaterCursor: _requiredString(json, 'highWaterCursor'),
+      hasMore: _requiredBoolean(json, 'hasMore'),
       records: _requiredObjectList(json, 'records'),
     );
   }
 
   final int protocolVersion;
   final String requestId;
-  final String snapshotCursor;
+  final String? snapshotCursor;
+  final String? pageCursor;
+  final String highWaterCursor;
+  final bool hasMore;
   final List<Map<String, Object?>> records;
 }
 
@@ -710,12 +887,13 @@ ${operations.registry}
     required String batchId,
     required String deviceId,
     required String? lastPulledCursor,
-    required List<SyncOperation> operations,
+    required int protocolVersion,
+    required List<SyncCommand> operations,
   }) async {
     final response = await _postJson(
       '/api/v1/homes/\${Uri.encodeComponent(homeId)}/sync/push',
       body: <String, Object?>{
-        'protocolVersion': 1,
+        'protocolVersion': protocolVersion,
         'batchId': batchId,
         'deviceId': deviceId,
         'lastPulledCursor': lastPulledCursor,
@@ -736,17 +914,26 @@ ${operations.registry}
     final response = await _get(
       '/api/v1/homes/\${Uri.encodeComponent(homeId)}/sync/pull',
       accept: 'application/json',
-      query: <String, String>{'cursor': ?cursor, 'limit': limit.toString()},
+      query: <String, String>{
+        if (cursor != null) 'cursor': cursor,
+        'limit': limit.toString(),
+      },
     );
     return SyncPullResponse.fromJson(_decodeObject(response.body));
   }
 
   Future<SyncBootstrapResponse> bootstrapHomeSynchronization({
     required String homeId,
+    String? cursor,
+    int limit = 250,
   }) async {
     final response = await _get(
       '/api/v1/homes/\${Uri.encodeComponent(homeId)}/sync/bootstrap',
       accept: 'application/json',
+      query: <String, String>{
+        if (cursor != null) 'cursor': cursor,
+        'limit': limit.toString(),
+      },
     );
     return SyncBootstrapResponse.fromJson(_decodeObject(response.body));
   }
@@ -1012,6 +1199,7 @@ ${registryLines.join('\n')}
     Map<String, Object?>? body,
     Map<String, String> formFields = const <String, String>{},
     List<http.MultipartFile> files = const <http.MultipartFile>[],
+    Future<void>? abortTrigger,
   }) async {
     final operation = operations[operationId];
     if (operation == null) {
@@ -1055,10 +1243,15 @@ ${registryLines.join('\n')}
           'is invalid for multipart operations',
         );
       }
-      final request = http.MultipartRequest(
-        operation.method,
-        _endpoint(requestPath, query: query),
-      )..headers.addAll(requestHeaders);
+      final endpoint = _endpoint(requestPath, query: query);
+      final http.MultipartRequest request = abortTrigger == null
+          ? http.MultipartRequest(operation.method, endpoint)
+          : http.AbortableMultipartRequest(
+              operation.method,
+              endpoint,
+              abortTrigger: abortTrigger,
+            );
+      request.headers.addAll(requestHeaders);
       request.fields.addAll(formFields);
       request.files.addAll(files);
       response = await http.Response.fromStream(
@@ -1068,10 +1261,15 @@ ${registryLines.join('\n')}
       if (formFields.isNotEmpty || files.isNotEmpty) {
         throw ArgumentError('Multipart fields are invalid for $operationId.');
       }
-      final request = http.Request(
-        operation.method,
-        _endpoint(requestPath, query: query),
-      )..headers.addAll(requestHeaders);
+      final endpoint = _endpoint(requestPath, query: query);
+      final http.Request request = abortTrigger == null
+          ? http.Request(operation.method, endpoint)
+          : http.AbortableRequest(
+              operation.method,
+              endpoint,
+              abortTrigger: abortTrigger,
+            );
+      request.headers.addAll(requestHeaders);
       if (body != null) {
         request.headers['Content-Type'] = 'application/json';
         request.body = jsonEncode(body);

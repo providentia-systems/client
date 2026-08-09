@@ -15,20 +15,28 @@ import 'package:providentia/core/networking/credentialed_http_client.dart';
 import 'package:providentia/core/networking/generated_api_connectivity_probe.dart';
 import 'package:providentia/core/networking/session_http_client.dart';
 import 'package:providentia/core/security/device_identity_store.dart';
+import 'package:providentia/core/security/platform_pending_login_link_store.dart';
+import 'package:providentia/core/security/platform_session_coordination.dart';
 import 'package:providentia/core/security/platform_session_credential_store.dart';
 import 'package:providentia/core/synchronization/generated_sync_gateway.dart';
 import 'package:providentia/core/synchronization/sync_coordinator.dart';
+import 'package:providentia/core/synchronization/sync_models.dart';
+import 'package:providentia/features/administration/application/platform_administration_controller.dart';
+import 'package:providentia/features/administration/infrastructure/api11_platform_administration_transport.dart';
 import 'package:providentia/features/homes/application/home_session_manager.dart';
 import 'package:providentia/features/homes/domain/home_models.dart';
-import 'package:providentia/features/homes/infrastructure/api17_home_transport.dart';
+import 'package:providentia/features/homes/infrastructure/api11_home_transport.dart';
 import 'package:providentia/features/homes/infrastructure/drift_active_home_store.dart';
+import 'package:providentia/features/homes/infrastructure/home_data_revocation.dart';
 import 'package:providentia/features/homes/presentation/home_selection_page.dart';
 import 'package:providentia/features/homes/presentation/homes_controller.dart';
 import 'package:providentia/features/identity/application/identity_session_manager.dart';
 import 'package:providentia/features/identity/domain/identity_models.dart';
-import 'package:providentia/features/identity/infrastructure/api17_identity_transport.dart';
+import 'package:providentia/features/identity/infrastructure/api11_identity_transport.dart';
+import 'package:providentia/features/identity/infrastructure/secure_login_link_request_factory.dart';
+import 'package:providentia/features/identity/presentation/account_access_page.dart';
 import 'package:providentia/features/identity/presentation/identity_controller.dart';
-import 'package:providentia/features/identity/presentation/passwordless_sign_in_page.dart';
+import 'package:providentia/features/identity/presentation/login_link_sign_in_page.dart';
 import 'package:providentia/features/inventory/presentation/inventory_controller.dart';
 import 'package:providentia/features/purchasing/presentation/purchasing_controller.dart';
 import 'package:providentia/features/shopping/presentation/shopping_controller.dart';
@@ -53,8 +61,15 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp> {
   late final IdentitySessionManager _identityManager;
   late final IdentityController _identityController;
   late final HomesController _homesController;
+  late final PlatformAdministrationController _platformAdministrationController;
+  late final ProductionSessionSecurityBoundary _sessionSecurityBoundary;
   late final Future<void> _initialization;
+  StreamSubscription<IdentitySessionSnapshot>? _identitySubscription;
   SessionHttpClient? _authorizedTransport;
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+  final Map<String, Future<bool>> _revokedHomePurges = <String, Future<bool>>{};
+  final HomeSyncRevocationGate _homeSyncRevocationGate =
+      HomeSyncRevocationGate();
 
   @override
   void initState() {
@@ -71,13 +86,16 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp> {
     _identityApi = const ApiClientFactory().create(
       configuration: widget.configuration,
     );
-    final identityTransport = Api17IdentityTransport(
-      client: _identityApi,
+    final identityTransport = Api11IdentityTransport(
+      _identityApi,
       sessionTransport: sessionTransport,
     );
     _identityManager = IdentitySessionManager(
       transport: identityTransport,
       credentialStore: PlatformSessionCredentialStore(),
+      pendingLoginLinkStore: PlatformPendingLoginLinkStore(),
+      loginLinkRequestFactory: SecureLoginLinkRequestFactory(),
+      sessionCoordination: PlatformSessionCoordination(),
       device: DeviceDescriptor(
         id: deviceId,
         name: _deviceName,
@@ -95,11 +113,34 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp> {
       httpClient: _authorizedTransport,
     );
     final homes = HomeSessionManager(
-      transport: Api17HomeTransport(_authorizedApi),
+      transport: Api11HomeTransport(_authorizedApi),
       activeHomeStore: DriftActiveHomeStore(_database),
       onActiveHomeChanged: _identityManager.updateActiveHome,
+      onHomeAccessRevoked: _scheduleRevokedHomePurge,
+      coordinateActiveHomeMutation: ({required homeId, required mutation}) =>
+          _identityManager.coordinateActiveHomeMutation<HomeSummary>(
+            homeId: homeId,
+            mutation: mutation,
+          ),
+      coordinateActiveHomeClearMutation: ({required mutation}) =>
+          _identityManager.coordinateActiveHomeMutation<void>(
+            homeId: null,
+            mutation: mutation,
+          ),
     );
     _homesController = HomesController(homes);
+    _platformAdministrationController = PlatformAdministrationController(
+      Api11PlatformAdministrationTransport(_authorizedApi),
+      onAuthorizationLost: _handlePlatformAuthorizationLost,
+    );
+    _sessionSecurityBoundary = ProductionSessionSecurityBoundary(
+      navigatorKey: _navigatorKey,
+      homesController: _homesController,
+      platformAdministrationController: _platformAdministrationController,
+    );
+    _identitySubscription = _identityManager.states.listen(
+      _sessionSecurityBoundary.handleIdentitySession,
+    );
   }
 
   @override
@@ -114,24 +155,62 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp> {
           return const _StartupProgressApp();
         }
         return MaterialApp(
+          navigatorKey: _navigatorKey,
           debugShowCheckedModeBanner: false,
           title: 'Providentia',
           theme: ProvidentiaTheme.light(),
           highContrastTheme: ProvidentiaTheme.light(highContrast: true),
-          home: PasswordlessSignInPage(
+          home: LoginLinkSignInPage(
             controller: _identityController,
-            passwordlessSignInAvailable: false,
-            authenticatedChild: HomeSelectionPage(
-              controller: _homesController,
-              activeHomeBuilder: (context, home) => _ConnectedHomeWorkspace(
-                key: ValueKey<String>(home.id),
-                home: home,
-                database: _database,
-                api: _authorizedApi,
-                onChangeHome: _homesController.returnToChooser,
-                onSignOut: _signOut,
-              ),
-            ),
+            developmentPasswordAvailable:
+                widget.configuration.enableDevelopmentPasswordLogin,
+            authenticatedBuilder: (context, identitySnapshot) =>
+                HomeSelectionPage(
+                  controller: _homesController,
+                  sessionActiveHomeId:
+                      identitySnapshot.session?.activeHomeId ??
+                      identitySnapshot.currentUser?.activeHomeId,
+                  accountPageBuilder: (context) => AccountAccessPage(
+                    identityController: _identityController,
+                    homesController: _homesController,
+                    platformAdministrationController:
+                        identitySnapshot.currentUser?.isPlatformAdministrator ??
+                            false
+                        ? _platformAdministrationController
+                        : null,
+                  ),
+                  onSignOut: _signOut,
+                  activeHomeBuilder: (context, home) {
+                    final permissions =
+                        _homesController.snapshot.effectivePermissions;
+                    final permissionKey = permissions.toList(growable: false)
+                      ..sort();
+                    return _ConnectedHomeWorkspace(
+                      key: ValueKey<String>(
+                        '${home.id}:${permissionKey.join(',')}',
+                      ),
+                      home: home,
+                      access: HouseholdWorkspaceAccess.fromPermissions(
+                        permissions,
+                      ),
+                      revokedDataPurge: _revokedHomePurges[home.id],
+                      syncRevocationGate: _homeSyncRevocationGate,
+                      database: _database,
+                      api: _authorizedApi,
+                      identityController: _identityController,
+                      homesController: _homesController,
+                      platformAdministrationController:
+                          identitySnapshot
+                                  .currentUser
+                                  ?.isPlatformAdministrator ??
+                              false
+                          ? _platformAdministrationController
+                          : null,
+                      onChangeHome: _homesController.returnToChooser,
+                      onSignOut: _signOut,
+                    );
+                  },
+                ),
           ),
         );
       },
@@ -142,7 +221,9 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp> {
   void dispose() {
     unawaited(
       _initialization.then((_) async {
+        await _identitySubscription?.cancel();
         _homesController.dispose();
+        _platformAdministrationController.dispose();
         _identityController.dispose();
         await _identityManager.dispose();
         _authorizedApi.close();
@@ -172,21 +253,73 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp> {
     await _homesController.returnToChooser();
     await logout;
   }
+
+  Future<void> _handlePlatformAuthorizationLost() async {
+    _sessionSecurityBoundary.dismissProtectedRoutes();
+    await _identityController.refreshCurrentUser();
+  }
+
+  void _scheduleRevokedHomePurge(String homeId) {
+    final quiesced = _homeSyncRevocationGate.revokeAndWait(homeId);
+    _revokedHomePurges[homeId] = quiesced
+        .then((_) => RevokedHomeDataPurger(_database).purge(homeId))
+        .then((_) => true, onError: (Object _, StackTrace _) => false);
+  }
+}
+
+/// Central fail-closed boundary for routes and controller snapshots that are
+/// meaningful only while an authenticated session exists.
+@visibleForTesting
+final class ProductionSessionSecurityBoundary {
+  const ProductionSessionSecurityBoundary({
+    required this.navigatorKey,
+    required this.homesController,
+    required this.platformAdministrationController,
+  });
+
+  final GlobalKey<NavigatorState> navigatorKey;
+  final HomesController homesController;
+  final PlatformAdministrationController platformAdministrationController;
+
+  void handleIdentitySession(IdentitySessionSnapshot snapshot) {
+    if (snapshot.isAuthenticated) {
+      return;
+    }
+    homesController.handleAuthenticationLost();
+    platformAdministrationController.clearSensitiveState();
+    dismissProtectedRoutes();
+  }
+
+  void dismissProtectedRoutes() {
+    navigatorKey.currentState?.popUntil((route) => route.isFirst);
+  }
 }
 
 final class _ConnectedHomeWorkspace extends StatefulWidget {
   const _ConnectedHomeWorkspace({
     required this.home,
+    required this.access,
+    required this.revokedDataPurge,
+    required this.syncRevocationGate,
     required this.database,
     required this.api,
+    required this.identityController,
+    required this.homesController,
+    required this.platformAdministrationController,
     required this.onChangeHome,
     required this.onSignOut,
     super.key,
   });
 
   final HomeSummary home;
+  final HouseholdWorkspaceAccess access;
+  final Future<bool>? revokedDataPurge;
+  final HomeSyncRevocationGate syncRevocationGate;
   final AppDatabase database;
   final ProvidentiaApiClient api;
+  final IdentityController identityController;
+  final HomesController homesController;
+  final PlatformAdministrationController? platformAdministrationController;
   final Future<void> Function() onChangeHome;
   final Future<void> Function() onSignOut;
 
@@ -200,22 +333,28 @@ final class _ConnectedHomeWorkspaceState
   late final AppController _app;
   late final HouseholdFeatures _features;
   late final Future<void> _ready;
+  bool _revocationRouted = false;
 
   @override
   void initState() {
     super.initState();
     final localSync = DriftLocalSyncRepository(widget.database);
-    final synchronization = SyncCoordinator(
-      local: localSync,
-      remote: GeneratedSyncGateway(widget.api),
-      connectivity: GeneratedApiConnectivityProbe(widget.api),
+    final synchronization = RevocationGuardedSynchronization(
+      delegate: SyncCoordinator(
+        local: localSync,
+        remote: GeneratedSyncGateway(widget.api),
+        connectivity: GeneratedApiConnectivityProbe(widget.api),
+      ),
+      gate: widget.syncRevocationGate,
+      homeId: widget.home.id,
     );
     _app = AppController(
       synchronization: synchronization,
       activeHomeId: widget.home.id,
     );
+    _app.addListener(_handleSynchronizationState);
     final household = DriftHouseholdRepository(widget.database);
-    _ready = household.ensureHomeInitialized(homeId: widget.home.id);
+    _ready = _prepareLocalWorkspace(household);
     _features = HouseholdFeatures(
       inventory: InventoryController(
         repository: household,
@@ -248,11 +387,42 @@ final class _ConnectedHomeWorkspaceState
         return ProvidentiaApp(
           controller: _app,
           features: _features,
+          access: widget.access,
           onChangeHome: widget.onChangeHome,
           onSignOut: widget.onSignOut,
+          accountPageBuilder: (context) => AccountAccessPage(
+            identityController: widget.identityController,
+            homesController: widget.homesController,
+            platformAdministrationController:
+                widget.platformAdministrationController,
+          ),
         );
       },
     );
+  }
+
+  Future<void> _prepareLocalWorkspace(
+    DriftHouseholdRepository household,
+  ) async {
+    final purge = widget.revokedDataPurge;
+    if (purge != null && !await purge) {
+      throw StateError('Revoked-home cache could not be purged safely.');
+    }
+    if (purge != null) {
+      widget.syncRevocationGate.reauthorize(widget.home.id);
+    }
+    if (widget.access.shoppingWrite) {
+      await household.ensureHomeInitialized(homeId: widget.home.id);
+    }
+  }
+
+  void _handleSynchronizationState() {
+    if (_revocationRouted ||
+        _app.syncSummary.availability != SyncAvailability.authorizationDenied) {
+      return;
+    }
+    _revocationRouted = true;
+    unawaited(widget.homesController.handleMembershipRevoked(widget.home.id));
   }
 }
 

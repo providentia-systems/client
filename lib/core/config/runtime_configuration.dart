@@ -3,11 +3,13 @@ class RuntimeConfiguration {
   const RuntimeConfiguration._({
     required this.apiBaseUri,
     required this.environment,
+    required this.enableDevelopmentPasswordLogin,
   });
 
   factory RuntimeConfiguration({
     required Uri apiBaseUri,
     required String environment,
+    bool enableDevelopmentPasswordLogin = false,
   }) {
     final validatedEnvironment = environment.trim();
     if (validatedEnvironment.isEmpty) {
@@ -17,9 +19,16 @@ class RuntimeConfiguration {
       apiBaseUri.toString(),
       environment: validatedEnvironment,
     );
+    if (enableDevelopmentPasswordLogin &&
+        validatedEnvironment != 'development') {
+      throw const FormatException(
+        'Development password login can only be enabled in development.',
+      );
+    }
     return RuntimeConfiguration._(
       apiBaseUri: validatedApiBaseUri,
       environment: validatedEnvironment,
+      enableDevelopmentPasswordLogin: enableDevelopmentPasswordLogin,
     );
   }
 
@@ -32,14 +41,19 @@ class RuntimeConfiguration {
       'PROVIDENTIA_ENVIRONMENT',
       defaultValue: 'development',
     );
+    const enableDevelopmentPasswordLogin = bool.fromEnvironment(
+      'PROVIDENTIA_ENABLE_DEVELOPMENT_PASSWORD_LOGIN',
+    );
     return RuntimeConfiguration(
       apiBaseUri: Uri.parse(rawApiBaseUrl),
       environment: environment,
+      enableDevelopmentPasswordLogin: enableDevelopmentPasswordLogin,
     );
   }
 
   final Uri apiBaseUri;
   final String environment;
+  final bool enableDevelopmentPasswordLogin;
 
   static Uri _validateApiBaseUri(String value, {required String environment}) {
     final uri = Uri.parse(value);

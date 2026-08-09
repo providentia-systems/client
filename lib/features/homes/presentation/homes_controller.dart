@@ -24,6 +24,14 @@ final class HomesController extends ChangeNotifier {
     return _manager.load(sessionActiveHomeId: sessionActiveHomeId);
   }
 
+  Future<void> reconcileSessionActiveHome(String? homeId) {
+    return _manager.reconcileSessionActiveHome(homeId);
+  }
+
+  void handleAuthenticationLost() {
+    _manager.handleAuthenticationLost();
+  }
+
   Future<void> selectHome(String homeId) async {
     try {
       await _manager.selectHome(homeId);
@@ -83,27 +91,66 @@ final class HomesController extends ChangeNotifier {
     }
   }
 
+  Future<void> updateActiveHome({
+    required String name,
+    required String locale,
+    required String currency,
+    required String timezone,
+  }) async {
+    try {
+      await _manager.updateActiveHome(
+        name: name,
+        locale: locale,
+        currency: currency,
+        timezone: timezone,
+      );
+    } on ArgumentError {
+      _localFailure('Complete the home name, locale, currency, and time zone.');
+    }
+  }
+
   Future<void> revokeInvitation(HomeInvitation invitation) async {
     try {
       await _manager.revokeInvitation(invitation);
     } on StateError catch (error) {
       _localFailure(error.message.toString());
-    } on UnsupportedError {
-      _localFailure(
-        'Invitation revocation is not available on this server version.',
+    }
+  }
+
+  Future<void> acceptPendingInvitation(
+    RecipientHomeInvitation invitation,
+  ) async {
+    try {
+      await _manager.acceptPendingInvitation(invitation);
+    } on StateError {
+      _localFailure('That invitation is no longer available. Refresh first.');
+    }
+  }
+
+  Future<void> updatePermissionPolicy({
+    required HomePermissionPolicy policy,
+    required Set<String> permissions,
+  }) async {
+    try {
+      await _manager.updatePermissionPolicy(
+        policy: policy,
+        permissions: permissions,
       );
+    } on StateError {
+      _localFailure('Select a home before changing role permissions.');
     }
   }
 
-  Future<void> acceptInvitation(String token) async {
-    if (token.trim().isEmpty) {
-      _localFailure('The invitation link is incomplete.');
-      return;
-    }
-    await _manager.acceptInvitation(token);
-  }
+  Future<void> refreshPendingInvitations() =>
+      _manager.load(sessionActiveHomeId: _snapshot.activeHome?.id);
 
-  Future<void> leaveActiveHome() => _manager.leaveActiveHome();
+  Future<void> leaveActiveHome() async {
+    try {
+      await _manager.leaveActiveHome();
+    } on StateError {
+      _localFailure('Select a home before leaving it.');
+    }
+  }
 
   Future<void> handleMembershipRevoked(String homeId) {
     return _manager.handleMembershipRevoked(homeId);
@@ -111,7 +158,9 @@ final class HomesController extends ChangeNotifier {
 
   void _localFailure(String safeMessage) {
     _snapshot = _snapshot.copyWith(
-      status: HomeSessionStatus.failure,
+      status: _snapshot.activeHome == null
+          ? HomeSessionStatus.failure
+          : HomeSessionStatus.ready,
       safeMessage: safeMessage,
     );
     notifyListeners();

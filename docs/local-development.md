@@ -1,52 +1,44 @@
 # Local backend and client testing
 
-This is the supported handoff for testing the current client against the
-Providentia backend on one development workstation. Keep the
-`providentia-systems/backend` and `providentia-systems/client` checkouts as
-sibling directories when convenient, but no command depends on that layout.
+This is the supported developer handoff for the API `1.11.0` client, pinned to
+SHA-256
+`6535298b37f99edb19d13afe1a2d36b8987ab4c051b091419eefe3ae8dbc469c`. It tests
+the production-shaped login-link flow, session restoration, homes,
+invitations, roles, and account administration against one local Providentia
+backend. The backend's canonical
+[client/user testing runbook](https://github.com/providentia-systems/backend/blob/main/docs/deployment/client-user-testing.md)
+contains the complete security and cross-device acceptance matrix.
 
-The client pins OpenAPI `1.7.0` with 86 generated operations. Backend `main`
-currently publishes `1.10.0` and retains the compatibility routes used here.
-Do not regenerate the client merely to remove that visible version difference.
+## 1. Start the backend and email delivery
 
-## 1. Start and provision the backend
-
-The full source-build path requires Docker with Compose v2, `unzip`,
-`sha256sum`, `curl`, `jq`, and `openssl`. From the backend checkout, run:
+From the backend checkout, either start the published stack or build from the
+verified handover:
 
 ```bash
-./scripts/setup-development.sh \
+bash scripts/setup-prebuilt.sh
+```
+
+```bash
+bash scripts/setup-development.sh \
   --handover /absolute/path/Pantry_Stock_Project_Handover_2026-07-29.zip
 ```
 
-The script starts MySQL, Redis, Mailpit, the API and workers, applies
-migrations, imports the verified handover, and creates or safely reuses:
-
-- one verified development account;
-- one home owned by that account;
-- `.providentia-development.json`, protected with mode `0600`.
-
-Confirm readiness and display only the credentials needed for interactive
-client login:
+Both paths start the API, database, queue, notification worker, and Mailpit.
+Confirm the API before launching Flutter:
 
 ```bash
-curl --fail http://127.0.0.1:8080/health/ready
-jq -r '"Email: \(.email)\nPassword: \(.password)"' \
-  .providentia-development.json
+curl --fail-with-body http://127.0.0.1:8080/health/live
+curl --fail-with-body http://127.0.0.1:8080/health/ready
+curl --fail-with-body http://127.0.0.1:8080/api/v1/system/info
 ```
 
-The handoff also contains tokens for backend tooling. Do not pass its
-`accessToken`, `refreshToken`, `homeId`, or `deviceId` to Flutter. The client
-accepts no build-time bearer token or home authorization shortcut.
-
-The published-container alternative is `bash scripts/setup-prebuilt.sh`; see
-the backend's
-[published-image guide](https://github.com/providentia-systems/backend/blob/main/docs/deployment/prebuilt-images.md).
+Open Mailpit at `http://127.0.0.1:8025`. An accepted API request without a
+delivered message is not a successful onboarding test.
 
 ## 2. Prepare the client
 
-Install the repository-pinned Flutter `3.44.7`/Dart `3.12.2` toolchain. From
-the client checkout, run:
+Install the repository-pinned Flutter `3.44.7` and Dart `3.12.2` toolchain.
+From the client checkout, run:
 
 ```bash
 flutter pub get --enforce-lockfile
@@ -56,12 +48,13 @@ node tool/verify_structure.mjs
 node --test tool/*.test.mjs
 ```
 
-## 3. Run Chrome on the fixed development origin
+The client contract must remain byte-for-byte aligned with the reviewed
+backend API `1.11.0` artifact. Do not hand-edit generated Dart.
 
-Use `localhost` for both the web page and API. Do not mix `localhost` and
-`127.0.0.1` in this browser flow: host-only, `SameSite=Strict` development
-cookies require a consistent site. Port `8081` is fixed because the backend
-CORS allowlist must contain the exact credentialed browser origin.
+## 3. Run the client
+
+For web, use `localhost` for both the page and API. Port `8081` is fixed because
+the backend credentialed-CORS allowlist must contain the exact origin.
 
 ```bash
 flutter run -d chrome \
@@ -73,27 +66,7 @@ flutter run -d chrome \
   --dart-define=PROVIDENTIA_API_BASE_URL=http://localhost:8080
 ```
 
-Open `http://localhost:8081`, enter the handoff email and password, and select
-or create a home. The account menu remains reachable from every household
-section and provides **Change home** and **Sign out**.
-
-The source and prebuilt backend development profiles allow
-`http://localhost:8081` by default. A custom browser origin must be added to
-the backend's explicit `CORS_ALLOWED_ORIGINS`; wildcard credentialed CORS is
-not supported.
-
-## 4. Run the Linux desktop client
-
-On Ubuntu, the Flutter Linux build dependencies include:
-
-```bash
-sudo apt-get install \
-  clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libsecret-1-dev
-```
-
-Ensure the desktop session has an available, unlocked Secret Service/keyring;
-the client creates a device identity and stores only the native refresh token
-in secure platform storage. The access token remains in memory. Then run:
+For a desktop target on the backend workstation:
 
 ```bash
 flutter run -d linux \
@@ -101,13 +74,11 @@ flutter run -d linux \
   --dart-define=PROVIDENTIA_API_BASE_URL=http://127.0.0.1:8080
 ```
 
-Use the same handoff email and password. Native clients use bearer sessions
-obtained by the interactive login flow; they do not consume the handoff token.
+Replace `linux` with an available `windows`, `macos`, or iOS simulator/device
+identifier as appropriate. Native release builds require HTTPS; cleartext HTTP
+is restricted to the development loopback profile.
 
-## 5. Run an Android debug build over ADB
-
-With an emulator or USB-debuggable device listed by `flutter devices`, map its
-loopback port to the host backend before launching:
+For Android over ADB, map the device loopback to the host first:
 
 ```bash
 adb reverse tcp:8080 tcp:8080
@@ -116,64 +87,80 @@ flutter run -d <android-device-id> \
   --dart-define=PROVIDENTIA_API_BASE_URL=http://127.0.0.1:8080
 ```
 
-Run `adb reverse` again after reconnecting or restarting the device. The
-Android debug network policy permits cleartext traffic only to loopback hosts,
-and `RuntimeConfiguration` independently enforces the same API boundary.
-Release builds retain the HTTPS-only boundary; a LAN HTTP address is not an
-accepted substitute.
+The loopback golden path is same-workstation (or ADB-reversed) testing. To
+open the approval link on a genuinely different device, expose the backend
+through a trusted reachable HTTPS endpoint, set backend `PUBLIC_BASE_URL` to
+that exact origin, allow the client origin in CORS, and point Flutter at the
+same reachable API. Never expose the loopback development secrets publicly.
 
-## 6. Create additional users and roles
+## 4. Verify the login-link flow
 
-User creation, verification, invitations, and role changes are backend-owned
-for this test phase. From the backend checkout, provision a verified test user
-and place it in the development home as `manager`, `member`, or `viewer`:
+Use a new email address for the first pass, then repeat with the same email
+from another installation.
 
-```bash
-./scripts/provision-development-user.sh \
-  --email tester@example.test \
-  --role member
-```
+1. Enter the email in the originating client and choose **Send login link**.
+2. Confirm the client shows its waiting screen and Mailpit receives one neutral
+   message without revealing whether the address already exists.
+3. Open the login link in any browser. For the loopback commands above, use the
+   same workstation or ADB-reversed device. A browser on another device works
+   only with the reachable trusted HTTPS setup described in section 3.
+   Opening the link must show a review page; it must not approve the request by
+   itself.
+4. Choose **Approve**. The browser should say it can be closed. It must not
+   receive the originating client's application session.
+5. Return to the originating client. It polls the backend and exchanges its
+   private poll token, state, and PKCE verifier. A deep link may return focus as
+   a convenience, but is not required.
+6. Confirm `GET /api/v1/me` bootstraps the account. A first-time person gets
+   exactly one editable `My home` as `owner`; an existing person gets their
+   existing homes without another default home.
 
-Read the generated password from the protected handoff, then use **Sign out**
-in the client and log in as that user:
+The login request expires after 15 minutes. **Resend**, **Cancel**, and retry
+must clear the prior protected pending proof. A lost or ambiguous exchange
+response is single-use and requires a new login-link request.
 
-```bash
-jq -r '.testUsers[]?
-  | select(.email == "tester@example.test")
-  | "Email: \(.email)\nPassword: \(.password)\nHome role: \(.role)"' \
-  .providentia-development.json
-```
+## 5. Verify homes, invitations, and roles
 
-Use `--role none` when the account should be created without adding or changing
-a home membership. It does not remove a membership created by an earlier run.
+- One default/active home opens automatically. Multiple homes show the home
+  chooser; the account and sign-out actions remain available even with no
+  active home.
+- Rename `My home` in **Home settings**, close the client, and confirm the same
+  home and session restore on relaunch.
+- As an `owner` or permitted `manager`, invite another email and choose its
+  home role. The invitee completes the ordinary login-link flow, sees the
+  pending invitation, accepts its current revision, and can then switch homes.
+- Verify `owner`, `manager`, `member`, and `viewer` screens expose only actions
+  allowed by the server permission policy. Platform roles are separate and do
+  not grant private-home access.
+- Before the first administrator login, set protected backend
+  `PLATFORM_BOOTSTRAP_ADMIN_EMAILS` to the exact test address and restart (or
+  recreate) the backend so startup validation applies. Complete the ordinary
+  login-link flow for that address, then verify list/grant/revoke in
+  **Account**. Onboard the delegated address through its own login link and
+  confirm the backend rejects removal of the final active administrator.
 
-Home roles are `owner`, `manager`, `member`, and `viewer`. Platform roles such
-as `platform_administrator`, `catalog_curator`, and `catalog_reviewer` are a
-separate authorization domain and grant no private-home access. The setup
-account is the development home's owner; making it a platform administrator is
-an explicit backend CLI action, not a client bootstrap requirement. Follow the
-backend's canonical
-[client/user testing guide](https://github.com/providentia-systems/backend/blob/main/docs/deployment/client-user-testing.md)
-for platform-role grants, invitation lifecycle checks, and cleanup.
+## 6. Verify persistent sessions and sign-out
 
-## Current limitations
+The backend enforces approximately 15-minute access credentials, sliding
+30-day web inactivity, and sliding 60-day native inactivity. Production HTTPS
+web sessions use Secure HttpOnly cookies and a required CSRF value. The
+isolated loopback HTTP profile relaxes only the cookie's Secure attribute;
+native refresh credentials remain in platform secure storage and access
+credentials remain in memory.
 
-- The current API 1.7 composition exposes local-development email/password
-  compatibility only. Production backend configuration disables password login
-  by default. Backend API 1.10 publishes passwordless operations, but the
-  client pin, adapter, and deep-link flow do not yet adopt them, so the client
-  does not show a nonfunctional passwordless toggle.
-- There is no client registration, email-verification, password-reset, member
-  invitation, invitation-acceptance, or platform-administration screen yet.
-- Home selection, home creation, session restoration, **Change home**, and
-  **Sign out** are reachable. Other home-governance methods may exist in code
-  without a composed screen.
-- Inventory, purchase, and shopping-list screens are currently backed mostly
-  by local Drift data. Their changes are not a reliable cross-device or
-  client/backend acceptance test.
-- Home-role restrictions are enforced by the backend, but the local-only
-  household UI is not yet fully gated by the effective role. In particular, do
-  not treat a viewer's local controls as proof of server write permission.
-- No live Flutter/backend integration test currently runs from
-  `integration_test/`; use this smoke workflow and record which assertions
-  crossed the API boundary.
+Close and reopen each client to confirm restoration. In **Account → Signed-in
+devices**, confirm the current installation is identified, expired sessions are
+not presented as active, and another device can be revoked. Sign out with an
+expired access credential as well: native uses its rotating refresh credential
+as logout proof, web uses its refresh cookie plus CSRF, and local state stays
+cleared even if remote cleanup cannot be completed.
+
+## Current integration boundary
+
+Login-link onboarding, session/device management, current-user bootstrap,
+multiple homes, invitations, home governance, editable home settings, and
+platform-administrator controls are composed against API `1.11.0`. Household
+inventory, purchase, and shopping-list screens still include local Drift
+projections; those screens alone are not proof of cross-device convergence for
+every backend resource. Use the synchronization tests and backend runbook for
+that boundary.

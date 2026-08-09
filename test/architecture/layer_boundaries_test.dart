@@ -104,9 +104,10 @@ void main() {
       'lib/core/synchronization/generated_sync_gateway.dart',
       'lib/features/ai_integration/infrastructure/api17_ai_gateway.dart',
       'lib/features/ai_integration/infrastructure/api17_server_credential_provisioning.dart',
-      'lib/features/homes/infrastructure/api17_home_transport.dart',
+      'lib/features/administration/infrastructure/api11_platform_administration_transport.dart',
+      'lib/features/homes/infrastructure/api11_home_transport.dart',
       'lib/features/household_sync/infrastructure/api17_callback_household_gateway.dart',
-      'lib/features/identity/infrastructure/api17_identity_transport.dart',
+      'lib/features/identity/infrastructure/api11_identity_transport.dart',
     };
     for (final file in _dartSources()) {
       final source = file.readAsStringSync();
@@ -134,6 +135,46 @@ void main() {
 
     expect(generated, startsWith('// GENERATED FILE - DO NOT EDIT.'));
     expect(generated, contains('// Contract SHA-256:'));
+  });
+
+  test('production composes the complete API 1.11 onboarding boundary', () {
+    final source = File(
+      'lib/app/production_bootstrap_app.dart',
+    ).readAsStringSync();
+
+    for (final requiredSymbol in <String>[
+      'Api11IdentityTransport',
+      'PlatformPendingLoginLinkStore',
+      'SecureLoginLinkRequestFactory',
+      'LoginLinkSignInPage',
+      'Api11HomeTransport',
+      'HomeSelectionPage',
+      'AccountAccessPage',
+      'Api11PlatformAdministrationTransport',
+      'PlatformAdministrationController',
+    ]) {
+      expect(
+        source,
+        contains(requiredSymbol),
+        reason: '$requiredSymbol must remain reachable from production.',
+      );
+    }
+    expect(source, contains('enableDevelopmentPasswordLogin'));
+
+    final accountSource = File(
+      'lib/features/identity/presentation/account_access_page.dart',
+    ).readAsStringSync();
+    for (final settingsDestination in <String>[
+      'DeviceSessionsPage',
+      'HomeGovernancePage',
+      'PlatformAdministratorsPage',
+    ]) {
+      expect(
+        accountSource,
+        contains(settingsDestination),
+        reason: '$settingsDestination must remain reachable from Account.',
+      );
+    }
   });
 }
 

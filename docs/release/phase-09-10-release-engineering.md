@@ -15,7 +15,7 @@ for authorized distribution and do not add or imply an open-source licence.
 | `release-windows.yml` | Signed x64 MSIX | PFX subject must equal the MSIX publisher and its thumbprint must match |
 | `release-linux.yml` | x86-64 AppImage and Debian package with detached OpenPGP signatures | AppImage tool is checksum-pinned; package signatures use the protected key |
 | `release-web.yml` | Production PWA archive plus optional protected deployment hook | HTTPS API URL and, for publication, authenticated deployment hook |
-| `browser-acceptance.yml` | Per-browser PWA, IndexedDB and login/refresh/logout cookie-authentication evidence | Deployed HTTPS target and dedicated synthetic acceptance account |
+| `browser-acceptance.yml` | Per-browser PWA persistence plus end-to-end login-link approval, origin exchange, bootstrap, refresh and logout evidence | Deployed HTTPS target, dedicated synthetic account and operator-controlled test mailbox |
 
 Each platform release contains SHA-256 checksums, a CycloneDX 1.5 dependency
 SBOM, an in-toto/SLSA-compatible provenance statement and a release manifest.
@@ -94,9 +94,24 @@ signature.
 
 - `WEB_DEPLOY_WEBHOOK_URL`
 - `WEB_DEPLOY_WEBHOOK_TOKEN`
-- `E2E_API_BASE_URL`
-- `E2E_USER_EMAIL`
-- `E2E_USER_PASSWORD`
+- Variable `E2E_API_BASE_URL`: absolute HTTPS API origin. The legacy secret of
+  the same name is accepted temporarily while deployments migrate it to a
+  variable.
+- Variable `E2E_PUBLIC_BASE_URL`: the exact HTTPS backend origin configured as
+  `PUBLIC_BASE_URL`. The harness rejects approval links from every other
+  origin. The legacy secret of the same name is accepted temporarily while
+  deployments migrate it to a variable.
+- Secret `E2E_USER_EMAIL`: dedicated synthetic account address. Do not use a
+  person's mailbox or an account with production household information.
+- Variable `E2E_MAILBOX_IMAP_HOST`
+- Optional variable `E2E_MAILBOX_IMAP_PORT`, default `993`
+- Optional variable `E2E_MAILBOX_IMAP_SECURE`, which must remain `true`
+- Optional variable `E2E_MAILBOX_IMAP_FOLDER`, default `INBOX`
+- Optional variable `E2E_MAILBOX_TIMEOUT_SECONDS`, default `120` and bounded
+  from 30 to 300 seconds
+- Secret `E2E_MAILBOX_IMAP_USER`
+- Secret `E2E_MAILBOX_IMAP_PASSWORD`, preferably an app-specific,
+  read-only mailbox credential
 
 The deployment hook receives only source/run metadata and the PWA archive
 checksum. It is responsible for obtaining the workflow artifact using its own
@@ -104,6 +119,47 @@ least-privilege GitHub identity and performing an atomic hosted deployment.
 
 Browser automation covers Chrome, Firefox, Playwright WebKit and Edge. WebKit
 is an engine-level gate and is not evidence of physical Safari acceptance.
+Chrome runs the authenticated mailbox flow. The other engines run the PWA and
+persistence checks without requesting another email, keeping a workflow retry
+inside the backend's five-attempt per-address window.
+
+Authenticated browser acceptance uses the production login-link protocol; it
+must never enable or call the development password-login route. For the
+authenticated Chrome entry the harness:
+
+1. generates a fresh request ID, installation ID, private polling token, PKCE
+   verifier and state in memory;
+2. sends only the SHA-256 polling and PKCE challenges when starting the login
+   request;
+3. reads the controlled mailbox over certificate-verified TLS IMAP and selects
+   only a message addressed to the synthetic account that contains that exact
+   request ID;
+4. opens the scanner-safe fragment link in a separate, isolated browser
+   context, confirms the request is still pending, and deliberately presses
+   **Approve login**;
+5. verifies that the approval browser did not receive a session;
+6. polls and exchanges from the original PWA context, then verifies `/api/v1/me`,
+   the authorized home list, current-session identity, 30-day web idle policy,
+   secure cookie attributes and another tab's cookie session;
+7. refreshes the session, requires refresh-cookie rotation, logs out and proves
+   both `/api/v1/me` and the home list are unauthorized afterward.
+
+Mailbox and protocol waits are bounded. The workflow fails closed when the
+message is absent, malformed, delivered to another recipient, uses HTTP,
+comes from an origin other than `E2E_PUBLIC_BASE_URL`, places its capability in
+a query string, or refers to another request. The
+harness neither deletes mail nor writes mailbox contents, email addresses,
+approval URLs, poll tokens, PKCE values, CSRF proofs or session-cookie values
+to its JSON evidence. Known credentials and capability-shaped fragments are
+redacted from failure messages.
+
+Use a mailbox reserved for automated acceptance. Restrict its credential to
+mail reading when the provider supports scoped access, require the protected
+`production-acceptance` environment's reviewers, rotate the credential on the
+normal secret schedule, disable link rewriting for this recipient, and prevent
+human or automated rules from approving the message. Only the authenticated
+Chrome job reads the mailbox. Firefox, WebKit, and Edge run the unauthenticated
+PWA/persistence checks and do not consume another login attempt.
 
 ## Fail-closed behavior
 
@@ -132,9 +188,11 @@ Attach the following to the release record before certification:
    including desktop integration and local database persistence.
 6. Real Safari testing on current macOS and iOS, in addition to WebKit CI.
 7. Chrome, Firefox and Edge tests against the hosted PWA, including offline
-   reload, IndexedDB persistence, session refresh and logout.
-8. A dedicated synthetic account proving authenticated cross-device data
-   convergence without exposing production household information.
+   reload, IndexedDB persistence, login-link approval in an isolated browser,
+   originating-client exchange, session refresh and logout.
+8. A dedicated synthetic account and controlled mailbox proving authenticated
+   cross-device data convergence without exposing production household
+   information.
 9. Store-console validation screenshots or exported reports for Google Play,
    App Store Connect and Microsoft Partner Center where those channels are
    selected.
