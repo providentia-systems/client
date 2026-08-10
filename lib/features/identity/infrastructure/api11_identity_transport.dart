@@ -315,6 +315,7 @@ final class Api11IdentityTransport
     final metadata = SessionMetadata(
       sessionId: _string(json, 'sessionId'),
       deviceId: _string(json, 'deviceId'),
+      installationId: _string(json, 'installationId'),
       userId: _string(json, 'userId'),
       accessExpiresAt: _dateTime(json, 'accessExpiresAt'),
       refreshExpiresAt: _dateTime(json, 'refreshExpiresAt'),

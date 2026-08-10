@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:providentia/core/security/device_identity_store.dart';
 import 'package:providentia/core/security/origin_lock.dart';
 import 'package:providentia/core/security/platform_pending_login_link_store.dart';
+import 'package:providentia/core/security/platform_session_credential_store_native.dart';
 import 'package:providentia/features/identity/application/identity_ports.dart';
 import 'package:providentia/features/identity/domain/identity_models.dart';
 
@@ -93,6 +94,38 @@ void main() {
     );
   });
 
+  test('native session store preserves both device identities', () async {
+    final storage = _MemorySecureStorage();
+    final store = PlatformSessionCredentialStore(storage: storage);
+    final session = StoredNativeSession(
+      sessionId: _requestA,
+      deviceId: _requestB,
+      installationId: _installationId,
+      refreshToken: 'refresh-secret',
+    );
+
+    await store.write(session);
+    final restored = await store.read();
+
+    expect(restored?.deviceId, _requestB);
+    expect(restored?.installationId, _installationId);
+  });
+
+  test('legacy native session treats its device ID as installation ID', () async {
+    final storage = _MemorySecureStorage()
+      ..values['providentia.native-session.v1'] = jsonEncode(<String, String>{
+        'sessionId': _requestA,
+        'deviceId': _requestB,
+        'refreshToken': 'legacy-refresh-secret',
+      });
+    final restored = await PlatformSessionCredentialStore(
+      storage: storage,
+    ).read();
+
+    expect(restored?.deviceId, _requestB);
+    expect(restored?.installationId, _requestB);
+  });
+
   test(
     'browser cookie mutation journal is durable and compare-and-cleared',
     () async {
@@ -124,6 +157,7 @@ void main() {
 
 const _requestA = '0198a0b1-c2d3-7e4f-8123-456789abcde1';
 const _requestB = '0198a0b1-c2d3-7e4f-8123-456789abcde2';
+const _installationId = '0198a0b1-c2d3-7e4f-8123-456789abcde3';
 
 PendingLoginLinkRequest _pending(String id, String email) =>
     PendingLoginLinkRequest(

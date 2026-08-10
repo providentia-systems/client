@@ -230,6 +230,7 @@ final class PlatformSessionCoordination implements SessionCoordinationPort {
 Map<String, Object?> _grantToJson(SessionGrant grant) => <String, Object?>{
   'sessionId': grant.metadata.sessionId,
   'deviceId': grant.metadata.deviceId,
+  'installationId': grant.metadata.installationId,
   'userId': grant.metadata.userId,
   'accessExpiresAt': grant.metadata.accessExpiresAt.toIso8601String(),
   'refreshExpiresAt': grant.metadata.refreshExpiresAt.toIso8601String(),
@@ -247,6 +248,7 @@ SessionGrant _grantFromJson(Object? value) {
     metadata: SessionMetadata(
       sessionId: _string(value, 'sessionId'),
       deviceId: _string(value, 'deviceId'),
+      installationId: _string(value, 'installationId'),
       userId: _string(value, 'userId'),
       accessExpiresAt: _dateTime(value, 'accessExpiresAt'),
       refreshExpiresAt: _dateTime(value, 'refreshExpiresAt'),

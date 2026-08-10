@@ -3,8 +3,8 @@
 ## Decision
 
 The Flutter client must not invent transport operations that are absent from
-the backend-owned OpenAPI artifact. This release pins API `1.11.0`, SHA-256
-`6535298b37f99edb19d13afe1a2d36b8987ab4c051b091419eefe3ae8dbc469c`,
+the backend-owned OpenAPI artifact. This release pins API `1.11.1`, SHA-256
+`56933d2caebc66e238091762398880c8e92a9a9649ba1b7fafdc64b4b96552ef`,
 from the companion backend login-link release. The generic synchronization
 allowlist remains limited to `home-preference` and `private-note`.
 

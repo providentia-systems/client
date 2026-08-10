@@ -46,7 +46,7 @@ void main() {
         codeChallenge: _challengeB,
         state: _state,
         device: DeviceDescriptor(
-          id: _deviceId,
+          id: _installationId,
           name: 'Test phone',
           platform: 'android',
         ),
@@ -58,6 +58,7 @@ void main() {
     expect(body['pollChallenge'], _challengeA);
     expect(body['codeChallenge'], _challengeB);
     expect(body['codeChallengeMethod'], 'S256');
+    expect(body['installationId'], _installationId);
     expect(body, isNot(contains('pollToken')));
     expect(body, isNot(contains('codeVerifier')));
     expect(receipt.pollInterval, const Duration(seconds: 3));
@@ -123,6 +124,8 @@ void main() {
     });
     expect(grant.metadata.refreshIdleTtl, const Duration(days: 60));
     expect(grant.metadata.idleExpiresAt, DateTime.utc(2026, 10, 8, 12));
+    expect(grant.metadata.deviceId, _deviceId);
+    expect(grant.metadata.installationId, _installationId);
     expect(grant.secrets.refreshToken, 'refresh-secret');
   });
 
@@ -689,6 +692,7 @@ void main() {
 
 const _requestId = '0198a0b1-c2d3-7e4f-8123-456789abcdef';
 const _deviceId = '0198a0b1-c2d3-7e4f-8123-456789abcdea';
+const _installationId = '0198a0b1-c2d3-7e4f-8123-456789abcd00';
 const _sessionId = '0198a0b1-c2d3-7e4f-8123-456789abcdeb';
 const _userId = '0198a0b1-c2d3-7e4f-8123-456789abcdec';
 const _homeId = '0198a0b1-c2d3-7e4f-8123-456789abcded';
@@ -737,6 +741,7 @@ PendingLoginLinkRequest _pending() => PendingLoginLinkRequest(
 Map<String, Object?> _nativeSessionJson() => <String, Object?>{
   'sessionId': _sessionId,
   'deviceId': _deviceId,
+  'installationId': _installationId,
   'userId': _userId,
   'accessExpiresAt': '2026-08-09T12:15:00Z',
   'refreshExpiresAt': '2026-10-08T12:00:00Z',
@@ -751,6 +756,7 @@ Map<String, Object?> _nativeSessionJson() => <String, Object?>{
 Map<String, Object?> _webSessionJson() => <String, Object?>{
   'sessionId': _sessionId,
   'deviceId': _deviceId,
+  'installationId': _installationId,
   'userId': _userId,
   'accessExpiresAt': '2026-08-09T12:15:00Z',
   'refreshExpiresAt': '2026-09-08T12:00:00Z',

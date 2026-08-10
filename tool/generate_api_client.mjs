@@ -129,7 +129,7 @@ function validateContract(document) {
   }
   if (
     document.info?.title !== 'Providentia API' ||
-    document.info?.version !== '1.11.0'
+    document.info?.version !== '1.11.1'
   ) {
     throw new Error('Unexpected API identity or version.');
   }
@@ -294,6 +294,7 @@ function validateContract(document) {
   assertRequiredFields(document, 'SessionCredentials', [
     'sessionId',
     'deviceId',
+    'installationId',
     'accessExpiresAt',
     'refreshExpiresAt',
     'idleExpiresAt',

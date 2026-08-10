@@ -30,11 +30,17 @@ void main() {
     );
   });
 
-  test('approval on any device is polled and exchanged once', () async {
-    final fixture = _Fixture();
+  test('account-scoped device grant accepts its bound installation', () async {
+    final fixture = _Fixture(installationId: _installationId);
     addTearDown(fixture.dispose);
     await fixture.manager.requestLoginLink('person@example.com');
-    fixture.transport.status = LoginLinkRequestStatus.approved;
+    fixture.transport
+      ..status = LoginLinkRequestStatus.approved
+      ..exchangeGrant = _grant(
+        fixture.clock.value,
+        installationId: _installationId,
+      )
+      ..currentUser = _currentUser(fixture.clock.value);
 
     await fixture.manager.pollLoginLinkNow();
 
@@ -48,6 +54,22 @@ void main() {
     expect(fixture.manager.snapshot.currentUser?.email, 'person@example.com');
     expect(fixture.pendingStore.value, isNull);
     expect(fixture.credentials.value?.refreshToken, 'refresh-token');
+    expect(fixture.credentials.value?.deviceId, _deviceId);
+    expect(fixture.credentials.value?.installationId, _installationId);
+  });
+
+  test('grant for another installation is rejected and revoked', () async {
+    final fixture = _Fixture(installationId: _installationId);
+    addTearDown(fixture.dispose);
+    await fixture.manager.requestLoginLink('person@example.com');
+    fixture.transport.status = LoginLinkRequestStatus.approved;
+
+    await fixture.manager.pollLoginLinkNow();
+
+    expect(fixture.manager.snapshot.status, IdentitySessionStatus.failure);
+    expect(fixture.manager.snapshot.safeMessage, contains('different device'));
+    expect(fixture.credentials.value, isNull);
+    expect(fixture.transport.logoutCalls, 1);
   });
 
   test(
@@ -203,13 +225,21 @@ void main() {
 
   test('native restore rotates a 60-day sliding session', () async {
     final fixture = _Fixture(
+      installationId: _installationId,
       stored: StoredNativeSession(
         sessionId: _sessionId,
         deviceId: _deviceId,
+        installationId: _installationId,
         refreshToken: 'old-refresh-token',
       ),
     );
     addTearDown(fixture.dispose);
+    fixture.transport
+      ..refreshGrant = _grant(
+        fixture.clock.value,
+        installationId: _installationId,
+      )
+      ..currentUser = _currentUser(fixture.clock.value);
 
     await fixture.manager.restore();
 
@@ -1234,6 +1264,7 @@ const _requestId = '0198a0b1-c2d3-7e4f-8123-456789abcdef';
 const _secondRequestId = '0198a0b1-c2d3-7e4f-8123-456789abcdd4';
 const _sessionId = '0198a0b1-c2d3-7e4f-8123-456789abcdea';
 const _deviceId = '0198a0b1-c2d3-7e4f-8123-456789abcdeb';
+const _installationId = '0198a0b1-c2d3-7e4f-8123-456789abcd00';
 const _userId = '0198a0b1-c2d3-7e4f-8123-456789abcdec';
 const _secondSessionId = '0198a0b1-c2d3-7e4f-8123-456789abcdd1';
 const _secondUserId = '0198a0b1-c2d3-7e4f-8123-456789abcdd2';
@@ -1248,6 +1279,7 @@ const _codeChallenge = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 final class _Fixture {
   _Fixture({
     _MutableClock? clock,
+    String installationId = _deviceId,
     bool credentialWriteFails = false,
     int? pendingWriteFailsAfter,
     StoredNativeSession? stored,
@@ -1274,7 +1306,7 @@ final class _Fixture {
       loginLinkRequestFactory: _DeterministicRequestFactory(requestId),
       sessionCoordination: sessionCoordination,
       device: DeviceDescriptor(
-        id: _deviceId,
+        id: installationId,
         name: 'Test device',
         platform: 'linux',
       ),
@@ -1596,6 +1628,7 @@ SessionGrant _grant(
   ClientSessionTransport transport = ClientSessionTransport.nativeBearer,
   String sessionId = _sessionId,
   String deviceId = _deviceId,
+  String installationId = _deviceId,
   String userId = _userId,
   String? activeHomeId,
   String csrfToken = 'csrf-token',
@@ -1603,6 +1636,7 @@ SessionGrant _grant(
   metadata: SessionMetadata(
     sessionId: sessionId,
     deviceId: deviceId,
+    installationId: installationId,
     userId: userId,
     accessExpiresAt: now.add(const Duration(minutes: 15)),
     refreshExpiresAt: now.add(

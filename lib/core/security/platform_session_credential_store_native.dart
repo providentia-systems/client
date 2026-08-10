@@ -27,9 +27,13 @@ final class PlatformSessionCredentialStore implements SessionCredentialStore {
       if (decoded is! Map<String, Object?>) {
         throw const FormatException('Expected an object.');
       }
+      final deviceId = _requiredString(decoded, 'deviceId');
       return StoredNativeSession(
         sessionId: _requiredString(decoded, 'sessionId'),
-        deviceId: _requiredString(decoded, 'deviceId'),
+        deviceId: deviceId,
+        installationId: decoded.containsKey('installationId')
+            ? _requiredString(decoded, 'installationId')
+            : deviceId,
         refreshToken: _requiredString(decoded, 'refreshToken'),
       );
     } on Object {
@@ -47,6 +51,7 @@ final class PlatformSessionCredentialStore implements SessionCredentialStore {
       value: jsonEncode(<String, String>{
         'sessionId': session.sessionId,
         'deviceId': session.deviceId,
+        'installationId': session.installationId,
         'refreshToken': session.refreshToken,
       }),
     );
