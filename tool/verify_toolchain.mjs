@@ -26,9 +26,11 @@ assert(
   '.metadata is inconsistent.',
 );
 assert(
-  pubspec.includes('flutter: 3.44.7') &&
-    pubspec.includes("sdk: '>=3.12.2 <3.13.0'"),
-  'pubspec SDK constraints are inconsistent.',
+  pubspec.includes(
+    `flutter: '>=${toolchain.flutter.version} <4.0.0'`,
+  ) &&
+    pubspec.includes(`sdk: '>=${toolchain.dart.version} <4.0.0'`),
+  'pubspec SDK compatibility range is inconsistent.',
 );
 
 const archiveArgument = process.argv[2];
