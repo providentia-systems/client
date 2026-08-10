@@ -37,7 +37,61 @@ delivered message is not a successful onboarding test.
 
 ## 2. Prepare the client
 
-Install the repository-pinned Flutter `3.44.7` and Dart `3.12.2` toolchain.
+The client accepts Flutter `>=3.44.7 <4.0.0` and Dart
+`>=3.12.2 <4.0.0`. This permits newer stable Flutter 3.x releases while CI
+retains `3.44.7` as the reproducible minimum baseline. A pubspec checks the SDK
+already selected by the `flutter` command; it cannot install or update Flutter.
+
+### Ubuntu and Debian-based Linux prerequisites
+
+Install Flutter's Linux desktop build tools and the Libsecret development and
+runtime packages required by `flutter_secure_storage`:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y \
+  clang cmake ninja-build pkg-config libgtk-3-dev libstdc++-12-dev \
+  liblzma-dev libsecret-1-0 libsecret-1-dev
+```
+
+For a first Snap installation, classic confinement is required:
+
+```bash
+sudo snap install flutter --classic
+```
+
+For an existing Flutter Snap, refresh it to the current stable release:
+
+```bash
+sudo snap refresh flutter --channel=latest/stable
+```
+
+Validate both the Flutter toolchain and the native Libsecret package before
+resolving the client:
+
+```bash
+flutter --version
+flutter doctor -v
+flutter devices
+pkg-config --modversion libsecret-1
+```
+
+The Flutter SDK does not need to be exactly `3.44.7`; for example, `3.44.9`
+satisfies the supported range. `flutter pub get` downloads Dart packages, not
+the Flutter SDK itself.
+
+The upstream Linux secure-storage plugin documents a possible later Snap/GLib
+linker mismatch on Ubuntu. That problem reports undefined references such as
+`g_task_set_static_name` or `g_once_init_enter_pointer`; it is different from a
+missing `libsecret-1` package. If that linker error occurs, use the
+[official Flutter Linux archive](https://docs.flutter.dev/install/manual)
+or install the repository's verified baseline archive outside the checkout:
+
+```bash
+tool/install_flutter_linux.sh /absolute/path/to/sdk-parent
+export PATH="/absolute/path/to/sdk-parent/flutter/bin:$PATH"
+```
+
 From the client checkout, run:
 
 ```bash
