@@ -70,6 +70,12 @@ Start the backend development stack first. It includes Mailpit and the
 notification worker needed to deliver login links. Then run Chrome on the
 fixed, backend-allowlisted `http://localhost:8081` origin:
 
+For the default loopback backend, its browser approval origin must also be in
+the runtime allowlist. Start the backend with
+`http://127.0.0.1:8080`, `http://localhost:8080`, and the Flutter web origins
+in `CORS_ALLOWED_ORIGINS`; the exact source and prebuilt commands plus a `303`
+capture smoke test are in [local development](docs/local-development.md).
+
 ```bash
 flutter run -d chrome \
   --web-hostname=localhost \
@@ -87,6 +93,9 @@ approval link on the same workstation (or an ADB-reversed device). A genuinely
 different device requires a reachable trusted HTTPS backend whose
 `PUBLIC_BASE_URL` matches the emailed origin. The originating client polls and
 exchanges its private PKCE proof, so a deep link is optional.
+Use the newest **Approve your Providentia login** message after every retry;
+resending deliberately retires older links, and a browser capture that already
+removed its fragment cannot be recovered by refreshing the cleaned URL.
 Build-time bearer tokens and home IDs are not supported. Native refresh tokens
 are kept in platform secure storage, access tokens remain in memory, and web
 authentication uses credentialed HttpOnly cookies.
