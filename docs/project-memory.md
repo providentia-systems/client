@@ -36,6 +36,10 @@
   before package resolution.
 - Linux desktop setup must include Flutter's native build prerequisites plus
   Libsecret development and runtime packages for secure session storage.
+- Local login-link acceptance must explicitly verify the backend-hosted browser
+  approval origin as well as the Flutter web origins. The default loopback
+  handoff supplies `127.0.0.1:8080` and `localhost:8080` in the backend CORS
+  allowlist and requires a `303` capture smoke test before client onboarding.
 
 Domain, app-store, and trademark due diligence remains mandatory before public
 launch. It does not reopen the owner-selected name.
