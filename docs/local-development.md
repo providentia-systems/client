@@ -12,18 +12,31 @@ contains the complete security and cross-device acceptance matrix.
 ## 1. Start the backend and email delivery
 
 From the backend checkout, either start the published stack or build from the
-verified handover:
+verified handover. The browser approval page is served by the backend and
+submits its token back to that same public origin. Keep that origin in the
+backend CORS list as well as the Flutter web origins. For the default loopback
+ports, start the chosen stack with the complete explicit allowlist:
 
 ```bash
-bash scripts/setup-prebuilt.sh
+CORS_ALLOWED_ORIGINS='http://127.0.0.1:8080,http://localhost:8080,http://127.0.0.1:3000,http://localhost:3000,http://127.0.0.1:8081,http://localhost:8081' \
+  bash scripts/setup-prebuilt.sh
 ```
 
 ```bash
-bash scripts/setup-development.sh \
-  --handover /absolute/path/Pantry_Stock_Project_Handover_2026-07-29.zip
+CORS_ALLOWED_ORIGINS='http://127.0.0.1:8080,http://localhost:8080,http://127.0.0.1:3000,http://localhost:3000,http://127.0.0.1:8081,http://localhost:8081' \
+  bash scripts/setup-development.sh \
+    --handover /absolute/path/Pantry_Stock_Project_Handover_2026-07-29.zip
 ```
+
+The backend also derives its configured `PUBLIC_BASE_URL` origin into the
+runtime allowlist. Supplying the complete list explicitly makes the local
+handoff independent of a stale generated environment or previously created
+container. If an installation already has `.env.prebuilt.local` or
+`.env.development.local`, add the same `CORS_ALLOWED_ORIGINS=...` line there
+and rerun the corresponding setup command so Docker recreates the API service.
 
 Both paths start the API, database, queue, notification worker, and Mailpit.
+
 Confirm the API before launching Flutter:
 
 ```bash
@@ -34,6 +47,25 @@ curl --fail-with-body http://127.0.0.1:8080/api/v1/system/info
 
 Open Mailpit at `http://127.0.0.1:8025`. An accepted API request without a
 delivered message is not a successful onboarding test.
+
+Before requesting a login link, verify that a same-origin browser form POST is
+accepted by the running backend. `303` is the expected result; the deliberately
+invalid request identifier is never approved or stored:
+
+```bash
+curl --silent --show-error --output /dev/null --write-out '%{http_code}\n' \
+  -H 'Origin: http://127.0.0.1:8080' \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -X POST \
+  --data 'approval=invalid' \
+  http://127.0.0.1:8080/login-links/00000000-0000-0000-0000-000000000000/capture
+```
+
+If this returns `403 Origin forbidden`, the API container is still using an
+allowlist that omits `http://127.0.0.1:8080`; apply the explicit allowlist
+above and recreate it before testing Flutter. If it returns `404`, first
+confirm that the running backend contains the `/login-links/{requestId}`
+browser routes and refresh the backend checkout or prebuilt image.
 
 ## 2. Prepare the client
 
@@ -172,6 +204,16 @@ from another installation.
 The login request expires after 15 minutes. **Resend**, **Cancel**, and retry
 must clear the prior protected pending proof. A lost or ambiguous exchange
 response is single-use and requires a new login-link request.
+
+Use only the newest message with subject **Approve your Providentia login**.
+Sending a new link retires the previous request, so an older link correctly
+becomes unavailable. The launch page also removes the `#approval=...` fragment
+before posting it into a protected cookie; after a failed capture, refreshing
+the cleaned browser URL cannot reconstruct that credential and may return
+`404`. Fix the backend origin first, request one new link, and open that fresh
+message once. Legacy **Verify your Providentia account** messages belong to the
+development password-registration flow and are not part of login-link
+onboarding.
 
 ## 5. Verify homes, invitations, and roles
 
