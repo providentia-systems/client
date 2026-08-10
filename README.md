@@ -10,7 +10,7 @@ architecture tests, and a full CI build matrix.
 Phases 5–8 add household inventory, count sessions, purchase history, shopping
 lists, AI review policies, catalog moderation models, explainable suggestions,
 price intelligence, reporting, and evaluation. The client now pins the
-backend's API `1.11.0` onboarding/session contract and generates 155 callable
+backend's API `1.11.1` onboarding/session contract and generates 155 callable
 operations from the reviewed bytes. Email-only login-link onboarding,
 cross-device browser approval, persistent web/native sessions, current-user
 bootstrap, multiple homes, recipient invitations, home governance, signed-in

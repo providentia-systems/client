@@ -2,11 +2,11 @@
 
 - Date: 2026-08-09
 - Flutter target: `1.0.0+10`
-- Authoritative backend review: `providentia-systems/backend` API `1.11.0`
+- Authoritative backend review: `providentia-systems/backend` API `1.11.1`
 
 ## Contract baseline
 
-The Flutter repository pins the reviewed OpenAPI `1.11.0` artifact, validates
+The Flutter repository pins the reviewed OpenAPI `1.11.1` artifact, validates
 its SHA-256 lock, and deterministically generates a callable Dart method and
 operation-registry entry for all 155 published operations. Generated transport
 stays behind application-owned adapters so authentication, authorization,
@@ -39,7 +39,7 @@ compatibility surfaces do not satisfy this acceptance boundary.
 
 ## Connected acceptance boundary
 
-Against the API `1.11.0` development stack, the production composition can:
+Against the API `1.11.1` development stack, the production composition can:
 
 1. start and approve a neutral login-link request for a new or existing email;
 2. complete the private exchange in the originating client and bootstrap the
@@ -86,7 +86,7 @@ same-site cookie topology required by browser sessions.
 
 ## Phase exit criteria
 
-Phase 9 exits when the complete API `1.11.0` login-link, session, home,
+Phase 9 exits when the complete API `1.11.1` login-link, session, home,
 invitation, role, and administration path passes against a live deployment on
 every selected platform, including expiry, retry, revoked membership, and
 cross-home isolation.

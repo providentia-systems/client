@@ -46,7 +46,7 @@ launch. It does not reopen the owner-selected name.
 
 ## Current integration note — 2026-08-09
 
-- The client pins the reviewed OpenAPI `1.11.0` onboarding/session boundary and
+- The client pins the reviewed OpenAPI `1.11.1` onboarding/session boundary and
   generates 155 operations. Contract, lock, manifest, and generated Dart are
   updated as one deliberate change.
 - Product onboarding is email-only login-link authentication. The originating

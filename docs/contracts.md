@@ -13,9 +13,9 @@ local `providentia_api_client` Dart package.
 
 ## Current pin
 
-- Client OpenAPI version: `1.11.0`
+- Client OpenAPI version: `1.11.1`
 - Contract SHA-256:
-  `6535298b37f99edb19d13afe1a2d36b8987ab4c051b091419eefe3ae8dbc469c`
+  `56933d2caebc66e238091762398880c8e92a9a9649ba1b7fafdc64b4b96552ef`
 - Declared/generated operations: 155
 
 The login-link onboarding and account-management surface is deliberately
@@ -28,6 +28,11 @@ adopted as one compatible boundary. Application-owned adapters compose:
 - active-home selection, editable home settings, recipient invitations,
   memberships, roles, and permission policies; and
 - platform-administrator list/grant/revoke with revision conflict handling.
+
+Session responses keep two UUIDs distinct. `installationId` is the stable UUID
+created by this app installation and is used to reject a grant issued for a
+different installation. `deviceId` is the backend's account-scoped UUID and is
+retained for session identity, device management, and synchronization.
 
 Generated methods show what the pinned server contract can express; they do
 not prove that every household operation is reachable from a visible screen.

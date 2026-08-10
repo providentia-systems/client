@@ -249,6 +249,7 @@ final class SessionMetadata {
   SessionMetadata({
     required this.sessionId,
     required this.deviceId,
+    String? installationId,
     required this.userId,
     required this.accessExpiresAt,
     required this.refreshExpiresAt,
@@ -256,9 +257,10 @@ final class SessionMetadata {
     required this.refreshIdleTtl,
     required this.transport,
     this.activeHomeId,
-  }) {
+  }) : installationId = installationId ?? deviceId {
     _requireUuid(sessionId, 'sessionId');
     _requireUuid(deviceId, 'deviceId');
+    _requireUuid(this.installationId, 'installationId');
     _requireUuid(userId, 'userId');
     final maximumIdleTtl = transport == ClientSessionTransport.webCookie
         ? const Duration(days: 30)
@@ -278,6 +280,7 @@ final class SessionMetadata {
 
   final String sessionId;
   final String deviceId;
+  final String installationId;
   final String userId;
   final DateTime accessExpiresAt;
   final DateTime refreshExpiresAt;
@@ -293,6 +296,7 @@ final class SessionMetadata {
     return SessionMetadata(
       sessionId: sessionId,
       deviceId: deviceId,
+      installationId: installationId,
       userId: userId,
       accessExpiresAt: accessExpiresAt,
       refreshExpiresAt: refreshExpiresAt,
@@ -326,15 +330,18 @@ final class StoredNativeSession {
   StoredNativeSession({
     required this.sessionId,
     required this.deviceId,
+    String? installationId,
     required this.refreshToken,
-  }) {
+  }) : installationId = installationId ?? deviceId {
     _requireUuid(sessionId, 'sessionId');
     _requireUuid(deviceId, 'deviceId');
+    _requireUuid(this.installationId, 'installationId');
     _requireNonEmpty(refreshToken, 'refreshToken');
   }
 
   final String sessionId;
   final String deviceId;
+  final String installationId;
   final String refreshToken;
 }
 

@@ -797,6 +797,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
     if (current != null &&
         current.sessionId == grant.metadata.sessionId &&
         current.deviceId == grant.metadata.deviceId &&
+        current.installationId == grant.metadata.installationId &&
         current.userId == grant.metadata.userId &&
         current.accessExpiresAt == grant.metadata.accessExpiresAt &&
         current.refreshExpiresAt == grant.metadata.refreshExpiresAt &&
@@ -830,6 +831,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
     return <Object?>[
       metadata.sessionId,
       metadata.deviceId,
+      metadata.installationId,
       metadata.userId,
       metadata.accessExpiresAt.microsecondsSinceEpoch,
       metadata.refreshExpiresAt.microsecondsSinceEpoch,
@@ -865,6 +867,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
     return <Object?>[
       metadata.sessionId,
       metadata.deviceId,
+      metadata.installationId,
       metadata.userId,
       metadata.accessExpiresAt.microsecondsSinceEpoch,
       metadata.refreshExpiresAt.microsecondsSinceEpoch,
@@ -1483,7 +1486,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
           return;
         }
         if (stored != null) {
-          if (stored.deviceId != _device.id) {
+          if (stored.installationId != _device.id) {
             await _retireSession(
               SessionSecrets(refreshToken: stored.refreshToken),
             );
@@ -1775,7 +1778,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
       }
       return false;
     }
-    if (grant.metadata.deviceId != _device.id) {
+    if (grant.metadata.installationId != _device.id) {
       final result = await _discardGrant(grant);
       if (result == _RemoteLogoutResult.settled) {
         await _clearBrowserCookieMutation(cookieMutation);
@@ -1802,6 +1805,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
             StoredNativeSession(
               sessionId: grant.metadata.sessionId,
               deviceId: grant.metadata.deviceId,
+              installationId: grant.metadata.installationId,
               refreshToken: grant.secrets.refreshToken!,
             ),
           ),
@@ -1952,6 +1956,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
     if (expectedSession != null &&
         (metadata.sessionId != expectedSession.sessionId ||
             metadata.deviceId != expectedSession.deviceId ||
+            metadata.installationId != expectedSession.installationId ||
             metadata.userId != expectedSession.userId ||
             metadata.transport != expectedSession.transport)) {
       throw const IdentityTransportException(
@@ -1961,7 +1966,8 @@ final class IdentitySessionManager implements SessionAuthorizer {
     }
     if (expectedStoredSession != null &&
         (metadata.sessionId != expectedStoredSession.sessionId ||
-            metadata.deviceId != expectedStoredSession.deviceId)) {
+            metadata.deviceId != expectedStoredSession.deviceId ||
+            metadata.installationId != expectedStoredSession.installationId)) {
       throw const IdentityTransportException(
         kind: IdentityFailureKind.validation,
         safeMessage: 'The saved session identity changed unexpectedly.',
