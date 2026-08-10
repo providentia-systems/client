@@ -23,6 +23,20 @@
 - Redis is the preferred production queue/cache profile. The shared
   Redis-compatible port and Valkey verification remain architecture safeguards.
 
+## Owner decision — 2026-08-10
+
+- Local client development accepts Flutter `>=3.44.7 <4.0.0` and Dart
+  `>=3.12.2 <4.0.0`, so stable Flutter 3.x patch and minor releases do not
+  require a repository edit.
+- Flutter `3.44.7` and Dart `3.12.2` remain the exact reproducible CI and
+  release-investigation baseline. FVM/asdf and the verified archive installers
+  continue to select that baseline.
+- The project cannot install a Flutter SDK through `pubspec.yaml`. Local setup
+  documentation must install or refresh Flutter separately and validate it
+  before package resolution.
+- Linux desktop setup must include Flutter's native build prerequisites plus
+  Libsecret development and runtime packages for secure session storage.
+
 Domain, app-store, and trademark due diligence remains mandatory before public
 launch. It does not reopen the owner-selected name.
 
