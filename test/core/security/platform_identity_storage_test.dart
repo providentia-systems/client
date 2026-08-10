@@ -111,20 +111,23 @@ void main() {
     expect(restored?.installationId, _installationId);
   });
 
-  test('legacy native session treats its device ID as installation ID', () async {
-    final storage = _MemorySecureStorage()
-      ..values['providentia.native-session.v1'] = jsonEncode(<String, String>{
-        'sessionId': _requestA,
-        'deviceId': _requestB,
-        'refreshToken': 'legacy-refresh-secret',
-      });
-    final restored = await PlatformSessionCredentialStore(
-      storage: storage,
-    ).read();
+  test(
+    'legacy native session treats its device ID as installation ID',
+    () async {
+      final storage = _MemorySecureStorage()
+        ..values['providentia.native-session.v1'] = jsonEncode(<String, String>{
+          'sessionId': _requestA,
+          'deviceId': _requestB,
+          'refreshToken': 'legacy-refresh-secret',
+        });
+      final restored = await PlatformSessionCredentialStore(
+        storage: storage,
+      ).read();
 
-    expect(restored?.deviceId, _requestB);
-    expect(restored?.installationId, _requestB);
-  });
+      expect(restored?.deviceId, _requestB);
+      expect(restored?.installationId, _requestB);
+    },
+  );
 
   test(
     'browser cookie mutation journal is durable and compare-and-cleared',
