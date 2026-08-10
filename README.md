@@ -20,14 +20,21 @@ are not by themselves an end-to-end test of every backend resource. See
 [docs/phases5-8-contract-release-plan.md](docs/phases5-8-contract-release-plan.md)
 for the backend release sequence.
 
-## Pinned environment
+## Supported toolchain
 
-- Flutter `3.44.7`
-- Dart `3.12.2`
-- Flutter revision `84fc5cbb223bc12f83d65b647ff8a56caf779ffd`
+- Local development: Flutter `>=3.44.7 <4.0.0` and Dart
+  `>=3.12.2 <4.0.0`
+- Reproducible CI baseline: Flutter `3.44.7`, Dart `3.12.2`, and Flutter
+  revision `84fc5cbb223bc12f83d65b647ff8a56caf779ffd`
 
-Install the exact SDK with FVM/asdf or use the checksum-verifying scripts in
-`tool/`. Then run:
+The compatibility ranges accept newer stable Flutter 3.x releases, including
+`3.44.9`. A pubspec can validate an installed SDK but cannot install or update
+Flutter. See [local development](docs/local-development.md) for the Ubuntu
+installation, refresh, and native dependency commands. FVM/asdf and the
+checksum-verifying scripts in `tool/` retain the exact baseline for
+reproducible CI and release investigation.
+
+Then run:
 
 ```bash
 flutter pub get --enforce-lockfile
