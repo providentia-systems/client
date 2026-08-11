@@ -16,6 +16,7 @@ doc/api/
 
 # Local platform files
 android/local.properties
+android/.gradle/
 **/android/**/GeneratedPluginRegistrant.java
 ios/Flutter/Generated.xcconfig
 ios/Flutter/ephemeral/
