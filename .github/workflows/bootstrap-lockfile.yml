@@ -5,6 +5,11 @@ on:
     paths:
       - .gitignore
       - pubspec.yaml
+      - pubspec.lock
+      - android/app/build.gradle.kts
+      - android/build.gradle.kts
+      - android/settings.gradle.kts
+      - android/gradle/wrapper/gradle-wrapper.properties
       - .github/workflows/bootstrap-lockfile.yml
   push:
     branches:
@@ -12,6 +17,15 @@ on:
       - 'agent/**'
       - 'feature/**'
       - 'phase-*/**'
+    paths:
+      - .gitignore
+      - pubspec.yaml
+      - pubspec.lock
+      - android/app/build.gradle.kts
+      - android/build.gradle.kts
+      - android/settings.gradle.kts
+      - android/gradle/wrapper/gradle-wrapper.properties
+      - .github/workflows/bootstrap-lockfile.yml
 
 permissions:
   contents: write
@@ -22,9 +36,9 @@ concurrency:
 
 jobs:
   create-lockfile:
-    name: Refresh pubspec.lock
+    name: Refresh dependency locks
     if: >-
-      github.repository == 'vast-development-method/providentia-flutter' &&
+      github.repository == 'providentia-systems/client' &&
       (github.event_name == 'pull_request' ||
       !contains(github.event.head_commit.message, '[lockfile-bootstrap]'))
     runs-on: ubuntu-24.04
@@ -43,29 +57,48 @@ jobs:
       - name: Resolve the dependency graph
         run: flutter pub get
 
+      - name: Refresh Android dependency locks
+        working-directory: android
+        run: ./gradlew :generateLockfiles
+
       - name: Verify mutation scope
         id: mutation
         run: |
           mapfile -t changed < <(git status --porcelain | sed 's/^...//')
-          if [[ ${#changed[@]} -gt 1 ]] ||
-             [[ ${#changed[@]} -eq 1 && "${changed[0]}" != "pubspec.lock" ]]; then
-            printf 'Unexpected generated paths:\n%s\n' "${changed[@]}" >&2
-            exit 1
-          fi
-          if [[ ${#changed[@]} -eq 1 ]]; then
+          for path in "${changed[@]}"; do
+            case "$path" in
+              pubspec.lock|android/buildscript-gradle.lockfile|android/project-*.lockfile)
+                ;;
+              *)
+                echo "Unexpected generated path: $path" >&2
+                exit 1
+                ;;
+            esac
+          done
+          if [[ ${#changed[@]} -gt 0 ]]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Commit only pubspec.lock
+      - name: Commit only dependency locks
         if: steps.mutation.outputs.changed == 'true'
         env:
           TARGET_BRANCH: ${{ github.event.pull_request.head.ref || github.ref_name }}
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -- pubspec.lock
-          test "$(git diff --cached --name-only)" = 'pubspec.lock'
-          git commit -m '[lockfile-bootstrap] Refresh Flutter dependency graph'
+          git add -- pubspec.lock android/buildscript-gradle.lockfile android/project-*.lockfile
+          mapfile -t staged < <(git diff --cached --name-only)
+          for path in "${staged[@]}"; do
+            case "$path" in
+              pubspec.lock|android/buildscript-gradle.lockfile|android/project-*.lockfile)
+                ;;
+              *)
+                echo "Unexpected staged path: $path" >&2
+                exit 1
+                ;;
+            esac
+          done
+          git commit -m '[lockfile-bootstrap] Refresh Flutter and Android dependency graphs'
           git push origin "HEAD:${TARGET_BRANCH}"

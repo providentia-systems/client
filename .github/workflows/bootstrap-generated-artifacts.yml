@@ -43,7 +43,7 @@ jobs:
   refresh:
     name: Refresh reviewable generated artifacts
     if: >-
-      github.repository == 'vast-development-method/providentia-flutter' &&
+      github.repository == 'providentia-systems/client' &&
       (github.event_name == 'pull_request' ||
       !contains(github.event.head_commit.message, '[generated-bootstrap]'))
     runs-on: ubuntu-24.04
