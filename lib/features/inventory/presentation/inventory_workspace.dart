@@ -35,10 +35,42 @@ class _InventoryWorkspaceState extends State<InventoryWorkspace> {
               padding: const EdgeInsets.all(20),
               sliver: SliverList.list(
                 children: <Widget>[
-                  Text(
-                    'Stock',
-                    style: Theme.of(context).textTheme.headlineLarge,
+                  Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: Text(
+                          'Stock',
+                          style: Theme.of(context).textTheme.headlineLarge,
+                        ),
+                      ),
+                      if (widget.controller.canCreatePrivateProduct)
+                        FilledButton.icon(
+                          key: const Key('inventory-add-private-product'),
+                          onPressed: state.productCreationBusy
+                              ? null
+                              : _showAddPrivateProduct,
+                          icon: const Icon(Icons.add),
+                          label: const Text('Add product'),
+                        ),
+                    ],
                   ),
+                  if (state.productCreationNotice != null) ...<Widget>[
+                    const SizedBox(height: 8),
+                    Text(
+                      state.productCreationNotice!,
+                      key: const Key('inventory-product-creation-notice'),
+                    ),
+                  ],
+                  if (state.productCreationError != null) ...<Widget>[
+                    const SizedBox(height: 8),
+                    Text(
+                      state.productCreationError!,
+                      key: const Key('inventory-product-creation-error'),
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   SegmentedButton<InventoryView>(
                     segments: const <ButtonSegment<InventoryView>>[
@@ -109,6 +141,98 @@ class _InventoryWorkspaceState extends State<InventoryWorkspace> {
         );
       },
     );
+  }
+
+  Future<void> _showAddPrivateProduct() async {
+    final draft = await showDialog<(String, String?)>(
+      context: context,
+      builder: (_) => const _PrivateHomeProductDialog(),
+    );
+    if (draft == null || !mounted) return;
+    await widget.controller.createPrivateProduct(
+      privateName: draft.$1,
+      originalPackText: draft.$2,
+    );
+  }
+}
+
+class _PrivateHomeProductDialog extends StatefulWidget {
+  const _PrivateHomeProductDialog();
+
+  @override
+  State<_PrivateHomeProductDialog> createState() =>
+      _PrivateHomeProductDialogState();
+}
+
+class _PrivateHomeProductDialogState extends State<_PrivateHomeProductDialog> {
+  final _name = TextEditingController();
+  final _pack = TextEditingController();
+  String? _safeError;
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _pack.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Add private product'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          const Text(
+            'This name and pack text stay private to the active home.',
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            key: const Key('inventory-private-product-name'),
+            controller: _name,
+            maxLength: 191,
+            decoration: const InputDecoration(labelText: 'Private name'),
+          ),
+          TextField(
+            key: const Key('inventory-private-product-pack'),
+            controller: _pack,
+            maxLength: 191,
+            decoration: const InputDecoration(
+              labelText: 'Original pack text (optional)',
+            ),
+          ),
+          if (_safeError != null)
+            Text(
+              _safeError!,
+              key: const Key('inventory-private-product-validation'),
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+        ],
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          key: const Key('inventory-save-private-product'),
+          onPressed: _save,
+          child: const Text('Save locally'),
+        ),
+      ],
+    );
+  }
+
+  void _save() {
+    final name = _name.text.trim();
+    final pack = _pack.text.trim();
+    if (name.isEmpty || name.length > 191 || pack.length > 191) {
+      setState(() {
+        _safeError = 'Enter a private product name of at most 191 characters.';
+      });
+      return;
+    }
+    Navigator.pop(context, (name, pack.isEmpty ? null : pack));
   }
 }
 

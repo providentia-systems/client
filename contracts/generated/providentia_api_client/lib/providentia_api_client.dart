@@ -1,6 +1,6 @@
 // GENERATED FILE - DO NOT EDIT.
 // Source: contracts/providentia-v1.json
-// Contract SHA-256: 56933d2caebc66e238091762398880c8e92a9a9649ba1b7fafdc64b4b96552ef
+// Contract SHA-256: 30604d238f9c29f9d6b09dbf1819c84a475cb93e94728a8b2888f9b65a865a44
 // ignore_for_file: use_null_aware_elements
 
 library;
@@ -1066,6 +1066,12 @@ final class ProvidentiaApiClient {
       operationId: "listPrivateAiMedia",
       method: "GET",
       pathTemplate: "/api/v1/homes/{homeId}/ai/media",
+      multipart: false,
+    ),
+    "listPublishedCatalogContributions": ApiOperation(
+      operationId: "listPublishedCatalogContributions",
+      method: "GET",
+      pathTemplate: "/api/v1/catalog-contributions",
       multipart: false,
     ),
     "listReceipts": ApiOperation(
@@ -2953,6 +2959,18 @@ final class ProvidentiaApiClient {
     return invokeOperation(
       operationId: "listPrivateAiMedia",
       pathParameters: <String, String>{"homeId": homeId},
+      query: query,
+      headers: headers,
+    );
+  }
+
+  Future<ApiResponse> listPublishedCatalogContributions({
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "listPublishedCatalogContributions",
+      pathParameters: const <String, String>{},
       query: query,
       headers: headers,
     );

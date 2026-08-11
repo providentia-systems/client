@@ -58,6 +58,9 @@ final class CatalogMergeWorkflow {
     if (reason.trim().isEmpty) {
       throw const CatalogMergeReasonRequiredException();
     }
+    if (!preview.eligible) {
+      throw const CatalogConflictException();
+    }
     if (!_sameRevisions(preview.expectedRevisions, currentRevisions)) {
       throw const CatalogStaleRevisionException();
     }

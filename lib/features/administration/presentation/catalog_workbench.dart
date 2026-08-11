@@ -5,9 +5,16 @@ import 'package:providentia/features/administration/application/catalog_workbenc
 import 'package:providentia/features/administration/domain/catalog_administration_models.dart';
 
 final class CatalogWorkbench extends StatelessWidget {
-  const CatalogWorkbench({required this.controller, super.key});
+  const CatalogWorkbench({
+    required this.controller,
+    this.onReview,
+    this.onPreviewMerge,
+    super.key,
+  });
 
   final CatalogWorkbenchController controller;
+  final ValueChanged<CatalogQueueItem>? onReview;
+  final ValueChanged<CatalogQueueItem>? onPreviewMerge;
 
   @override
   Widget build(BuildContext context) {
@@ -25,8 +32,8 @@ final class CatalogWorkbench extends StatelessWidget {
             icon: Icons.cloud_off_outlined,
             title: 'Catalog administration is not connected',
             detail:
-                'The pinned backend contract does not yet expose moderation, '
-                'icon, merge, or catalog-audit operations.',
+                'The catalog service could not be reached or its response did '
+                'not match the current pinned contract.',
             actionLabel: 'Check again',
             onAction: controller.refresh,
           ),
@@ -67,6 +74,8 @@ final class CatalogWorkbench extends StatelessWidget {
           ),
           CatalogWorkbenchStatus.ready => _ReadyWorkbench(
             controller: controller,
+            onReview: onReview,
+            onPreviewMerge: onPreviewMerge,
           ),
         };
       },
@@ -75,9 +84,15 @@ final class CatalogWorkbench extends StatelessWidget {
 }
 
 final class _ReadyWorkbench extends StatelessWidget {
-  const _ReadyWorkbench({required this.controller});
+  const _ReadyWorkbench({
+    required this.controller,
+    required this.onReview,
+    required this.onPreviewMerge,
+  });
 
   final CatalogWorkbenchController controller;
+  final ValueChanged<CatalogQueueItem>? onReview;
+  final ValueChanged<CatalogQueueItem>? onPreviewMerge;
 
   @override
   Widget build(BuildContext context) {
@@ -87,6 +102,8 @@ final class _ReadyWorkbench extends StatelessWidget {
         final detail = _DetailPanel(
           item: controller.selectedItem,
           capabilities: controller.capabilities,
+          onReview: onReview,
+          onPreviewMerge: onPreviewMerge,
         );
         if (constraints.maxWidth >= 840) {
           return Row(
@@ -205,10 +222,17 @@ final class _QueuePanel extends StatelessWidget {
 }
 
 final class _DetailPanel extends StatelessWidget {
-  const _DetailPanel({required this.item, required this.capabilities});
+  const _DetailPanel({
+    required this.item,
+    required this.capabilities,
+    required this.onReview,
+    required this.onPreviewMerge,
+  });
 
   final CatalogQueueItem? item;
   final Set<CatalogCapability> capabilities;
+  final ValueChanged<CatalogQueueItem>? onReview;
+  final ValueChanged<CatalogQueueItem>? onPreviewMerge;
 
   @override
   Widget build(BuildContext context) {
@@ -254,11 +278,19 @@ final class _DetailPanel extends StatelessWidget {
                     'receipt, private alias, note, image, or AI metadata.',
                   ),
                   const SizedBox(height: 20),
-                  if (capabilities.contains(CatalogCapability.curate))
+                  if (_mayReview(selected, capabilities))
                     FilledButton.icon(
-                      onPressed: () {},
+                      onPressed: onReview == null
+                          ? null
+                          : () {
+                              onReview!(selected);
+                            },
                       icon: const Icon(Icons.fact_check_outlined),
-                      label: const Text('Review sanitized record'),
+                      label: Text(
+                        selected.source == CatalogQueueSource.icon
+                            ? 'Add validated icon metadata'
+                            : 'Review sanitized record',
+                      ),
                     )
                   else
                     const Text(
@@ -268,12 +300,19 @@ final class _DetailPanel extends StatelessWidget {
                     const SizedBox(height: 10),
                     OutlinedButton.icon(
                       onPressed:
-                          capabilities.contains(CatalogCapability.previewMerges)
-                          ? () {}
+                          capabilities.contains(
+                                CatalogCapability.previewMerges,
+                              ) &&
+                              onPreviewMerge != null
+                          ? () {
+                              onPreviewMerge!(selected);
+                            }
                           : null,
                       icon: const Icon(Icons.preview_outlined),
-                      label: const Text(
-                        'Generate revision-bound merge preview',
+                      label: Text(
+                        selected.source == CatalogQueueSource.merge
+                            ? 'Preview revision-bound reversal'
+                            : 'Generate revision-bound merge preview',
                       ),
                     ),
                   ],
@@ -285,6 +324,11 @@ final class _DetailPanel extends StatelessWidget {
       ),
     );
   }
+
+  bool _mayReview(CatalogQueueItem item, Set<CatalogCapability> capabilities) =>
+      item.source == CatalogQueueSource.icon
+      ? capabilities.contains(CatalogCapability.manageIcons)
+      : capabilities.contains(CatalogCapability.review);
 }
 
 final class _WorkbenchMessage extends StatelessWidget {

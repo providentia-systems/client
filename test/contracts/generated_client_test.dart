@@ -151,8 +151,8 @@ void main() {
       expect(await client.getMetrics(), 'providentia_up 1\n');
     });
 
-    test('publishes the complete API 1.11 operation registry', () {
-      expect(ProvidentiaApiClient.operations, hasLength(155));
+    test('publishes the complete API 1.12 operation registry', () {
+      expect(ProvidentiaApiClient.operations, hasLength(156));
       expect(
         ProvidentiaApiClient.operations['createAiExtraction'],
         isA<ApiOperation>()

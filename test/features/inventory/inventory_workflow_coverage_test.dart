@@ -237,7 +237,7 @@ void main() {
 
       final recorded = repository.savedSessions.last;
       expect(recorded.lines, hasLength(1));
-      expect(recorded.lines.single.id, 'manual:count-42:flour');
+      expect(recorded.lines.single.id, 'count-42');
       expect(recorded.lines.single.source, CountSource.manual);
       expect(recorded.lines.single.status, CountLineStatus.confirmed);
       expect(recorded.lines.single.observedQuantity, 3);

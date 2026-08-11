@@ -12,6 +12,21 @@ final class CrossHomeReportDataException implements Exception {
   const CrossHomeReportDataException();
 }
 
+enum ReportRepositoryFailureKind {
+  authenticationRequired,
+  forbidden,
+  conflict,
+  invalidResponse,
+  unavailable,
+}
+
+/// A deliberately detail-free transport taxonomy safe for presentation.
+final class ReportRepositoryException implements Exception {
+  const ReportRepositoryException(this.kind);
+
+  final ReportRepositoryFailureKind kind;
+}
+
 abstract interface class HouseholdReportRepository {
   Future<HouseholdReport> load({required String homeId});
 }

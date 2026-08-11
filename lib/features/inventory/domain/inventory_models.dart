@@ -6,6 +6,58 @@ enum CountLineStatus { outstanding, confirmed }
 
 enum CountSource { manual, photo }
 
+enum InventoryProductCreationDisposition { queued, synchronized }
+
+final class PrivateHomeProductDraft {
+  PrivateHomeProductDraft({
+    required this.homeId,
+    required this.privateName,
+    this.originalPackText,
+  }) {
+    _requireText(homeId, 'homeId');
+    final name = privateName.trim();
+    if (name.isEmpty || name.length > 191) {
+      throw ArgumentError.value(
+        privateName,
+        'privateName',
+        'must contain 1 to 191 characters',
+      );
+    }
+    if (originalPackText != null && originalPackText!.trim().length > 191) {
+      throw ArgumentError.value(
+        originalPackText,
+        'originalPackText',
+        'must not exceed 191 characters',
+      );
+    }
+  }
+
+  final String homeId;
+  final String privateName;
+  final String? originalPackText;
+}
+
+final class InventoryProductCreationResult {
+  const InventoryProductCreationResult({
+    required this.homeProductId,
+    required this.revision,
+    required this.disposition,
+  });
+
+  final String homeProductId;
+  final int revision;
+  final InventoryProductCreationDisposition disposition;
+
+  bool get awaitsServerConfirmation =>
+      disposition == InventoryProductCreationDisposition.queued;
+}
+
+final class InventoryProductCreationException implements Exception {
+  const InventoryProductCreationException(this.safeMessage);
+
+  final String safeMessage;
+}
+
 enum StockMovementKind {
   openingBalance,
   purchase,

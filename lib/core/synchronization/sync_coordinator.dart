@@ -104,10 +104,8 @@ final class SyncCoordinator implements AppSynchronization {
       final lastPulledCursor = await _local.cursorForHome(homeId);
       _metrics.recordAttempt(operationCount: operations.length);
 
-      if (operations.isNotEmpty) {
-        final operationIds = operations
-            .map((operation) => operation.operationId)
-            .toList(growable: false);
+      for (final operation in operations) {
+        final operationIds = <String>[operation.operationId];
         await _local.markSyncing(operationIds);
         try {
           PushResponse response;
@@ -115,7 +113,7 @@ final class SyncCoordinator implements AppSynchronization {
             response = await _remote.push(
               homeId: homeId,
               lastPulledCursor: lastPulledCursor,
-              operations: operations,
+              operations: <PendingClientOperation>[operation],
             );
           } on AuthenticationSyncException {
             final recovered = await _authenticationRecovery.tryRecover();
@@ -125,7 +123,13 @@ final class SyncCoordinator implements AppSynchronization {
             response = await _remote.push(
               homeId: homeId,
               lastPulledCursor: lastPulledCursor,
-              operations: operations,
+              operations: <PendingClientOperation>[operation],
+            );
+          }
+          if (response.results.length != 1 ||
+              response.results.single.operationId != operation.operationId) {
+            throw const FormatException(
+              'Synchronization returned an invalid command result.',
             );
           }
           await _local.applyPushResults(
@@ -133,9 +137,13 @@ final class SyncCoordinator implements AppSynchronization {
             now: _clock().toUtc(),
             retryPolicy: _retryPolicy,
           );
-          acknowledged = response.results
-              .where((result) => result.kind == PushResultKind.acknowledged)
-              .length;
+          if (response.results.single.kind == PushResultKind.acknowledged) {
+            acknowledged++;
+            continue;
+          }
+          // Commands are dependency ordered. Never submit a later command
+          // after its predecessor was rejected or deferred.
+          break;
         } on AuthenticationSyncException catch (error) {
           // Expired credentials do not mean that the user lost permission.
           // Keep intent retryable and surface authentication-required state.

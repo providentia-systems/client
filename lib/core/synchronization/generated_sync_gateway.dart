@@ -13,19 +13,29 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
 
   final generated.ProvidentiaApiClient _client;
 
-  static const Set<String> _protocolTwoCommands = <String>{
-    'inventory.location.create',
-    'inventory.home-product.create',
-    'inventory.adjustment.create',
-    'inventory.count-session.create',
+  static const Map<String, String> _protocolTwoProjections = <String, String>{
+    'inventory.location.create': 'inventory-location',
+    'inventory.home-product.create': 'inventory-home-product',
+    'inventory.adjustment.create': 'inventory-balance',
+    'inventory.count-session.create': 'inventory-count-session',
+    'inventory.count-line.upsert': 'inventory-count-line',
+    'inventory.count-session.close': 'inventory-count-session',
+    'purchasing.store.create': 'purchasing-store',
+    'purchasing.receipt.create': 'purchasing-receipt',
+    'purchasing.receipt-line.create': 'purchasing-receipt-line',
+    'purchasing.receipt-line.approve': 'purchasing-receipt-line',
+    'purchasing.receipt.commit': 'purchasing-receipt',
+    'shopping.list.create': 'shopping-list',
+    'shopping.list-line.create': 'shopping-list-line',
+    'shopping.list-line.checked': 'shopping-list-line',
+  };
+
+  static const Set<String> _commandsRequiringRevision = <String>{
     'inventory.count-line.upsert',
     'inventory.count-session.close',
-    'purchasing.store.create',
-    'purchasing.receipt.create',
     'purchasing.receipt-line.create',
     'purchasing.receipt-line.approve',
     'purchasing.receipt.commit',
-    'shopping.list.create',
     'shopping.list-line.create',
     'shopping.list-line.checked',
   };
@@ -165,7 +175,8 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
     final batchId = _batchId(operations);
     final protocolTwoCount = operations
         .where(
-          (operation) => _protocolTwoCommands.contains(operation.entityType),
+          (operation) =>
+              _protocolTwoProjections.containsKey(operation.operationType),
         )
         .length;
     if (protocolTwoCount != 0 && protocolTwoCount != operations.length) {
@@ -174,6 +185,36 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
       );
     }
     final protocolVersion = protocolTwoCount == operations.length ? 2 : 1;
+    if (protocolVersion == 2) {
+      for (final operation in operations) {
+        final expectedEntityType =
+            _protocolTwoProjections[operation.operationType];
+        if (operation.entityType != expectedEntityType) {
+          throw FormatException(
+            'Command ${operation.operationType} must project '
+            '$expectedEntityType, not ${operation.entityType}.',
+          );
+        }
+        if (!_uuid.hasMatch(operation.operationId) ||
+            !_uuid.hasMatch(operation.entityId) ||
+            !_uuid.hasMatch(operation.deviceId)) {
+          throw const FormatException(
+            'Protocol-v2 command, entity, and device IDs must be UUIDs.',
+          );
+        }
+        if (operation.payloadSchemaVersion != 1) {
+          throw const FormatException(
+            'Protocol-v2 commands require payload schema version one.',
+          );
+        }
+        if (_commandsRequiringRevision.contains(operation.operationType) &&
+            operation.baseRevision == null) {
+          throw FormatException(
+            'Command ${operation.operationType} requires a base revision.',
+          );
+        }
+      }
+    }
     try {
       final response = await _client.pushHomeSynchronization(
         homeId: homeId,
@@ -187,7 +228,7 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
               if (protocolVersion == 2) {
                 return generated.SyncPantryCommand(
                   operationId: operation.operationId,
-                  commandType: operation.entityType,
+                  commandType: operation.operationType,
                   entityId: operation.entityId,
                   baseRevision: operation.baseRevision,
                   clientTimestamp: operation.clientTimestamp,
@@ -413,3 +454,8 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
     return value;
   }
 }
+
+final RegExp _uuid = RegExp(
+  r'^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
+  caseSensitive: false,
+);

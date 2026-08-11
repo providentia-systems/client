@@ -1,10 +1,16 @@
 import 'dart:collection';
 
-enum AiProviderKind { openAi, openAiCompatible, ollama }
+enum AiProviderKind { openAi, anthropic, gemini, xAi, openAiCompatible, ollama }
 
 enum AiTransport { serverProxy, directNative }
 
-enum AiEndpointProtocol { openAiResponses, openAiChatCompletions, ollamaChat }
+enum AiEndpointProtocol {
+  openAiResponses,
+  anthropicMessages,
+  geminiGenerateContent,
+  openAiChatCompletions,
+  ollamaChat,
+}
 
 enum AiPrivacyMode { serverProxyCloud, strictLocal, directCloudAdvanced }
 
@@ -67,9 +73,21 @@ final class AiProviderProfile {
     this.strictLocalAttestedAt,
     this.revision = 1,
     this.enabled = true,
+    this.estimatedCostMicros = 0,
   }) : capabilities = UnmodifiableSetView<AiCapability>(
          Set<AiCapability>.of(capabilities),
-       );
+       ) {
+    if (revision < 1) {
+      throw ArgumentError.value(revision, 'revision', 'must be positive');
+    }
+    if (estimatedCostMicros < 0 || estimatedCostMicros > 1000000000) {
+      throw ArgumentError.value(
+        estimatedCostMicros,
+        'estimatedCostMicros',
+        'must be between 0 and 1000000000',
+      );
+    }
+  }
 
   final String id;
   final String homeId;
@@ -85,6 +103,18 @@ final class AiProviderProfile {
   final DateTime? strictLocalAttestedAt;
   final int revision;
   final bool enabled;
+  final int estimatedCostMicros;
+
+  /// Provider identifier published by the server contract. This is distinct
+  /// from [id], which identifies one revisioned household profile.
+  String get providerWireId => switch (kind) {
+    AiProviderKind.openAi => 'openai',
+    AiProviderKind.anthropic => 'anthropic',
+    AiProviderKind.gemini => 'gemini',
+    AiProviderKind.xAi => 'xai',
+    AiProviderKind.openAiCompatible => 'openai-compatible',
+    AiProviderKind.ollama => 'ollama',
+  };
 
   AiProviderProfile copyWith({
     String? displayName,
@@ -96,6 +126,7 @@ final class AiProviderProfile {
     DateTime? strictLocalAttestedAt,
     int? revision,
     bool? enabled,
+    int? estimatedCostMicros,
   }) => AiProviderProfile(
     id: id,
     homeId: homeId,
@@ -111,6 +142,7 @@ final class AiProviderProfile {
     strictLocalAttestedAt: strictLocalAttestedAt ?? this.strictLocalAttestedAt,
     revision: revision ?? this.revision,
     enabled: enabled ?? this.enabled,
+    estimatedCostMicros: estimatedCostMicros ?? this.estimatedCostMicros,
   );
 }
 

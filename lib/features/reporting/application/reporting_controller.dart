@@ -25,43 +25,57 @@ final class ReportingController extends ChangeNotifier {
   ReportingStatus _status = ReportingStatus.idle;
   HouseholdReport? _report;
   int _loadGeneration = 0;
+  bool _disposed = false;
 
   String get activeHomeId => _activeHomeId;
   HouseholdReport? get report => _report;
   ReportingStatus get status => _status;
 
   Future<void> load() async {
+    if (_disposed) return;
     final generation = ++_loadGeneration;
     final requestedHomeId = _activeHomeId;
     _status = ReportingStatus.loading;
     _report = null;
-    notifyListeners();
+    _notifyListeners();
     try {
       final loaded = await _service.load(homeId: requestedHomeId);
-      if (generation != _loadGeneration || requestedHomeId != _activeHomeId) {
+      if (!_isCurrent(generation, requestedHomeId)) {
         return;
       }
       _report = loaded;
       _status = ReportingStatus.ready;
     } on ReportContractUnavailableException {
-      if (generation == _loadGeneration) {
+      if (_isCurrent(generation, requestedHomeId)) {
         _status = ReportingStatus.contractUnavailable;
       }
     } on ReportForbiddenException {
-      if (generation == _loadGeneration) {
+      if (_isCurrent(generation, requestedHomeId)) {
         _status = ReportingStatus.forbidden;
       }
+    } on ReportRepositoryException catch (error) {
+      if (_isCurrent(generation, requestedHomeId)) {
+        _status = switch (error.kind) {
+          ReportRepositoryFailureKind.authenticationRequired ||
+          ReportRepositoryFailureKind.forbidden => ReportingStatus.forbidden,
+          ReportRepositoryFailureKind.invalidResponse =>
+            ReportingStatus.contractUnavailable,
+          ReportRepositoryFailureKind.conflict ||
+          ReportRepositoryFailureKind.unavailable => ReportingStatus.failure,
+        };
+      }
     } on Exception {
-      if (generation == _loadGeneration) {
+      if (_isCurrent(generation, requestedHomeId)) {
         _status = ReportingStatus.failure;
       }
     }
-    if (generation == _loadGeneration) {
-      notifyListeners();
+    if (_isCurrent(generation, requestedHomeId)) {
+      _notifyListeners();
     }
   }
 
   void switchHome(String homeId) {
+    if (_disposed) return;
     if (homeId.trim().isEmpty) {
       throw ArgumentError.value(homeId, 'homeId', 'must not be empty');
     }
@@ -72,6 +86,31 @@ final class ReportingController extends ChangeNotifier {
     _loadGeneration++;
     _report = null;
     _status = ReportingStatus.idle;
-    notifyListeners();
+    _notifyListeners();
+  }
+
+  void clearSensitiveState() {
+    if (_disposed) return;
+    _loadGeneration++;
+    _report = null;
+    _status = ReportingStatus.idle;
+    _notifyListeners();
+  }
+
+  bool _isCurrent(int generation, String requestedHomeId) =>
+      !_disposed &&
+      generation == _loadGeneration &&
+      requestedHomeId == _activeHomeId;
+
+  void _notifyListeners() {
+    if (!_disposed) notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _loadGeneration++;
+    _report = null;
+    super.dispose();
   }
 }

@@ -19,6 +19,24 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
         ClientOperationState.blockedAuthorization,
       ].map((state) => state.storageValue).toList(growable: false);
 
+  static const Map<String, String> _protocolTwoProjectionByCommand =
+      <String, String>{
+        'inventory.location.create': 'inventory-location',
+        'inventory.home-product.create': 'inventory-home-product',
+        'inventory.adjustment.create': 'inventory-balance',
+        'inventory.count-session.create': 'inventory-count-session',
+        'inventory.count-line.upsert': 'inventory-count-line',
+        'inventory.count-session.close': 'inventory-count-session',
+        'purchasing.store.create': 'purchasing-store',
+        'purchasing.receipt.create': 'purchasing-receipt',
+        'purchasing.receipt-line.create': 'purchasing-receipt-line',
+        'purchasing.receipt-line.approve': 'purchasing-receipt-line',
+        'purchasing.receipt.commit': 'purchasing-receipt',
+        'shopping.list.create': 'shopping-list',
+        'shopping.list-line.create': 'shopping-list-line',
+        'shopping.list-line.checked': 'shopping-list-line',
+      };
+
   final AppDatabase _database;
   final DateTime Function() _clock;
 
@@ -91,39 +109,53 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
     required DateTime now,
     int limit = 100,
   }) async {
+    if (limit < 1) {
+      throw ArgumentError.value(limit, 'limit', 'must be positive');
+    }
     final query = _database.select(_database.clientOperations)
-      ..where(
-        (row) =>
-            row.homeId.equals(homeId) &
-            (row.state.equals(ClientOperationState.pending.storageValue) |
-                (row.state.equals(ClientOperationState.retryWait.storageValue) &
-                    (row.nextAttemptAt.isNull() |
-                        row.nextAttemptAt.isSmallerOrEqualValue(now.toUtc())))),
-      )
+      ..where((row) => row.homeId.equals(homeId))
       ..orderBy(<OrderingTerm Function(ClientOperations)>[
         (row) => OrderingTerm.asc(row.clientTimestamp),
         (row) => OrderingTerm.asc(row.operationId),
-      ])
-      ..limit(limit);
+      ]);
 
     final rows = await query.get();
-    return rows
-        .map(
-          (row) => PendingClientOperation(
-            operationId: row.operationId,
-            deviceId: row.deviceId,
-            homeId: row.homeId,
-            entityType: row.entityType,
-            entityId: row.entityId,
-            operationType: row.operationType,
-            baseRevision: row.baseRevision,
-            clientTimestamp: row.clientTimestamp,
-            payloadSchemaVersion: row.payloadSchemaVersion,
-            payload: _decodePayload(row.payload),
-            retryCount: row.retryCount,
-          ),
-        )
-        .toList(growable: false);
+    final executable = <PendingClientOperation>[];
+    final cutoff = now.toUtc();
+    for (final row in rows) {
+      final state = ClientOperationState.fromStorage(row.state);
+      if (state == ClientOperationState.acknowledged) {
+        continue;
+      }
+      final isDueRetry =
+          state == ClientOperationState.retryWait &&
+          (row.nextAttemptAt == null || !row.nextAttemptAt!.isAfter(cutoff));
+      if (state != ClientOperationState.pending && !isDueRetry) {
+        // Every later operation may depend on this unresolved predecessor.
+        // A blocked, in-flight, or not-yet-due operation is therefore a
+        // conservative home-queue barrier, not a row to skip around.
+        break;
+      }
+      executable.add(
+        PendingClientOperation(
+          operationId: row.operationId,
+          deviceId: row.deviceId,
+          homeId: row.homeId,
+          entityType: row.entityType,
+          entityId: row.entityId,
+          operationType: row.operationType,
+          baseRevision: row.baseRevision,
+          clientTimestamp: row.clientTimestamp,
+          payloadSchemaVersion: row.payloadSchemaVersion,
+          payload: _decodePayload(row.payload),
+          retryCount: row.retryCount,
+        ),
+      );
+      if (executable.length == limit) {
+        break;
+      }
+    }
+    return List<PendingClientOperation>.unmodifiable(executable);
   }
 
   @override
@@ -203,10 +235,17 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
                 (row) =>
                     row.homeId.equals(operation.homeId) &
                     row.entityType.equals(operation.entityType) &
-                    row.entityId.equals(operation.entityId),
+                    row.entityId.equals(operation.entityId) &
+                    row.revision.isSmallerOrEqualValue(
+                      result.acceptedRevision!,
+                    ),
               ))
               .write(
                 LocalRecordsCompanion(
+                  // A parent projection can already include later dependent
+                  // commands (for example receipt line creation/approval).
+                  // Never let an earlier acknowledgement roll that revision
+                  // back or falsely mark the later optimistic state synced.
                   revision: Value<int>(result.acceptedRevision!),
                   synchronizedAt: Value<DateTime>(now.toUtc()),
                 ),
@@ -353,9 +392,40 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
             ].fold<int>(-1, (highest, revision) {
               return revision > highest ? revision : highest;
             });
-        if (change.revision <= newestRevision) {
-          // Duplicate and out-of-order replay is idempotent. In particular, an
-          // older upsert can never resurrect a newer tombstone.
+        if (change.revision < newestRevision) {
+          // Out-of-order replay is idempotent. In particular, an older upsert
+          // can never resurrect a newer tombstone.
+          continue;
+        }
+        if (change.revision == newestRevision) {
+          if (change.kind == RemoteChangeKind.upsert &&
+              existingRecord != null &&
+              existingRecord.revision == change.revision &&
+              existingRecord.synchronizedAt == null &&
+              existingTombstone == null) {
+            // Protocol-v2 command acknowledgements do not necessarily carry a
+            // resource revision. Once the same-entity intent is acknowledged,
+            // the equal authoritative feed event is what confirms and
+            // reconciles the optimistic projection.
+            await (_database.update(_database.localRecords)..where(
+                  (row) =>
+                      row.homeId.equals(homeId) &
+                      row.entityType.equals(change.entityType) &
+                      row.entityId.equals(change.entityId) &
+                      row.revision.equals(change.revision),
+                ))
+                .write(
+                  LocalRecordsCompanion(
+                    payload: Value<String>(jsonEncode(change.payload)),
+                    updatedAt: Value<DateTime>(change.serverTimestamp.toUtc()),
+                    synchronizedAt: Value<DateTime>(
+                      change.serverTimestamp.toUtc(),
+                    ),
+                  ),
+                );
+          }
+          // Equal tombstones and cross-kind replays remain idempotent. They
+          // cannot delete or resurrect an already materialized equal revision.
           continue;
         }
 
@@ -451,7 +521,73 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
                 (operation) =>
                     operation.state !=
                     ClientOperationState.acknowledged.storageValue,
-              );
+              )
+              .toList(growable: false);
+      final protocolTwoIntent = localIntent
+          .where(
+            (operation) => _protocolTwoProjectionByCommand.containsKey(
+              operation.operationType,
+            ),
+          )
+          .toList(growable: false);
+      final intentKeys = protocolTwoIntent
+          .map(
+            (operation) => '${operation.entityType}\u0000${operation.entityId}',
+          )
+          .toSet();
+      for (final operation in protocolTwoIntent) {
+        final payload = _decodePayload(operation.payload);
+        final auxiliary = switch (operation.operationType) {
+          'inventory.count-line.upsert' => (
+            entityType: 'inventory-count-session',
+            entityId: payload['sessionId'],
+          ),
+          'purchasing.receipt-line.create' ||
+          'purchasing.receipt-line.approve' => (
+            entityType: 'purchasing-receipt',
+            entityId: payload['receiptId'],
+          ),
+          'shopping.list-line.create' => (
+            entityType: 'shopping-list',
+            entityId: payload['listId'],
+          ),
+          _ => null,
+        };
+        if (auxiliary != null && auxiliary.entityId is String) {
+          intentKeys.add(
+            '${auxiliary.entityType}\u0000${auxiliary.entityId as String}',
+          );
+        }
+        if (operation.operationType == 'inventory.count-session.close') {
+          final countLines =
+              await (_database.select(_database.localRecords)..where(
+                    (row) =>
+                        row.homeId.equals(homeId) &
+                        row.entityType.equals('inventory-count-line'),
+                  ))
+                  .get();
+          for (final line in countLines) {
+            final linePayload = _decodePayload(line.payload);
+            final homeProductId = linePayload['homeProductId'];
+            if (linePayload['sessionId'] == operation.entityId &&
+                homeProductId is String) {
+              intentKeys.add('inventory-balance\u0000$homeProductId');
+            }
+          }
+        }
+      }
+      final optimisticRecords =
+          (await (_database.select(_database.localRecords)..where(
+                    (row) =>
+                        row.homeId.equals(homeId) & row.synchronizedAt.isNull(),
+                  ))
+                  .get())
+              .where(
+                (record) => intentKeys.contains(
+                  '${record.entityType}\u0000${record.entityId}',
+                ),
+              )
+              .toList(growable: false);
 
       await (_database.delete(
         _database.localRecords,
@@ -481,8 +617,9 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
       }
 
       // A server snapshot replaces synchronized cache state, never durable
-      // local intent. Reapply every unacknowledged operation over the snapshot
-      // before committing its captured cursor.
+      // local intent. Protocol-v2 operations carry command payloads rather
+      // than materialized resource representations, so replay the exact
+      // unsynchronized projection rows captured before replacement.
       for (final operation in localIntent) {
         if (operation.operationType == 'delete') {
           await (_database.delete(_database.localRecords)..where(
@@ -504,7 +641,11 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
                   deletedAt: operation.clientTimestamp.toUtc(),
                 ),
               );
-        } else {
+        } else if (!_protocolTwoProjectionByCommand.containsKey(
+          operation.operationType,
+        )) {
+          // Legacy protocol-v1 operations still use their projection as the
+          // operation payload and therefore remain directly replayable.
           await _database
               .into(_database.localRecords)
               .insertOnConflictUpdate(
@@ -526,6 +667,30 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
               ))
               .go();
         }
+      }
+
+      for (final record in optimisticRecords) {
+        await _database
+            .into(_database.localRecords)
+            .insertOnConflictUpdate(
+              LocalRecordsCompanion.insert(
+                homeId: homeId,
+                entityType: record.entityType,
+                entityId: record.entityId,
+                payload: record.payload,
+                revision: Value<int>(record.revision),
+                isTombstone: Value<bool>(record.isTombstone),
+                updatedAt: record.updatedAt,
+                synchronizedAt: const Value<DateTime?>(null),
+              ),
+            );
+        await (_database.delete(_database.recordTombstones)..where(
+              (row) =>
+                  row.homeId.equals(homeId) &
+                  row.entityType.equals(record.entityType) &
+                  row.entityId.equals(record.entityId),
+            ))
+            .go();
       }
 
       await _database

@@ -16,6 +16,14 @@ final class CatalogStaleRevisionException implements Exception {
   const CatalogStaleRevisionException();
 }
 
+final class CatalogValidationException implements Exception {
+  const CatalogValidationException();
+}
+
+final class CatalogUnsupportedDecisionException implements Exception {
+  const CatalogUnsupportedDecisionException();
+}
+
 abstract interface class CatalogModerationRepository {
   Set<CatalogCapability> get capabilities;
 
@@ -26,6 +34,30 @@ abstract interface class CatalogAuditRepository {
   Set<CatalogCapability> get capabilities;
 
   Future<List<CatalogAuditEvent>> loadAudit();
+}
+
+abstract interface class CatalogProposalDecisionRepository {
+  Future<CatalogModerationDecisionResult> decideProposal(
+    CatalogReviewDecision decision,
+  );
+}
+
+abstract interface class CatalogContributionModerationRepository {
+  Future<List<CatalogQueueItem>> loadContributionQueue();
+
+  Future<void> decideContribution(CatalogReviewDecision decision);
+}
+
+abstract interface class CatalogConflictResolutionRepository {
+  Future<void> keepExistingConflict({
+    required String conflictId,
+    required String reason,
+    required int expectedRevision,
+  });
+}
+
+abstract interface class CatalogIconRepository {
+  Future<CatalogRevisionResult> putIcon(CatalogIconWrite icon);
 }
 
 abstract interface class CatalogMergeRepository {

@@ -42,6 +42,10 @@ void main() {
     repository.session.add(null);
     await tester.pump();
 
+    expect(
+      find.byKey(const Key('inventory-add-private-product')),
+      findsNothing,
+    );
     expect(find.text('Coke'), findsOneWidget);
     expect(find.text('Tea Rooibos Bags'), findsNothing);
     await tester.tap(find.text('Item master'));
@@ -58,6 +62,110 @@ void main() {
     controller.dispose();
     await repository.close();
   });
+
+  testWidgets(
+    'writable creation capability validates private input and reports queued state',
+    (tester) async {
+      final repository = _CreationInventoryRepository();
+      final controller = InventoryController(
+        repository: repository,
+        homeId: 'home-a',
+      );
+      await tester.pumpWidget(
+        _TestApp(child: InventoryWorkspace(controller: controller)),
+      );
+      repository.items.add(const <InventoryItem>[]);
+      repository.session.add(null);
+      await tester.pump();
+
+      await tester.tap(find.byKey(const Key('inventory-add-private-product')));
+      await tester.pumpAndSettle();
+      expect(find.text('Add private product'), findsOneWidget);
+      expect(
+        find.text('This name and pack text stay private to the active home.'),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const Key('inventory-save-private-product')));
+      await tester.pump();
+      expect(
+        find.byKey(const Key('inventory-private-product-validation')),
+        findsOneWidget,
+      );
+
+      await tester.enterText(
+        find.byKey(const Key('inventory-private-product-name')),
+        'Family spice mix',
+      );
+      await tester.enterText(
+        find.byKey(const Key('inventory-private-product-pack')),
+        '250 g jar',
+      );
+      await tester.tap(find.byKey(const Key('inventory-save-private-product')));
+      await tester.pumpAndSettle();
+
+      expect(repository.drafts, hasLength(1));
+      expect(repository.drafts.single.homeId, 'home-a');
+      expect(repository.drafts.single.privateName, 'Family spice mix');
+      expect(repository.drafts.single.originalPackText, '250 g jar');
+      expect(
+        find.text(
+          'The private product is saved locally and queued; server confirmation is pending.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('The private product is synchronized.'), findsNothing);
+
+      controller.dispose();
+      await repository.close();
+    },
+  );
+
+  test(
+    'controller fails closed when creation capability is unavailable',
+    () async {
+      final repository = _InventoryRepository();
+      final controller = InventoryController(
+        repository: repository,
+        homeId: 'home-a',
+      );
+
+      expect(
+        await controller.createPrivateProduct(privateName: 'Hidden item'),
+        isFalse,
+      );
+      expect(
+        controller.state.productCreationError,
+        'Private product creation is unavailable in this workspace.',
+      );
+
+      controller.dispose();
+      await repository.close();
+    },
+  );
+
+  test(
+    'failed creation never reports a successful or queued outcome',
+    () async {
+      final repository = _FailingCreationInventoryRepository();
+      final controller = InventoryController(
+        repository: repository,
+        homeId: 'home-a',
+      );
+
+      expect(
+        await controller.createPrivateProduct(privateName: 'Hidden item'),
+        isFalse,
+      );
+      expect(controller.state.productCreationNotice, isNull);
+      expect(
+        controller.state.productCreationError,
+        'The private product could not be queued.',
+      );
+
+      controller.dispose();
+      await repository.close();
+    },
+  );
 
   test('manual adjustment delegates immutable intent and movement', () async {
     final repository = _InventoryRepository();
@@ -119,6 +227,41 @@ class _InventoryRepository implements InventoryRepository {
   Future<void> close() async {
     await items.close();
     await session.close();
+  }
+}
+
+final class _CreationInventoryRepository extends _InventoryRepository
+    implements InventoryProductCreationRepository {
+  final List<PrivateHomeProductDraft> drafts = <PrivateHomeProductDraft>[];
+
+  @override
+  bool get supportsPrivateHomeProductCreation => true;
+
+  @override
+  Future<InventoryProductCreationResult> createPrivateHomeProduct(
+    PrivateHomeProductDraft draft,
+  ) async {
+    drafts.add(draft);
+    return const InventoryProductCreationResult(
+      homeProductId: 'private-product-a',
+      revision: 1,
+      disposition: InventoryProductCreationDisposition.queued,
+    );
+  }
+}
+
+final class _FailingCreationInventoryRepository extends _InventoryRepository
+    implements InventoryProductCreationRepository {
+  @override
+  bool get supportsPrivateHomeProductCreation => true;
+
+  @override
+  Future<InventoryProductCreationResult> createPrivateHomeProduct(
+    PrivateHomeProductDraft draft,
+  ) {
+    throw const InventoryProductCreationException(
+      'The private product could not be queued.',
+    );
   }
 }
 

@@ -5,7 +5,8 @@ on:
   push:
     branches:
       - main
-      - agent/phase-1-production-foundations
+      - 'agent/**'
+      - 'task/**'
       - 'feature/**'
       - 'phase-*/**'
   workflow_dispatch:

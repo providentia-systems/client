@@ -172,6 +172,91 @@ void main() {
     expect(find.text('Test device · current device'), findsOneWidget);
   });
 
+  testWidgets(
+    'data governance remains account-accessible without a selected home',
+    (tester) async {
+      final identity = _AuthenticatedIdentityFixture();
+      final homes = _HomeFixture();
+      addTearDown(identity.dispose);
+      addTearDown(homes.dispose);
+      await identity.controller.restore();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: AccountAccessPage(
+            identityController: identity.controller,
+            homesController: homes.controller,
+            householdReportsPageBuilder: (_) =>
+                const Scaffold(body: Text('Reports route')),
+            householdAiPageBuilder: (_) =>
+                const Scaffold(body: Text('Household AI route')),
+            dataGovernancePageBuilder: (_) =>
+                const Scaffold(body: Text('Data governance route')),
+          ),
+        ),
+      );
+
+      expect(find.byKey(const Key('open-data-governance')), findsOneWidget);
+      expect(find.byKey(const Key('open-household-reports')), findsNothing);
+      expect(find.byKey(const Key('open-household-ai')), findsNothing);
+      await tester.tap(find.byKey(const Key('open-data-governance')));
+      await tester.pumpAndSettle();
+      expect(find.text('Data governance route'), findsOneWidget);
+    },
+  );
+
+  testWidgets('household reports and AI require exact home permissions', (
+    tester,
+  ) async {
+    final identity = _AuthenticatedIdentityFixture();
+    final homes = _HomeFixture();
+    homes.transport.homes.add(
+      HomeSummary(
+        id: 'owner-home',
+        name: 'Owner home',
+        locale: 'en-NA',
+        currency: 'NAD',
+        timezone: 'Africa/Windhoek',
+        role: HomeRole.owner,
+        revision: 1,
+      ),
+    );
+    addTearDown(identity.dispose);
+    addTearDown(homes.dispose);
+    await identity.controller.restore();
+    await homes.controller.load(sessionActiveHomeId: 'owner-home');
+    await tester.pumpWidget(
+      MaterialApp(
+        home: AccountAccessPage(
+          identityController: identity.controller,
+          homesController: homes.controller,
+          householdReportsPageBuilder: (_) =>
+              const Scaffold(body: Text('Reports route')),
+          householdAiPageBuilder: (_) =>
+              const Scaffold(body: Text('Household AI route')),
+          dataGovernancePageBuilder: (_) =>
+              const Scaffold(body: Text('Data governance route')),
+        ),
+      ),
+    );
+
+    expect(find.byKey(const Key('open-household-reports')), findsOneWidget);
+    expect(find.byKey(const Key('open-household-ai')), findsOneWidget);
+    expect(find.byKey(const Key('open-data-governance')), findsOneWidget);
+    expect(
+      mayAccessHouseholdReports(const <String>{'reports.read.extra'}),
+      isFalse,
+    );
+    expect(
+      mayAccessHouseholdReports(const <String>{HomePermissions.reportsRead}),
+      isTrue,
+    );
+    expect(mayAccessHouseholdAi(const <String>{'ai.read.extra'}), isFalse);
+    expect(
+      mayAccessHouseholdAi(const <String>{HomePermissions.aiRead}),
+      isTrue,
+    );
+  });
+
   test(
     'device-management failure preserves an authenticated account',
     () async {

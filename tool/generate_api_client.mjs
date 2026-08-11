@@ -129,7 +129,7 @@ function validateContract(document) {
   }
   if (
     document.info?.title !== 'Providentia API' ||
-    document.info?.version !== '1.11.1'
+    document.info?.version !== '1.12.0'
   ) {
     throw new Error('Unexpected API identity or version.');
   }
@@ -156,6 +156,7 @@ function validateContract(document) {
     ['get', '/api/v1/homes/{homeId}/receipts', 'listReceipts'],
     ['get', '/api/v1/homes/{homeId}/shopping-lists', 'listShoppingLists'],
     ['get', '/api/v1/homes/{homeId}/ai/settings', 'getAiSettings'],
+    ['get', '/api/v1/catalog-contributions', 'listPublishedCatalogContributions'],
     ['get', '/api/v1/catalog-admin/workbench', 'getCatalogWorkbench'],
     ['get', '/api/v1/homes/{homeId}/reports/inventory', 'getInventoryReport'],
   ];
@@ -186,7 +187,7 @@ function validateContract(document) {
     }
   }
   if (operationIds.size < 150) {
-    throw new Error(`Expected the API 1.11 surface, found ${operationIds.size} operations.`);
+    throw new Error(`Expected the API 1.12 surface, found ${operationIds.size} operations.`);
   }
 
   for (const schema of [

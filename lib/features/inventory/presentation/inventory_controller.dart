@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:providentia/core/security/uuid_v4.dart';
 import 'package:providentia/features/inventory/application/inventory_repository.dart';
 import 'package:providentia/features/inventory/domain/inventory_models.dart';
 import 'package:providentia/features/inventory/domain/inventory_services.dart';
@@ -11,6 +12,9 @@ final class InventoryViewState {
     this.criteria = const InventorySearchCriteria(),
     this.activeSession,
     this.loading = true,
+    this.productCreationBusy = false,
+    this.productCreationNotice,
+    this.productCreationError,
     this.safeError,
   });
 
@@ -18,6 +22,9 @@ final class InventoryViewState {
   final InventorySearchCriteria criteria;
   final StockCountSession? activeSession;
   final bool loading;
+  final bool productCreationBusy;
+  final String? productCreationNotice;
+  final String? productCreationError;
   final String? safeError;
 }
 
@@ -33,18 +40,21 @@ final class InventoryController extends ChangeNotifier {
     homeId,
     search,
     clock ?? DateTime.now,
-    idGenerator ?? (() => DateTime.now().microsecondsSinceEpoch.toString()),
+    idGenerator ?? UuidV4Generator().call,
   );
 
   InventoryController._(
-    this._repository,
+    InventoryRepository repository,
     this.homeId,
     this._search,
     this._clock,
     this._idGenerator,
-  );
+  ) : _repository = repository,
+      _productCreationRepository =
+          repository is InventoryProductCreationRepository ? repository : null;
 
   final InventoryRepository _repository;
+  final InventoryProductCreationRepository? _productCreationRepository;
   final InventoryItemSearch _search;
   final DateTime Function() _clock;
   final String Function() _idGenerator;
@@ -55,6 +65,8 @@ final class InventoryController extends ChangeNotifier {
   bool _started = false;
 
   InventoryViewState get state => _state;
+  bool get canCreatePrivateProduct =>
+      _productCreationRepository?.supportsPrivateHomeProductCreation == true;
 
   List<InventoryItem> get visibleItems => _search.filter(
     _state.items,
@@ -80,6 +92,9 @@ final class InventoryController extends ChangeNotifier {
           criteria: _state.criteria,
           activeSession: _state.activeSession,
           loading: false,
+          productCreationBusy: _state.productCreationBusy,
+          productCreationNotice: _state.productCreationNotice,
+          productCreationError: _state.productCreationError,
         ),
       );
     }, onError: (Object _) => _setSafeError('Inventory could not be loaded.'));
@@ -97,6 +112,9 @@ final class InventoryController extends ChangeNotifier {
                 criteria: _state.criteria,
                 activeSession: session,
                 loading: _state.loading,
+                productCreationBusy: _state.productCreationBusy,
+                productCreationNotice: _state.productCreationNotice,
+                productCreationError: _state.productCreationError,
               ),
             );
           },
@@ -154,6 +172,64 @@ final class InventoryController extends ChangeNotifier {
     );
   }
 
+  Future<bool> createPrivateProduct({
+    required String privateName,
+    String? originalPackText,
+  }) async {
+    final repository = _productCreationRepository;
+    if (repository == null || !repository.supportsPrivateHomeProductCreation) {
+      _setProductCreationError(
+        'Private product creation is unavailable in this workspace.',
+      );
+      return false;
+    }
+    if (_state.productCreationBusy) return false;
+    _setState(
+      InventoryViewState(
+        items: _state.items,
+        criteria: _state.criteria,
+        activeSession: _state.activeSession,
+        loading: _state.loading,
+        productCreationBusy: true,
+        productCreationNotice: _state.productCreationNotice,
+        safeError: _state.safeError,
+      ),
+    );
+    try {
+      final result = await repository.createPrivateHomeProduct(
+        PrivateHomeProductDraft(
+          homeId: homeId,
+          privateName: privateName,
+          originalPackText: originalPackText,
+        ),
+      );
+      _setState(
+        InventoryViewState(
+          items: _state.items,
+          criteria: _state.criteria,
+          activeSession: _state.activeSession,
+          loading: _state.loading,
+          productCreationNotice: result.awaitsServerConfirmation
+              ? 'The private product is saved locally and queued; server confirmation is pending.'
+              : 'The private product is synchronized.',
+          safeError: _state.safeError,
+        ),
+      );
+      return true;
+    } on InventoryProductCreationException catch (error) {
+      _setProductCreationError(error.safeMessage);
+      return false;
+    } on ArgumentError catch (_) {
+      _setProductCreationError('Check the private product name and pack text.');
+      return false;
+    } catch (_) {
+      _setProductCreationError(
+        'The private product could not be saved safely.',
+      );
+      return false;
+    }
+  }
+
   Future<void> saveSession(StockCountSession session) {
     if (session.homeId != homeId) {
       throw StateError('Cannot save a count session for another home.');
@@ -185,7 +261,7 @@ final class InventoryController extends ChangeNotifier {
     if (session == null) {
       throw StateError('Start a count session before recording quantities.');
     }
-    final lineId = 'manual:${session.id}:${item.id}';
+    final lineId = _idGenerator();
     return saveSession(
       session.recordLine(
         StockCountLine(
@@ -226,6 +302,9 @@ final class InventoryController extends ChangeNotifier {
         criteria: criteria,
         activeSession: _state.activeSession,
         loading: _state.loading,
+        productCreationBusy: _state.productCreationBusy,
+        productCreationNotice: _state.productCreationNotice,
+        productCreationError: _state.productCreationError,
       ),
     );
   }
@@ -237,7 +316,24 @@ final class InventoryController extends ChangeNotifier {
         criteria: _state.criteria,
         activeSession: _state.activeSession,
         loading: false,
+        productCreationBusy: _state.productCreationBusy,
+        productCreationNotice: _state.productCreationNotice,
+        productCreationError: _state.productCreationError,
         safeError: message,
+      ),
+    );
+  }
+
+  void _setProductCreationError(String message) {
+    _setState(
+      InventoryViewState(
+        items: _state.items,
+        criteria: _state.criteria,
+        activeSession: _state.activeSession,
+        loading: _state.loading,
+        productCreationNotice: _state.productCreationNotice,
+        productCreationError: message,
+        safeError: _state.safeError,
       ),
     );
   }

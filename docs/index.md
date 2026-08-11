@@ -14,6 +14,16 @@
 - [Dependency policy](dependency-policy.md): pinning, licence, and release
   constraints.
 - [Risk register](risk-register.md): current delivery and architecture risks.
+- [Inventory integration roadmap](inventory-integration-roadmap.md): P0–P3
+  integration objectives and cross-repository acceptance gates.
+- [Reporting and data governance integration](reporting-data-governance-integration.md):
+  current-contract report mapping, export/erasure safeguards, exact
+  permissions, and production composition.
+- [Server AI integration](server-ai-integration.md): active-home capability
+  gates, one-image privacy lifecycle, mandatory review, and the non-mutating
+  ordinary-command handoff.
+- [Phase 9–10 production integration status](phase9-10-production-integration-status.md):
+  composed capabilities, adapter-ready boundaries, and release blockers.
 - [Phase 1 report](phase1-report.md): implementation evidence and limitations.
 - [Historical Phase 3–4 report](phase3-phase4-report.md): responsive client,
   local

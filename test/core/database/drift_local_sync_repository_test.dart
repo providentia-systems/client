@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:drift/drift.dart' hide isNotNull, isNull;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:providentia/core/database/app_database.dart';
@@ -83,6 +84,107 @@ void main() {
     expect(operation.nextAttemptAt!.isAfter(now), isTrue);
     expect(operation.lastSafeError, contains('Retrying safely'));
   });
+
+  test('an earlier retry delay is a queue barrier until it is due', () async {
+    final firstAt = DateTime.utc(2026, 7, 29, 12);
+    await repository.commitLocalMutation(_mutation(clientTimestamp: firstAt));
+    await repository.commitLocalMutation(
+      _mutation(
+        operationId: 'operation-2',
+        entityId: 'record-2',
+        clientTimestamp: firstAt.add(const Duration(seconds: 1)),
+      ),
+    );
+    await repository.commitLocalMutation(
+      _mutation(
+        operationId: 'operation-3',
+        entityId: 'record-3',
+        clientTimestamp: firstAt.add(const Duration(seconds: 2)),
+      ),
+    );
+    await repository.markSyncing(const <String>['operation-1']);
+    await repository.applyPushResults(
+      results: <PushOperationResult>[
+        PushOperationResult(
+          operationId: 'operation-1',
+          kind: PushResultKind.acknowledged,
+        ),
+      ],
+      now: firstAt,
+      retryPolicy: RetryPolicy(),
+    );
+    await repository.markSyncing(const <String>['operation-2']);
+    await repository.applyPushResults(
+      results: <PushOperationResult>[
+        PushOperationResult(
+          operationId: 'operation-2',
+          kind: PushResultKind.retryableFailure,
+          safeMessage: 'Retry in order.',
+        ),
+      ],
+      now: firstAt,
+      retryPolicy: RetryPolicy(baseDelay: const Duration(seconds: 2)),
+    );
+
+    expect(
+      await repository.pendingOperations(
+        homeId: 'home-1',
+        now: firstAt.add(const Duration(seconds: 1)),
+      ),
+      isEmpty,
+    );
+
+    final due = await repository.pendingOperations(
+      homeId: 'home-1',
+      now: firstAt.add(const Duration(seconds: 3)),
+    );
+    expect(due.map((operation) => operation.operationId), <String>[
+      'operation-2',
+      'operation-3',
+    ]);
+  });
+
+  test(
+    'earlier acknowledgement cannot roll back a dependent optimistic revision',
+    () async {
+      await repository.commitLocalMutation(
+        _mutation(
+          entityType: 'purchasing-receipt',
+          baseRevision: 1,
+          operationType: 'purchasing.receipt.create',
+        ),
+      );
+      await database
+          .update(database.localRecords)
+          .write(
+            const LocalRecordsCompanion(
+              revision: Value<int>(3),
+              synchronizedAt: Value<DateTime?>(null),
+            ),
+          );
+      await repository.markSyncing(const <String>['operation-1']);
+
+      await repository.applyPushResults(
+        results: <PushOperationResult>[
+          PushOperationResult(
+            operationId: 'operation-1',
+            kind: PushResultKind.acknowledged,
+            acceptedRevision: 1,
+          ),
+        ],
+        now: DateTime.utc(2026, 7, 29, 13),
+        retryPolicy: RetryPolicy(),
+      );
+
+      final record = await database.select(database.localRecords).getSingle();
+      expect(record.revision, 3);
+      expect(record.synchronizedAt, isNull);
+      final operation = await database
+          .select(database.clientOperations)
+          .getSingle();
+      expect(operation.state, ClientOperationState.acknowledged.storageValue);
+    },
+  );
 
   test('startup recovery requeues a process-death syncing operation', () async {
     await repository.commitLocalMutation(_mutation());
@@ -185,6 +287,127 @@ void main() {
       hasLength(1),
     );
     expect(await repository.cursorForHome('home-1'), 'cursor-6');
+  });
+
+  test(
+    'equal authoritative upsert confirms protocol-v2 optimistic projection',
+    () async {
+      await repository.commitLocalMutation(
+        _mutation(
+          entityType: 'purchasing-receipt',
+          entityId: 'receipt-1',
+          operationType: 'purchasing.receipt.create',
+          payload: const <String, Object?>{'status': 'draft-local'},
+        ),
+      );
+      await database
+          .update(database.localRecords)
+          .write(
+            const LocalRecordsCompanion(
+              revision: Value<int>(1),
+              synchronizedAt: Value<DateTime?>(null),
+            ),
+          );
+      await repository.markSyncing(const <String>['operation-1']);
+      await repository.applyPushResults(
+        results: <PushOperationResult>[
+          PushOperationResult(
+            operationId: 'operation-1',
+            kind: PushResultKind.acknowledged,
+          ),
+        ],
+        now: DateTime.utc(2026, 7, 29, 13),
+        retryPolicy: RetryPolicy(),
+      );
+      final serverAt = DateTime.utc(2026, 7, 29, 13, 1);
+
+      await repository.applyPullPage(
+        homeId: 'home-1',
+        page: _page(
+          changes: <RemoteChange>[
+            _change(
+              entityType: 'purchasing-receipt',
+              entityId: 'receipt-1',
+              revision: 1,
+              cursor: 'cursor-1',
+              serverTimestamp: serverAt,
+              payload: const <String, Object?>{'status': 'draft-server'},
+            ),
+          ],
+          pageCursor: 'cursor-1',
+        ),
+      );
+
+      final record = await database.select(database.localRecords).getSingle();
+      expect(jsonDecode(record.payload), <String, Object?>{
+        'status': 'draft-server',
+      });
+      expect(record.revision, 1);
+      expect(record.updatedAt.toUtc(), serverAt);
+      expect(record.synchronizedAt?.toUtc(), serverAt);
+      expect(
+        (await database.select(database.clientOperations).getSingle()).state,
+        ClientOperationState.acknowledged.storageValue,
+      );
+    },
+  );
+
+  test('equal cross-kind tombstone cannot delete an upsert', () async {
+    await repository.applyPullPage(
+      homeId: 'home-1',
+      page: _page(
+        changes: <RemoteChange>[_change(revision: 2, cursor: 'cursor-2')],
+        pageCursor: 'cursor-2',
+      ),
+    );
+
+    await repository.applyPullPage(
+      homeId: 'home-1',
+      page: _page(
+        fromCursor: 'cursor-2',
+        changes: <RemoteChange>[
+          _change(
+            kind: RemoteChangeKind.tombstone,
+            revision: 2,
+            cursor: 'cursor-3',
+          ),
+        ],
+        pageCursor: 'cursor-3',
+      ),
+    );
+
+    expect(await database.select(database.localRecords).get(), hasLength(1));
+    expect(await database.select(database.recordTombstones).get(), isEmpty);
+    expect(await repository.cursorForHome('home-1'), 'cursor-3');
+  });
+
+  test('equal duplicate upsert cannot rewrite synchronized state', () async {
+    await repository.applyPullPage(
+      homeId: 'home-1',
+      page: _page(
+        changes: <RemoteChange>[_change(revision: 2, cursor: 'cursor-2')],
+        pageCursor: 'cursor-2',
+      ),
+    );
+
+    await repository.applyPullPage(
+      homeId: 'home-1',
+      page: _page(
+        fromCursor: 'cursor-2',
+        changes: <RemoteChange>[
+          _change(
+            revision: 2,
+            cursor: 'cursor-3',
+            payload: const <String, Object?>{'quantity': 999},
+          ),
+        ],
+        pageCursor: 'cursor-3',
+      ),
+    );
+
+    final record = await database.select(database.localRecords).getSingle();
+    expect(jsonDecode(record.payload), <String, Object?>{'quantity': 2});
+    expect(await repository.cursorForHome('home-1'), 'cursor-3');
   });
 
   test('remote tombstone is preserved when local intent is pending', () async {
@@ -364,6 +587,121 @@ void main() {
     );
   });
 
+  test(
+    'bootstrap replaces an acknowledged v2 projection with server truth',
+    () async {
+      await repository.commitLocalMutation(
+        _mutation(
+          entityType: 'inventory-home-product',
+          entityId: 'product-1',
+          operationType: 'inventory.home-product.create',
+          payload: const <String, Object?>{'privateName': 'Optimistic name'},
+        ),
+      );
+      await repository.markSyncing(const <String>['operation-1']);
+      await repository.applyPushResults(
+        results: <PushOperationResult>[
+          PushOperationResult(
+            operationId: 'operation-1',
+            kind: PushResultKind.acknowledged,
+          ),
+        ],
+        now: DateTime.utc(2026, 7, 29, 13),
+        retryPolicy: RetryPolicy(),
+      );
+
+      await repository.replaceWithBootstrap(
+        homeId: 'home-1',
+        page: _page(
+          fromCursor: 'snapshot-cursor',
+          changes: <RemoteChange>[
+            _change(
+              entityType: 'inventory-home-product',
+              entityId: 'product-1',
+              revision: 1,
+              cursor: 'snapshot-cursor',
+              payload: const <String, Object?>{
+                'id': 'product-1',
+                'revision': 1,
+                'privateName': 'Server name',
+              },
+            ),
+          ],
+          pageCursor: 'snapshot-cursor',
+        ),
+      );
+
+      final record = await database.select(database.localRecords).getSingle();
+      expect(jsonDecode(record.payload), <String, Object?>{
+        'id': 'product-1',
+        'revision': 1,
+        'privateName': 'Server name',
+      });
+      expect(record.synchronizedAt, isNotNull);
+    },
+  );
+
+  test(
+    'bootstrap preserves a pending v2 child and its optimistic parent',
+    () async {
+      await repository.commitLocalMutation(
+        _mutation(
+          entityType: 'purchasing-receipt-line',
+          entityId: 'line-1',
+          operationType: 'purchasing.receipt-line.create',
+          baseRevision: 1,
+          payload: const <String, Object?>{'receiptId': 'receipt-1'},
+        ),
+      );
+      await database
+          .into(database.localRecords)
+          .insertOnConflictUpdate(
+            LocalRecordsCompanion.insert(
+              homeId: 'home-1',
+              entityType: 'purchasing-receipt',
+              entityId: 'receipt-1',
+              payload: jsonEncode(const <String, Object?>{
+                'status': 'draft-optimistic',
+              }),
+              revision: const Value<int>(2),
+              updatedAt: DateTime.utc(2026, 7, 29, 13),
+              synchronizedAt: const Value<DateTime?>(null),
+            ),
+          );
+
+      await repository.replaceWithBootstrap(
+        homeId: 'home-1',
+        page: _page(
+          fromCursor: 'snapshot-cursor',
+          changes: <RemoteChange>[
+            _change(
+              entityType: 'purchasing-receipt',
+              entityId: 'receipt-1',
+              revision: 1,
+              cursor: 'snapshot-cursor',
+              payload: const <String, Object?>{'status': 'draft-server'},
+            ),
+          ],
+          pageCursor: 'snapshot-cursor',
+        ),
+      );
+
+      final records = await database.select(database.localRecords).get();
+      final parent = records.singleWhere(
+        (record) => record.entityType == 'purchasing-receipt',
+      );
+      expect(jsonDecode(parent.payload), <String, Object?>{
+        'status': 'draft-optimistic',
+      });
+      expect(parent.revision, 2);
+      expect(parent.synchronizedAt, isNull);
+      expect(
+        records.any((record) => record.entityType == 'purchasing-receipt-line'),
+        isTrue,
+      );
+    },
+  );
+
   test('summary stream is isolated to its requested home', () async {
     await repository.commitLocalMutation(_mutation());
     await repository.commitLocalMutation(
@@ -454,7 +792,9 @@ void main() {
 LocalMutation _mutation({
   String operationId = 'operation-1',
   String homeId = 'home-1',
+  String entityType = 'inventory_balance',
   String entityId = 'record-1',
+  String operationType = 'set_count',
   int? baseRevision,
   DateTime? clientTimestamp,
   Map<String, Object?> payload = const <String, Object?>{'quantity': 1},
@@ -463,9 +803,9 @@ LocalMutation _mutation({
     operationId: operationId,
     deviceId: 'device-1',
     homeId: homeId,
-    entityType: 'inventory_balance',
+    entityType: entityType,
     entityId: entityId,
-    operationType: 'set_count',
+    operationType: operationType,
     baseRevision: baseRevision,
     clientTimestamp: clientTimestamp ?? DateTime.utc(2026, 7, 29, 12),
     payloadSchemaVersion: 1,
@@ -475,20 +815,23 @@ LocalMutation _mutation({
 
 RemoteChange _change({
   String homeId = 'home-1',
+  String entityType = 'inventory_balance',
   String entityId = 'record-1',
   RemoteChangeKind kind = RemoteChangeKind.upsert,
   int revision = 1,
   String cursor = 'cursor-1',
+  DateTime? serverTimestamp,
+  Map<String, Object?>? payload,
 }) {
   return RemoteChange(
     cursor: cursor,
     homeId: homeId,
-    entityType: 'inventory_balance',
+    entityType: entityType,
     entityId: entityId,
     kind: kind,
     revision: revision,
-    serverTimestamp: DateTime.utc(2026, 7, 29, 12),
-    payload: <String, Object?>{'quantity': revision},
+    serverTimestamp: serverTimestamp ?? DateTime.utc(2026, 7, 29, 12),
+    payload: payload ?? <String, Object?>{'quantity': revision},
   );
 }
 

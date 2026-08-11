@@ -10,10 +10,20 @@ abstract interface class InventoryRepository {
 
   /// Persists the intent and optional ledger movement atomically.
   ///
-  /// The adapter must not queue an unsupported synchronization entity until
-  /// the pinned backend contract publishes that entity type.
+  /// Connected adapters project the optimistic balance and queue the pinned
+  /// `inventory.adjustment.create` command in the same transaction.
   Future<void> commitManualAdjustment({
     required ManualAdjustmentIntent intent,
     required StockMovement? movement,
   });
+}
+
+/// Narrow protocol-v2 capability for creating a home-private product identity.
+abstract interface class InventoryProductCreationRepository
+    implements InventoryRepository {
+  bool get supportsPrivateHomeProductCreation;
+
+  Future<InventoryProductCreationResult> createPrivateHomeProduct(
+    PrivateHomeProductDraft draft,
+  );
 }
