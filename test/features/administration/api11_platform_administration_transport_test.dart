@@ -72,7 +72,7 @@ void main() {
 
   test('timed-out administrator mutation aborts its HTTP request', () async {
     var requestCount = 0;
-    var aborted = false;
+    final abortObserved = Completer<void>();
     final client = MockClient.streaming((request, _) async {
       requestCount++;
       if (requestCount == 1) {
@@ -85,7 +85,7 @@ void main() {
           abortTrigger.then((_) => 'abort'),
         ]);
         if (outcome == 'abort') {
-          aborted = true;
+          if (!abortObserved.isCompleted) abortObserved.complete();
           throw http.RequestAbortedException(request.url);
         }
       }
@@ -110,11 +110,11 @@ void main() {
       ),
     );
     final granted = await transport.grantAdministrator('second@example.com');
-    await Future<void>.delayed(const Duration(milliseconds: 100));
+    await abortObserved.future.timeout(const Duration(seconds: 1));
 
     expect(granted.id, _administratorId);
     expect(requestCount, 2);
-    expect(aborted, isTrue);
+    expect(abortObserved.isCompleted, isTrue);
   });
 }
 

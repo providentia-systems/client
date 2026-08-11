@@ -515,6 +515,7 @@ InventoryItem _item({
     category: category,
     aliases: aliases,
     currentQuantity: quantity,
+    isHomeProduct: true,
   );
 }
 

@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -6,6 +8,7 @@ import 'package:providentia/features/ai_integration/application/ai_ports.dart';
 import 'package:providentia/features/ai_integration/application/server_ai_repository.dart';
 import 'package:providentia/features/ai_integration/domain/ai_models.dart';
 import 'package:providentia/features/ai_integration/domain/server_ai_models.dart';
+import 'package:providentia/features/ai_integration/infrastructure/receipt_page_media_editor.dart';
 import 'package:providentia/features/ai_integration/presentation/server_ai_workspace_controller.dart';
 import 'package:providentia/features/ai_integration/presentation/server_ai_workspace_page.dart';
 
@@ -87,9 +90,96 @@ void main() {
         controller.review?.candidates.single.status,
         AiCandidateReviewStatus.pending,
       );
-      expect(media.discardCalls, 2);
+      expect(media.discardCalls, 1);
+      expect(controller.prepared, isNotNull);
       expect(repository.reviewCalls, 0);
       expect(repository.inventoryOrPurchaseMutationCalls, 0);
+    },
+  );
+
+  test(
+    'ordered receipt pages bind every digest and do not mutate a domain',
+    () async {
+      final provider = _multiImageProvider();
+      final repository = _ServerRepository(
+        _workspace(profiles: <AiProviderProfile>[provider]),
+      );
+      final media = _OrderedMediaPreparation();
+      final gateway = FakeGateway(
+        route: AiGatewayRoute.serverProxyCloud,
+        receiptHandler: (request) async => AiExtractionSuccess<ReceiptProposal>(
+          proposal: receiptProposal(runId: request.runId),
+          metadata: runMetadata,
+        ),
+      );
+      final controller = _controller(
+        repository: repository,
+        media: media,
+        gateway: gateway,
+      );
+      addTearDown(controller.dispose);
+      await controller.load();
+      final pages = <AiMediaAsset>[
+        _receiptPage('page-b', 0),
+        _receiptPage('page-a', 1),
+        _receiptPage('page-c', 2),
+      ];
+
+      await controller.prepareReceiptPages(provider: provider, assets: pages);
+
+      expect(controller.status, ServerAiWorkspaceStatus.awaitingConsent);
+      expect(media.preparedSourceIds.single, <String>[
+        'page-b',
+        'page-a',
+        'page-c',
+      ]);
+      expect(controller.prepared?.media.map((item) => item.pageIndex), <int>[
+        0,
+        1,
+        2,
+      ]);
+      expect(gateway.requests, isEmpty);
+      expect(repository.inventoryOrPurchaseMutationCalls, 0);
+
+      controller.confirmTransmission();
+      expect(
+        controller.consent?.orderedMediaHashes,
+        controller.prepared?.orderedHashes,
+      );
+      await controller.extract();
+
+      expect(gateway.requests, hasLength(1));
+      expect(
+        gateway.requests.single.media.media.map((item) => item.sourceMediaId),
+        <String>['page-b', 'page-a', 'page-c'],
+      );
+      expect(repository.inventoryOrPurchaseMutationCalls, 0);
+    },
+  );
+
+  test(
+    'receipt intake rejects an unbounded selection before preparation',
+    () async {
+      final provider = _multiImageProvider();
+      final repository = _ServerRepository(
+        _workspace(profiles: <AiProviderProfile>[provider]),
+      );
+      final media = _OrderedMediaPreparation();
+      final controller = _controller(repository: repository, media: media);
+      addTearDown(controller.dispose);
+      await controller.load();
+
+      await controller.prepareReceiptPages(
+        provider: provider,
+        assets: <AiMediaAsset>[
+          for (var index = 0; index < 9; index++)
+            _receiptPage('page-$index', index),
+        ],
+      );
+
+      expect(controller.status, ServerAiWorkspaceStatus.failed);
+      expect(controller.safeMessage, contains('1 and 8'));
+      expect(media.preparedSourceIds, isEmpty);
     },
   );
 
@@ -203,11 +293,16 @@ void main() {
     addTearDown(controller.dispose);
     await controller.load();
     AiReviewHandoff? handoff;
+    PreparedAiMedia? previewedMedia;
     await tester.pumpWidget(
       MaterialApp(
         home: ServerAiWorkspacePage(
           controller: controller,
           pickSingleImage: (kind) async => _asset(),
+          readPreparedImage: (media) async {
+            previewedMedia = media;
+            return _transparentPixel;
+          },
           onReviewHandoff: (value) => handoff = value,
         ),
       ),
@@ -226,6 +321,13 @@ void main() {
       scrollable: find.byType(Scrollable).first,
     );
     expect(find.byKey(const Key('ai-transmission-consent')), findsOneWidget);
+    expect(find.byKey(const Key('ai-sanitized-preview')), findsOneWidget);
+    expect(
+      find.byKey(const Key('ai-transmission-media-disclosure')),
+      findsOneWidget,
+    );
+    expect(find.textContaining('leaves this device'), findsWidgets);
+    expect(previewedMedia?.ephemeralReference, 'ephemeral://batch-1/page-1');
     expect(
       tester
           .widget<FilledButton>(find.byKey(const Key('ai-send-extraction')))
@@ -237,25 +339,258 @@ void main() {
     await tester.pump();
     await tester.tap(find.byKey(const Key('ai-send-extraction')));
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(
-      find.byKey(const Key('ai-accept-0')),
-      300,
-      scrollable: find.byType(Scrollable).first,
-    );
+    await _scrollTo(tester, const Key('ai-accept-0'));
     expect(find.text('Mandatory candidate review'), findsOneWidget);
+    expect(find.byKey(const Key('ai-sanitized-preview')), findsOneWidget);
+    expect(
+      find.byKey(const Key('ai-review-preview-retention')),
+      findsOneWidget,
+    );
     expect(find.textContaining('ordinary authorized'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('ai-accept-0')));
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(
-      find.byKey(const Key('ai-build-review-handoff')),
-      200,
-      scrollable: find.byType(Scrollable).first,
-    );
+    await _scrollTo(tester, const Key('ai-build-review-handoff'));
     await tester.tap(find.byKey(const Key('ai-build-review-handoff')));
     await tester.pump();
 
     expect(handoff?.acceptedPositions, <int>[0]);
+    expect(repository.inventoryOrPurchaseMutationCalls, 0);
+  });
+
+  testWidgets(
+    'receipt PDF pages show ordered local transforms then every sanitized preview',
+    (tester) async {
+      final provider = _multiImageProvider();
+      final repository = _ServerRepository(
+        _workspace(profiles: <AiProviderProfile>[provider]),
+      );
+      final media = _OrderedMediaPreparation();
+      final controller = _controller(repository: repository, media: media);
+      addTearDown(controller.dispose);
+      await controller.load();
+      final transforms = <ReceiptPageTransform>[];
+      final crops = <NormalizedRegion?>[];
+      final discarded = <String>[];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ServerAiWorkspacePage(
+            controller: controller,
+            pickSingleImage: (_) async => null,
+            pickMultipleImages: (_) async => <AiMediaAsset>[
+              _receiptPage('first', 0),
+              _receiptPage('second', 1),
+            ],
+            pickReceiptPdf: () async => <AiMediaAsset>[
+              _receiptPage('first', 0),
+              _receiptPage('second', 1),
+            ],
+            readLocalImage: (_) async => _transparentPixel,
+            transformReceiptPage:
+                ({required asset, required transform, crop}) async {
+                  transforms.add(transform);
+                  crops.add(crop);
+                  return AiMediaAsset(
+                    id: '${asset.id}-${transform.name}',
+                    homeId: asset.homeId,
+                    localReference: asset.localReference,
+                    purpose: asset.purpose,
+                    mimeType: 'image/jpeg',
+                    byteLength: asset.byteLength,
+                    createdAt: asset.createdAt,
+                    pageIndex: asset.pageIndex,
+                  );
+                },
+            discardLocalImages: (assets) async =>
+                discarded.addAll(assets.map((asset) => asset.id)),
+            readPreparedImage: (_) async => _transparentPixel,
+          ),
+        ),
+      );
+
+      await _scrollTo(tester, const Key('ai-pick-receipt-pdf'));
+      await tester.tap(find.byKey(const Key('ai-pick-receipt-pdf')));
+      await tester.pumpAndSettle();
+      await _scrollTo(tester, const Key('ai-receipt-page-draft'));
+      expect(find.byKey(const Key('ai-receipt-local-preview-0')), findsOne);
+      expect(find.byKey(const Key('ai-receipt-local-preview-1')), findsOne);
+
+      await tester.tap(find.byKey(const Key('ai-receipt-rotate-0')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('ai-receipt-crop-1')));
+      await tester.pumpAndSettle();
+
+      expect(transforms, <ReceiptPageTransform>[
+        ReceiptPageTransform.rotateClockwise90,
+        ReceiptPageTransform.crop,
+      ]);
+      expect(crops.first, isNull);
+      expect(crops.last?.pageIndex, 1);
+      expect(crops.last?.width, 0.9);
+
+      await _scrollTo(tester, const Key('ai-prepare-receipt-pages'));
+      await tester.tap(find.byKey(const Key('ai-prepare-receipt-pages')));
+      await tester.pumpAndSettle();
+      await _scrollTo(tester, const Key('ai-transmission-consent'));
+
+      expect(find.byKey(const Key('ai-receipt-page-draft')), findsNothing);
+      expect(find.byKey(const Key('ai-sanitized-preview')), findsOne);
+      expect(find.byKey(const Key('ai-sanitized-preview-1')), findsOne);
+      expect(find.byKey(const Key('ai-prepared-digest-0')), findsOne);
+      expect(find.byKey(const Key('ai-prepared-digest-1')), findsOne);
+      expect(discarded, <String>['first-rotateClockwise90', 'second-crop']);
+      expect(controller.consent, isNull);
+
+      await tester.tap(find.byKey(const Key('ai-transmission-consent')));
+      await tester.pump();
+      await _scrollTo(tester, const Key('ai-send-extraction'));
+      await tester.tap(find.byKey(const Key('ai-send-extraction')));
+      await tester.pumpAndSettle();
+
+      expect(controller.status, ServerAiWorkspaceStatus.reviewRequired);
+      expect(find.byKey(const Key('ai-sanitized-preview')), findsOne);
+      expect(find.byKey(const Key('ai-sanitized-preview-1')), findsOne);
+      expect(find.byKey(const Key('ai-review-preview-retention')), findsOne);
+      expect(repository.inventoryOrPurchaseMutationCalls, 0);
+    },
+  );
+
+  testWidgets(
+    'receipt PDF staging rejects raw documents and discards them locally',
+    (tester) async {
+      final provider = _multiImageProvider();
+      final repository = _ServerRepository(
+        _workspace(profiles: <AiProviderProfile>[provider]),
+      );
+      final controller = _controller(repository: repository);
+      addTearDown(controller.dispose);
+      await controller.load();
+      final discarded = <String>[];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ServerAiWorkspacePage(
+            controller: controller,
+            pickSingleImage: (_) async => null,
+            pickReceiptPdf: () async => <AiMediaAsset>[
+              AiMediaAsset(
+                id: 'raw-pdf',
+                homeId: 'home-1',
+                localReference: 'registered://raw-pdf',
+                purpose: AiExtractionKind.receipt,
+                mimeType: 'application/pdf',
+                byteLength: 100,
+                createdAt: DateTime.utc(2026, 8, 11),
+              ),
+            ],
+            discardLocalImages: (assets) async =>
+                discarded.addAll(assets.map((asset) => asset.id)),
+          ),
+        ),
+      );
+
+      await _scrollTo(tester, const Key('ai-pick-receipt-pdf'));
+      await tester.tap(find.byKey(const Key('ai-pick-receipt-pdf')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('ai-receipt-page-draft')), findsNothing);
+      expect(discarded, <String>['raw-pdf']);
+      expect(controller.prepared, isNull);
+      expect(repository.inventoryOrPurchaseMutationCalls, 0);
+    },
+  );
+
+  testWidgets('receipt PDF draft is discarded after preparation failure', (
+    tester,
+  ) async {
+    final provider = _multiImageProvider();
+    final repository = _ServerRepository(
+      _workspace(profiles: <AiProviderProfile>[provider]),
+    );
+    final controller = _controller(
+      repository: repository,
+      media: _ThrowingMedia(prepareError: StateError('private source path')),
+    );
+    addTearDown(controller.dispose);
+    await controller.load();
+    final discarded = <String>[];
+    var selection = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ServerAiWorkspacePage(
+          controller: controller,
+          pickSingleImage: (_) async => null,
+          pickReceiptPdf: () async => <AiMediaAsset>[
+            _receiptPage('pdf-page-${selection++}', 0),
+          ],
+          readLocalImage: (_) async => _transparentPixel,
+          discardLocalImages: (assets) async =>
+              discarded.addAll(assets.map((asset) => asset.id)),
+        ),
+      ),
+    );
+
+    await _scrollTo(tester, const Key('ai-pick-receipt-pdf'));
+    await tester.tap(find.byKey(const Key('ai-pick-receipt-pdf')));
+    await tester.pumpAndSettle();
+    await _scrollTo(tester, const Key('ai-prepare-receipt-pages'));
+    await tester.tap(find.byKey(const Key('ai-prepare-receipt-pages')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('ai-receipt-page-draft')), findsNothing);
+    expect(discarded, contains('pdf-page-0'));
+    expect(controller.prepared, isNull);
+    expect(controller.safeMessage, isNot(contains('private')));
+    expect(repository.inventoryOrPurchaseMutationCalls, 0);
+  });
+
+  testWidgets('receipt PDF draft is discarded when home access is revoked', (
+    tester,
+  ) async {
+    final provider = _multiImageProvider();
+    final repository = _ServerRepository(
+      _workspace(profiles: <AiProviderProfile>[provider]),
+    );
+    final controller = _controller(repository: repository);
+    addTearDown(controller.dispose);
+    await controller.load();
+    final discarded = <String>[];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ServerAiWorkspacePage(
+          controller: controller,
+          pickSingleImage: (_) async => null,
+          pickReceiptPdf: () async => <AiMediaAsset>[
+            _receiptPage('pdf-revoked-page', 0),
+          ],
+          readLocalImage: (_) async => _transparentPixel,
+          discardLocalImages: (assets) async =>
+              discarded.addAll(assets.map((asset) => asset.id)),
+        ),
+      ),
+    );
+
+    await _scrollTo(tester, const Key('ai-pick-receipt-pdf'));
+    await tester.tap(find.byKey(const Key('ai-pick-receipt-pdf')));
+    await tester.pumpAndSettle();
+    await _scrollTo(tester, const Key('ai-receipt-page-draft'));
+    expect(find.byKey(const Key('ai-receipt-page-draft')), findsOneWidget);
+
+    await controller.updateCapabilities(
+      AiHomeCapabilities.fromPermissions(
+        homeId: 'home-1',
+        permissions: const <String>{},
+        active: false,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('ai-receipt-page-draft')), findsNothing);
+    expect(discarded, contains('pdf-revoked-page'));
+    expect(controller.status, ServerAiWorkspaceStatus.accessDenied);
     expect(repository.inventoryOrPurchaseMutationCalls, 0);
   });
 
@@ -776,6 +1111,151 @@ void main() {
 
   group('review and access lifecycle', () {
     test(
+      'server authorization denial is terminal and clears private state',
+      () async {
+        final repository = _ServerRepository(_workspace());
+        final media = FakeMediaPreparation(preparedBatch());
+        final controller = _controller(repository: repository, media: media);
+        addTearDown(controller.dispose);
+        await controller.load();
+        await controller.prepareOne(
+          provider: controller.workspace!.profiles.single,
+          asset: _asset(),
+        );
+        controller.confirmTransmission();
+        expect(controller.prepared, isNotNull);
+        expect(controller.consent, isNotNull);
+
+        repository.settingsError = const AiServerException(
+          AiServerFailureKind.authorizationDenied,
+        );
+        await controller.updateSettings(
+          const AiSettingsUpdate(
+            mode: AiServerMode.serverProxy,
+            provider: 'openai',
+            model: 'gpt-5-mini',
+            expectedRevision: 1,
+          ),
+        );
+
+        expect(controller.status, ServerAiWorkspaceStatus.accessDenied);
+        expect(controller.safeMessage, contains('Access to this household'));
+        expect(controller.workspace, isNull);
+        expect(controller.selectedProvider, isNull);
+        expect(controller.prepared, isNull);
+        expect(controller.consent, isNull);
+        expect(controller.receiptProposal, isNull);
+        expect(controller.stockProposal, isNull);
+        expect(controller.review, isNull);
+        expect(media.discardCalls, 1);
+        expect(repository.inventoryOrPurchaseMutationCalls, 0);
+      },
+    );
+
+    test('load authorization denial enters terminal access state', () async {
+      final repository = _ServerRepository(_workspace())
+        ..loadError = const AiServerException(
+          AiServerFailureKind.authorizationDenied,
+        );
+      final controller = _controller(repository: repository);
+      addTearDown(controller.dispose);
+
+      await controller.load();
+
+      expect(controller.status, ServerAiWorkspaceStatus.accessDenied);
+      expect(controller.workspace, isNull);
+      expect(controller.safeMessage, contains('Access to this household'));
+    });
+
+    for (final failurePoint in <String>['readiness', 'extraction']) {
+      test('gateway $failurePoint denial discards consent and media', () async {
+        final repository = _ServerRepository(_workspace());
+        final media = FakeMediaPreparation(preparedBatch());
+        final gateway = FakeGateway(
+          route: AiGatewayRoute.serverProxyCloud,
+          readinessError: failurePoint == 'readiness'
+              ? const AiGatewayAuthorizationDeniedException()
+              : null,
+          receiptHandler: (_) async {
+            if (failurePoint == 'extraction') {
+              throw const AiGatewayAuthorizationDeniedException();
+            }
+            throw StateError('Extraction must not run after readiness denial.');
+          },
+        );
+        final controller = _controller(
+          repository: repository,
+          media: media,
+          gateway: gateway,
+        );
+        addTearDown(controller.dispose);
+        await controller.load();
+        await controller.prepareOne(
+          provider: controller.workspace!.profiles.single,
+          asset: _asset(),
+        );
+        controller.confirmTransmission();
+
+        await controller.extract();
+
+        expect(controller.status, ServerAiWorkspaceStatus.accessDenied);
+        expect(controller.workspace, isNull);
+        expect(controller.prepared, isNull);
+        expect(controller.consent, isNull);
+        expect(controller.review, isNull);
+        expect(media.discardCalls, 1);
+        expect(repository.inventoryOrPurchaseMutationCalls, 0);
+        expect(
+          gateway.requests,
+          hasLength(failurePoint == 'extraction' ? 1 : 0),
+        );
+      });
+    }
+
+    test(
+      'dispose invalidates an in-flight extraction without a late review',
+      () async {
+        final extraction = Completer<AiExtractionResult<ReceiptProposal>>();
+        final repository = _ServerRepository(_workspace());
+        final media = FakeMediaPreparation(preparedBatch());
+        final controller = _controller(
+          repository: repository,
+          media: media,
+          gateway: FakeGateway(
+            route: AiGatewayRoute.serverProxyCloud,
+            receiptHandler: (_) => extraction.future,
+          ),
+        );
+        await controller.load();
+        await controller.prepareOne(
+          provider: controller.workspace!.profiles.single,
+          asset: _asset(),
+        );
+        controller.confirmTransmission();
+        final pending = controller.extract();
+        await Future<void>.delayed(Duration.zero);
+
+        controller.dispose();
+        extraction.complete(
+          AiExtractionSuccess<ReceiptProposal>(
+            proposal: receiptProposal(runId: 'late-run'),
+            metadata: runMetadata,
+          ),
+        );
+        await pending;
+
+        expect(controller.workspace, isNull);
+        expect(controller.prepared, isNull);
+        expect(controller.consent, isNull);
+        expect(controller.receiptProposal, isNull);
+        expect(controller.review, isNull);
+        expect(media.discardCalls, 1);
+        expect(repository.reviewCalls, 0);
+        expect(repository.inventoryOrPurchaseMutationCalls, 0);
+      },
+    );
+
+    test(
       'review rejects missing, unknown, repeated, and invalid server data',
       () async {
         final repository = _ServerRepository(_workspace());
@@ -942,6 +1422,14 @@ void main() {
         await tester.pumpAndSettle();
         expect(readyRepository.loadCalls, 1);
         expect(find.text('Privacy boundary'), findsOneWidget);
+        expect(
+          find.byKey(const Key('ai-direct-extraction-media-disclosure')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const Key('ai-private-media-disclosure')),
+          findsOneWidget,
+        );
 
         final deniedController = _controller(
           repository: _ServerRepository(_workspace()),
@@ -997,9 +1485,11 @@ void main() {
       await controller.load();
       await _pumpPage(tester, controller);
 
+      await _scrollTo(tester, const Key('ai-enable-profile'));
       await tester.tap(find.byKey(const Key('ai-enable-profile')));
       await tester.pumpAndSettle();
       expect(repository.lastSettingsUpdate?.expectedRevision, 1);
+      await _scrollTo(tester, const Key('ai-single-profile-policy'));
       await tester.tap(find.byKey(const Key('ai-single-profile-policy')));
       await tester.pumpAndSettle();
       expect(repository.lastPolicyUpdate?.extractionProfileIds, <String>[
@@ -1280,6 +1770,10 @@ void main() {
   });
 }
 
+final Uint8List _transparentPixel = base64Decode(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+);
+
 AiProviderProfileDraft _existingProfileDraft() => const AiProviderProfileDraft(
   id: 'provider-1',
   label: 'Primary provider',
@@ -1328,6 +1822,7 @@ Future<void> _pumpPage(
   WidgetTester tester,
   ServerAiWorkspaceController controller, {
   AiSingleImagePicker? picker,
+  AiPreparedImageReader? readPreparedImage,
   ValueChanged<AiReviewHandoff>? onReviewHandoff,
 }) => tester.pumpWidget(
   MaterialApp(
@@ -1335,6 +1830,7 @@ Future<void> _pumpPage(
       key: UniqueKey(),
       controller: controller,
       pickSingleImage: picker ?? (_) async => _asset(),
+      readPreparedImage: readPreparedImage ?? (_) async => _transparentPixel,
       onReviewHandoff: onReviewHandoff,
     ),
   ),
@@ -1347,6 +1843,8 @@ Future<void> _scrollTo(WidgetTester tester, Key key) async {
     250,
     scrollable: find.byType(Scrollable).first,
   );
+  await tester.ensureVisible(finder);
+  await tester.pumpAndSettle();
 }
 
 Future<void> _completeReceiptExtraction(WidgetTester tester) async {
@@ -1414,6 +1912,49 @@ final class _DelayedMediaPreparation implements AiMediaPreparationPort {
   }
 }
 
+final class _OrderedMediaPreparation implements AiMediaPreparationPort {
+  final List<List<String>> preparedSourceIds = <List<String>>[];
+  int discardCalls = 0;
+
+  @override
+  Future<PreparedMediaBatch> prepare({
+    required String homeId,
+    required AiExtractionKind purpose,
+    required List<AiMediaAsset> assets,
+  }) async {
+    preparedSourceIds.add(
+      assets.map((asset) => asset.id).toList(growable: false),
+    );
+    return PreparedMediaBatch(
+      id: 'ordered-${assets.length}',
+      homeId: homeId,
+      purpose: purpose,
+      media: <PreparedAiMedia>[
+        for (var index = 0; index < assets.length; index++)
+          PreparedAiMedia(
+            sourceMediaId: assets[index].id,
+            ephemeralReference: 'ephemeral://ordered/$index',
+            previewReference: 'ephemeral://ordered/$index',
+            sha256: List<String>.filled(
+              64,
+              String.fromCharCode(97 + index),
+            ).join(),
+            mimeType: 'image/jpeg',
+            byteLength: 1024,
+            width: 100,
+            height: 200,
+            pageIndex: assets[index].pageIndex ?? index,
+          ),
+      ],
+    );
+  }
+
+  @override
+  Future<void> discard(PreparedMediaBatch batch) async {
+    discardCalls++;
+  }
+}
+
 final class _ThrowingMedia implements AiMediaPreparationPort {
   _ThrowingMedia({this.batch, this.prepareError, this.discardError});
 
@@ -1451,6 +1992,24 @@ AiMediaAsset _asset({
   byteLength: 12000,
   createdAt: DateTime.utc(2026, 8, 11),
 );
+
+AiMediaAsset _receiptPage(String id, int pageIndex) => AiMediaAsset(
+  id: id,
+  homeId: 'home-1',
+  localReference: 'registered://$id',
+  purpose: AiExtractionKind.receipt,
+  mimeType: 'image/jpeg',
+  byteLength: 12000,
+  createdAt: DateTime.utc(2026, 8, 11),
+  pageIndex: pageIndex,
+);
+
+AiProviderProfile _multiImageProvider() {
+  final base = serverProvider();
+  return base.copyWith(
+    capabilities: <AiCapability>{...base.capabilities, AiCapability.multiImage},
+  );
+}
 
 PreparedMediaBatch _preparedBatch({
   String homeId = 'home-1',
@@ -1548,7 +2107,17 @@ AiServerWorkspace _workspace({
       ],
       credentialEncryptionAvailable: true,
       humanReviewRequired: true,
-      serverPersistsUploadedMedia: true,
+      serverPersistsUploadedMedia: false,
+      mediaHandling: AiMediaHandling(
+        directExtractionUpload: AiDirectExtractionUpload.transientNotPersisted,
+        privateMediaStorage: AiPrivateMediaStorage.explicitEncryptedOptIn,
+        privateMediaRetentionOptions: const <AiPrivateMediaRetention>{
+          AiPrivateMediaRetention.transient,
+          AiPrivateMediaRetention.retained,
+        },
+        plaintextMediaAtRest: false,
+        cloudProviderTransmissionRequiresConsent: true,
+      ),
     ),
     profiles: scopedProfiles,
     policy: AiOrchestrationPolicy(

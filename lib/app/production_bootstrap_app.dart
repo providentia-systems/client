@@ -20,8 +20,10 @@ import 'package:providentia/core/security/platform_session_coordination.dart';
 import 'package:providentia/core/security/platform_session_credential_store.dart';
 import 'package:providentia/core/security/uuid_v4.dart';
 import 'package:providentia/core/synchronization/generated_sync_gateway.dart';
+import 'package:providentia/core/synchronization/privacy_safe_sync_metrics.dart';
 import 'package:providentia/core/synchronization/sync_coordinator.dart';
 import 'package:providentia/core/synchronization/sync_models.dart';
+import 'package:providentia/core/synchronization/sync_ports.dart';
 import 'package:providentia/features/administration/application/catalog_merge_workflow.dart';
 import 'package:providentia/features/administration/application/catalog_workbench_controller.dart';
 import 'package:providentia/features/administration/application/platform_administration_controller.dart';
@@ -30,12 +32,19 @@ import 'package:providentia/features/administration/infrastructure/api11_platfor
 import 'package:providentia/features/administration/infrastructure/generated_catalog_administration_repository.dart';
 import 'package:providentia/features/administration/presentation/catalog_workbench_page.dart';
 import 'package:providentia/features/ai_integration/application/ai_ports.dart';
+import 'package:providentia/features/ai_integration/application/receipt_ai_handoff_controller.dart';
 import 'package:providentia/features/ai_integration/domain/ai_models.dart';
+import 'package:providentia/features/ai_integration/domain/ai_policy.dart';
 import 'package:providentia/features/ai_integration/domain/server_ai_models.dart';
 import 'package:providentia/features/ai_integration/infrastructure/api17_ai_gateway.dart';
 import 'package:providentia/features/ai_integration/infrastructure/generated_server_ai_repository.dart';
 import 'package:providentia/features/ai_integration/infrastructure/media_acquisition_service.dart';
+import 'package:providentia/features/ai_integration/infrastructure/receipt_page_media_editor.dart';
+import 'package:providentia/features/ai_integration/infrastructure/receipt_pdf_rasterizer.dart';
 import 'package:providentia/features/ai_integration/infrastructure/sanitizing_image_media_preparer.dart';
+import 'package:providentia/features/ai_integration/infrastructure/strict_local_home_ai_composition.dart';
+import 'package:providentia/features/ai_integration/presentation/home_ai_hub_page.dart';
+import 'package:providentia/features/ai_integration/presentation/receipt_ai_handoff_page.dart';
 import 'package:providentia/features/ai_integration/presentation/server_ai_workspace_controller.dart';
 import 'package:providentia/features/ai_integration/presentation/server_ai_workspace_page.dart';
 import 'package:providentia/features/catalog/application/catalog_product_contribution_controller.dart';
@@ -63,13 +72,24 @@ import 'package:providentia/features/identity/infrastructure/secure_login_link_r
 import 'package:providentia/features/identity/presentation/account_access_page.dart';
 import 'package:providentia/features/identity/presentation/identity_controller.dart';
 import 'package:providentia/features/identity/presentation/login_link_sign_in_page.dart';
+import 'package:providentia/features/inventory/application/stock_photo_count_controller.dart';
+import 'package:providentia/features/inventory/infrastructure/generated_home_item_master_source.dart';
+import 'package:providentia/features/inventory/infrastructure/item_master_refreshing_synchronization.dart';
 import 'package:providentia/features/inventory/presentation/inventory_controller.dart';
+import 'package:providentia/features/purchasing/application/purchase_repository.dart';
 import 'package:providentia/features/purchasing/presentation/purchasing_controller.dart';
 import 'package:providentia/features/reporting/application/household_report_service.dart';
 import 'package:providentia/features/reporting/application/reporting_controller.dart';
 import 'package:providentia/features/reporting/infrastructure/generated_household_report_repository.dart';
 import 'package:providentia/features/reporting/presentation/household_reports_page.dart';
+import 'package:providentia/features/shopping/application/online_shopping_suggestion_repository.dart';
+import 'package:providentia/features/shopping/application/shopping_interaction_capabilities.dart';
+import 'package:providentia/features/shopping/infrastructure/drift_shopping_suggestion_cache.dart';
+import 'package:providentia/features/shopping/infrastructure/generated_online_shopping_suggestion_repository.dart';
 import 'package:providentia/features/shopping/presentation/shopping_controller.dart';
+import 'package:providentia/features/sync_conflicts/application/sync_conflict_repository.dart';
+import 'package:providentia/features/sync_conflicts/infrastructure/drift_sync_conflict_repository.dart';
+import 'package:providentia/features/sync_conflicts/presentation/sync_conflict_controller.dart';
 import 'package:providentia_api_client/providentia_api_client.dart';
 
 /// Production composition root: identity -> authorized homes -> active home ->
@@ -94,6 +114,7 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp> {
   late final HomesController _homesController;
   late final PlatformAdministrationController _platformAdministrationController;
   late final ProductionSessionSecurityBoundary _sessionSecurityBoundary;
+  late final ProductionHomeRevocationBoundary _homeRevocationBoundary;
   late final Future<void> _initialization;
   GeneratedCatalogAdministrationRepository? _catalogAdministrationRepository;
   CatalogWorkbenchController? _catalogWorkbenchController;
@@ -116,6 +137,12 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp> {
   void initState() {
     super.initState();
     _database = AppDatabase.defaults();
+    _homeRevocationBoundary = ProductionHomeRevocationBoundary(
+      purge: (homeId) {
+        _scheduleRevokedHomePurge(homeId);
+        return _revokedHomePurges[homeId]!;
+      },
+    );
     _initialization = _initialize();
   }
 
@@ -254,6 +281,7 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp> {
                       ),
                       revokedDataPurge: _revokedHomePurges[home.id],
                       syncRevocationGate: _homeSyncRevocationGate,
+                      homeRevocationBoundary: _homeRevocationBoundary,
                       database: _database,
                       deviceId: _deviceId,
                       api: _authorizedApi,
@@ -590,6 +618,7 @@ final class _ConnectedHomeWorkspace extends StatefulWidget {
     required this.access,
     required this.revokedDataPurge,
     required this.syncRevocationGate,
+    required this.homeRevocationBoundary,
     required this.database,
     required this.deviceId,
     required this.api,
@@ -614,6 +643,7 @@ final class _ConnectedHomeWorkspace extends StatefulWidget {
   final HouseholdWorkspaceAccess access;
   final Future<bool>? revokedDataPurge;
   final HomeSyncRevocationGate syncRevocationGate;
+  final ProductionHomeRevocationBoundary homeRevocationBoundary;
   final AppDatabase database;
   final String deviceId;
   final ProvidentiaApiClient api;
@@ -637,23 +667,50 @@ final class _ConnectedHomeWorkspace extends StatefulWidget {
       _ConnectedHomeWorkspaceState();
 }
 
-final class _ConnectedHomeWorkspaceState
-    extends State<_ConnectedHomeWorkspace> {
+final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
+    with WidgetsBindingObserver {
   late final AppController _app;
+  late final DriftHouseholdRepository _household;
   late final HouseholdFeatures _features;
+  late final SyncConflictController _syncConflicts;
+  late final PrivacySafeSyncMetrics _syncMetrics;
+  late final ProductionResumeSyncGate _resumeSyncGate;
   late final Future<void> _ready;
+  StrictLocalHomeAiComposition? _strictLocalAi;
+  SyncMetricsSnapshot? _latestSyncMetrics;
   bool _revocationRouted = false;
 
   @override
   void initState() {
     super.initState();
     final localSync = DriftLocalSyncRepository(widget.database);
-    final synchronization = RevocationGuardedSynchronization(
-      delegate: SyncCoordinator(
-        local: localSync,
-        remote: GeneratedSyncGateway(widget.api),
-        connectivity: GeneratedApiConnectivityProbe(widget.api),
+    final household = createProductionHouseholdRepository(
+      database: widget.database,
+      deviceId: widget.deviceId,
+      onMutationCommitted: () => _app.refresh(),
+    );
+    _household = household;
+    _syncMetrics = PrivacySafeSyncMetrics(
+      sink: CallbackSyncMetricsSnapshotSink(
+        (snapshot) => _latestSyncMetrics = snapshot,
       ),
+    );
+    AppSynchronization synchronization = SyncCoordinator(
+      local: localSync,
+      remote: GeneratedSyncGateway(widget.api),
+      connectivity: GeneratedApiConnectivityProbe(widget.api),
+      metrics: _syncMetrics,
+    );
+    if (widget.access.inventoryRead) {
+      synchronization = ItemMasterRefreshingSynchronization(
+        delegate: synchronization,
+        source: GeneratedHomeItemMasterSource(widget.api),
+        replaceCache: household.replaceCatalogItemMaster,
+        homeId: widget.home.id,
+      );
+    }
+    synchronization = RevocationGuardedSynchronization(
+      delegate: synchronization,
       gate: widget.syncRevocationGate,
       homeId: widget.home.id,
     );
@@ -661,28 +718,139 @@ final class _ConnectedHomeWorkspaceState
       synchronization: synchronization,
       activeHomeId: widget.home.id,
     );
-    _app.addListener(_handleSynchronizationState);
-    final household = createProductionHouseholdRepository(
-      database: widget.database,
-      deviceId: widget.deviceId,
-      onMutationCommitted: _app.refresh,
-    );
-    _ready = _prepareLocalWorkspace(household);
-    _features = HouseholdFeatures(
-      inventory: InventoryController(
-        repository: household,
+    _resumeSyncGate = ProductionResumeSyncGate(refresh: _app.refresh);
+    WidgetsBinding.instance.addObserver(this);
+    _syncConflicts = SyncConflictController(
+      repository: DriftSyncConflictRepository(
+        conflictStore: localSync,
         homeId: widget.home.id,
+        accessResolver: (_) => SyncConflictAccess(
+          mayReview: true,
+          mayResolve:
+              widget.access.inventoryWrite ||
+              widget.access.purchasesWrite ||
+              widget.access.shoppingWrite,
+        ),
+        resolutionAuthorization: _mayResolveConflict,
       ),
+    );
+    _app.addListener(_handleSynchronizationState);
+    _ready = _prepareLocalWorkspace(household);
+    final inventory = InventoryController(
+      repository: household,
+      homeId: widget.home.id,
+    );
+    final permissions = widget.homesController.snapshot.effectivePermissions;
+    final aiCapabilities = AiHomeCapabilities.fromPermissions(
+      homeId: widget.home.id,
+      permissions: permissions,
+    );
+    final preparedStore = MemoryEphemeralPreparedMediaStore();
+    if (aiCapabilities.hasAnyAccess) {
+      _strictLocalAi = StrictLocalHomeAiComposition.create(
+        database: widget.database,
+        homeId: widget.home.id,
+        mediaReader: preparedStore,
+        idGenerator: UuidV4Generator().call,
+      );
+    }
+    StockPhotoCountController? stockPhotoCount;
+    if (widget.access.inventoryWrite &&
+        aiCapabilities.mayRead &&
+        aiCapabilities.mayUse) {
+      final sources = RegisteredMediaSourceReader();
+      final mediaPreparation = ProductionRegisteredSourceClearingMediaPreparer(
+        delegate: SanitizingImageMediaPreparer(
+          sources: sources,
+          prepared: preparedStore,
+        ),
+        sources: sources,
+      );
+      final acquisition = MediaAcquisitionService(registry: sources);
+      final aiRepository = GeneratedServerAiRepository(widget.api);
+      final serverGateway = Api17AiGateway(
+        client: widget.api,
+        mediaReader: preparedStore,
+      );
+      Future<StockPhotoAiRoute> loadServerRoute() async {
+        final workspace = await aiRepository.loadWorkspace(
+          homeId: widget.home.id,
+        );
+        if (workspace.homeId != widget.home.id ||
+            workspace.settings.mode != AiServerMode.serverProxy) {
+          throw const AiServerException(AiServerFailureKind.validation);
+        }
+        for (final profileId in workspace.policy.extractionProfileIds) {
+          final profile = workspace.profile(profileId);
+          if (profile != null && profile.enabled) {
+            return StockPhotoAiRoute(
+              profile: profile,
+              gateway: serverGateway,
+              privacyMode: AiPrivacyMode.serverProxyCloud,
+            );
+          }
+        }
+        throw const AiServerException(AiServerFailureKind.validation);
+      }
+
+      Future<StockPhotoAiRoute> loadPreferredRoute() async {
+        final strictLocalAi = _strictLocalAi;
+        final strictLocalProfileSelected =
+            strictLocalAi != null &&
+            await strictLocalAi.activeStockProfileId() != null;
+        return selectProductionStockAiRoute(
+          strictLocalProfileSelected: strictLocalProfileSelected,
+          loadStrictLocalRoute: strictLocalAi?.loadActiveStockRoute,
+          loadServerRoute: loadServerRoute,
+        );
+      }
+
+      stockPhotoCount = StockPhotoCountController(
+        homeId: widget.home.id,
+        inventory: inventory,
+        mediaPreparation: mediaPreparation,
+        mediaReader: preparedStore,
+        pickAssets: () => acquisition.choosePhotos(
+          homeId: widget.home.id,
+          purpose: AiExtractionKind.stockPhoto,
+          limit: 8,
+        ),
+        loadRoute: loadPreferredRoute,
+        idGenerator: UuidV4Generator().call,
+        onAuthorizationDenied: _handleHomeAuthorizationLost,
+      );
+    }
+    _features = HouseholdFeatures(
+      inventory: inventory,
       purchasing: PurchasingController(
         repository: household,
+        productCreationRepository: household,
         homeId: widget.home.id,
         mayWrite: widget.access.purchasesWrite,
       ),
       shopping: ShoppingController(
         repository: household,
         homeId: widget.home.id,
+        suggestionRepository: CachedOnlineShoppingSuggestionRepository(
+          remote: GeneratedOnlineShoppingSuggestionRepository(widget.api),
+          cache: DriftShoppingSuggestionCache(widget.database),
+        ),
+        capabilities: ShoppingInteractionCapabilities.onlineEvidenceSuggestions,
+        onAuthorizationDenied: _handleHomeAuthorizationLost,
       ),
+      stockPhotoCount: stockPhotoCount,
     );
+  }
+
+  @visibleForTesting
+  SyncMetricsSnapshot get syncMetricsSnapshot =>
+      _latestSyncMetrics ?? _syncMetrics.snapshot;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _resumeSyncGate.resume();
+    }
   }
 
   @override
@@ -705,6 +873,10 @@ final class _ConnectedHomeWorkspaceState
           navigatorKey: widget.workspaceNavigatorKey,
           onChangeHome: widget.onChangeHome,
           onSignOut: widget.onSignOut,
+          syncConflictController: _syncConflicts,
+          onCountReconciliation: (_) {
+            _app.selectSection(AppSection.stock);
+          },
           accountPageBuilder: (context) => AccountAccessPage(
             identityController: widget.identityController,
             homesController: widget.homesController,
@@ -715,7 +887,7 @@ final class _ConnectedHomeWorkspaceState
             catalogAdministrationPageBuilder:
                 widget.catalogAdministrationPageBuilder,
             householdReportsPageBuilder: widget.householdReportsPageBuilder,
-            householdAiPageBuilder: widget.householdAiPageBuilder,
+            householdAiPageBuilder: _connectedHouseholdAiPageBuilder,
             dataGovernancePageBuilder: widget.dataGovernancePageBuilder,
           ),
         );
@@ -739,6 +911,54 @@ final class _ConnectedHomeWorkspaceState
     };
   }
 
+  bool _mayResolveConflict(SyncConflict conflict) {
+    final entityType = conflict.entityType;
+    if (entityType.startsWith('inventory-')) {
+      return widget.access.inventoryWrite;
+    }
+    if (entityType.startsWith('purchasing-')) {
+      return widget.access.purchasesWrite;
+    }
+    if (entityType.startsWith('shopping-')) {
+      return widget.access.shoppingWrite;
+    }
+    return false;
+  }
+
+  WidgetBuilder get _connectedHouseholdAiPageBuilder => (_) {
+    final permissions = widget.homesController.snapshot.effectivePermissions;
+    final capabilities = AiHomeCapabilities.fromPermissions(
+      homeId: widget.home.id,
+      permissions: permissions,
+    );
+    if (!widget.identityController.snapshot.isAuthenticated ||
+        !capabilities.mayRead) {
+      return const _ProtectedRouteUnavailable();
+    }
+    final strictLocalAi = _strictLocalAi;
+    return HomeAiHubPage(
+      mayManageLocalProfiles: capabilities.mayManage && strictLocalAi != null,
+      strictLocalSettingsPageBuilder: (_) =>
+          strictLocalAi?.settingsPage() ?? const _ProtectedRouteUnavailable(),
+      serverProxyPageBuilder: (_) => ProductionServerAiRoute(
+        api: widget.api,
+        homeId: widget.home.id,
+        capabilities: capabilities,
+        protectedRouteRegistry: widget.protectedRouteRegistry,
+        onAuthorizationLost: _handleHomeAuthorizationLost,
+        purchaseRepository: _household,
+        mayWritePurchases:
+            widget.access.purchasesRead && widget.access.purchasesWrite,
+        onReceiptDraftReady: (_) {
+          widget.workspaceNavigatorKey.currentState?.popUntil(
+            (route) => route.isFirst,
+          );
+          _app.selectSection(AppSection.purchases);
+        },
+      ),
+    );
+  };
+
   Future<void> _prepareLocalWorkspace(
     DriftHouseholdRepository household,
   ) async {
@@ -756,6 +976,9 @@ final class _ConnectedHomeWorkspaceState
     if (widget.access.shoppingWrite) {
       await household.ensureHomeInitialized(homeId: widget.home.id);
     }
+    if (!_revocationRouted && mounted) {
+      _resumeSyncGate.markReady();
+    }
   }
 
   void _handleSynchronizationState() {
@@ -763,8 +986,118 @@ final class _ConnectedHomeWorkspaceState
         _app.syncSummary.availability != SyncAvailability.authorizationDenied) {
       return;
     }
+    unawaited(_handleHomeAuthorizationLost());
+  }
+
+  Future<void> _handleHomeAuthorizationLost() async {
+    if (_revocationRouted) return;
     _revocationRouted = true;
-    unawaited(widget.homesController.handleMembershipRevoked(widget.home.id));
+    final stockPhotoCount = _features.stockPhotoCount;
+    if (stockPhotoCount != null &&
+        stockPhotoCount.state.status != StockPhotoCountStatus.accessDenied) {
+      await stockPhotoCount.authorizationLost();
+    }
+    await widget.homeRevocationBoundary.revokePurgeAndRoute(
+      homeId: widget.home.id,
+      resumeSyncGate: _resumeSyncGate,
+      routeAway: () =>
+          widget.homesController.handleMembershipRevoked(widget.home.id),
+    );
+  }
+
+  @override
+  void dispose() {
+    // The nested ProvidentiaApp owns the feature bundle, but blocking this
+    // controller here closes the home-switch race before any async extraction
+    // can hand a reviewed candidate to the outgoing home's inventory.
+    WidgetsBinding.instance.removeObserver(this);
+    _resumeSyncGate.dispose();
+    _features.stockPhotoCount?.dispose();
+    _strictLocalAi?.dispose();
+    _app.removeListener(_handleSynchronizationState);
+    super.dispose();
+  }
+}
+
+/// Small explicit serialization gate for foreground resume refreshes. It owns
+/// no home identifiers or household data and drops duplicate lifecycle events
+/// while one refresh is running.
+@visibleForTesting
+final class ProductionResumeSyncGate {
+  factory ProductionResumeSyncGate({
+    required Future<void> Function() refresh,
+  }) => ProductionResumeSyncGate._(refresh);
+
+  ProductionResumeSyncGate._(this._refresh);
+
+  final Future<void> Function() _refresh;
+  bool _ready = false;
+  bool _revoked = false;
+  bool _disposed = false;
+  bool _running = false;
+  Future<void>? _inFlight;
+
+  bool get isRunning => _running;
+
+  void markReady() {
+    if (_disposed || _revoked) return;
+    _ready = true;
+  }
+
+  void markRevoked() {
+    _revoked = true;
+    _ready = false;
+  }
+
+  void resume() {
+    if (!_ready || _revoked || _disposed || _running) return;
+    _running = true;
+    _inFlight = _run();
+    unawaited(_inFlight);
+  }
+
+  Future<void> settle() => _inFlight ?? Future<void>.value();
+
+  Future<void> _run() async {
+    try {
+      await _refresh();
+    } catch (_) {
+      // AppController and SyncCoordinator expose safe state; lifecycle
+      // delivery must never leak transport errors as unhandled exceptions.
+    } finally {
+      _running = false;
+    }
+  }
+
+  void dispose() {
+    _disposed = true;
+    _ready = false;
+  }
+}
+
+/// Production ordering boundary for an inaccessible home: block foreground
+/// resume work first, wait for synchronization to quiesce and private data to
+/// be purged, then close the workspace. Purge failure never preserves access;
+/// routing still happens and the false result keeps re-entry fail closed.
+@visibleForTesting
+final class ProductionHomeRevocationBoundary {
+  const ProductionHomeRevocationBoundary({required this.purge});
+
+  final Future<bool> Function(String homeId) purge;
+
+  Future<bool> revokePurgeAndRoute({
+    required String homeId,
+    required ProductionResumeSyncGate resumeSyncGate,
+    required Future<void> Function() routeAway,
+  }) async {
+    resumeSyncGate.markRevoked();
+    var purged = false;
+    try {
+      purged = await purge(homeId);
+    } finally {
+      await routeAway();
+    }
+    return purged;
   }
 }
 
@@ -1033,6 +1366,9 @@ final class ProductionServerAiRoute extends StatefulWidget {
     required this.capabilities,
     required this.protectedRouteRegistry,
     required this.onAuthorizationLost,
+    this.purchaseRepository,
+    this.mayWritePurchases = false,
+    this.onReceiptDraftReady,
     super.key,
   });
 
@@ -1041,6 +1377,9 @@ final class ProductionServerAiRoute extends StatefulWidget {
   final AiHomeCapabilities capabilities;
   final ProductionProtectedRouteRegistry protectedRouteRegistry;
   final Future<void> Function() onAuthorizationLost;
+  final PurchaseCaptureRepository? purchaseRepository;
+  final bool mayWritePurchases;
+  final ValueChanged<String>? onReceiptDraftReady;
 
   @override
   State<ProductionServerAiRoute> createState() =>
@@ -1052,11 +1391,14 @@ final class _ProductionServerAiRouteState
   late final RegisteredMediaSourceReader _sources;
   late final MemoryEphemeralPreparedMediaStore _prepared;
   late final MediaAcquisitionService _acquisition;
+  late final ReceiptPageMediaEditor _receiptEditor;
+  late final ReceiptPdfRasterizer _receiptPdfRasterizer;
   late final ServerAiWorkspaceController _controller;
   late final VoidCallback _clearSensitiveStateCallback;
   bool _handlingAuthorizationLoss = false;
   bool _sensitiveStateCleared = false;
   bool _picking = false;
+  ReceiptAiHandoffController? _receiptHandoff;
 
   @override
   void initState() {
@@ -1064,6 +1406,8 @@ final class _ProductionServerAiRouteState
     _sources = RegisteredMediaSourceReader();
     _prepared = MemoryEphemeralPreparedMediaStore();
     _acquisition = MediaAcquisitionService(registry: _sources);
+    _receiptEditor = ReceiptPageMediaEditor(sources: _sources);
+    _receiptPdfRasterizer = ReceiptPdfRasterizer(sources: _sources);
     final capabilities = widget.capabilities.homeId == widget.homeId
         ? widget.capabilities
         : AiHomeCapabilities.fromPermissions(
@@ -1092,6 +1436,12 @@ final class _ProductionServerAiRouteState
   Widget build(BuildContext context) => ServerAiWorkspacePage(
     controller: _controller,
     pickSingleImage: _pickSingleImage,
+    pickMultipleImages: _pickMultipleImages,
+    pickReceiptPdf: _pickReceiptPdf,
+    readLocalImage: _receiptEditor.readPreview,
+    transformReceiptPage: _receiptEditor.transform,
+    discardLocalImages: _receiptEditor.discard,
+    readPreparedImage: _prepared.read,
     onReviewHandoff: _handleReviewHandoff,
   );
 
@@ -1125,10 +1475,115 @@ final class _ProductionServerAiRouteState
     }
   }
 
+  Future<List<AiMediaAsset>> _pickMultipleImages(AiExtractionKind kind) async {
+    if (_picking ||
+        _sensitiveStateCleared ||
+        kind != AiExtractionKind.receipt) {
+      return const <AiMediaAsset>[];
+    }
+    _picking = true;
+    _clearRegisteredSources();
+    try {
+      final selected = await _acquisition.choosePhotos(
+        homeId: widget.homeId,
+        purpose: AiExtractionKind.receipt,
+        limit: 8,
+      );
+      if (!mounted || _sensitiveStateCleared) {
+        _clearRegisteredSources();
+        return const <AiMediaAsset>[];
+      }
+      return selected;
+    } on Object {
+      _clearRegisteredSources();
+      if (mounted && !_sensitiveStateCleared) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'The selected receipt pages could not be opened safely.',
+            ),
+          ),
+        );
+      }
+      return const <AiMediaAsset>[];
+    } finally {
+      _picking = false;
+    }
+  }
+
+  Future<List<AiMediaAsset>> _pickReceiptPdf() async {
+    if (_picking || _sensitiveStateCleared) {
+      return const <AiMediaAsset>[];
+    }
+    _picking = true;
+    _clearRegisteredSources();
+    try {
+      final selected = await _receiptPdfRasterizer.choose(
+        homeId: widget.homeId,
+      );
+      if (!mounted || _sensitiveStateCleared) {
+        _clearRegisteredSources();
+        return const <AiMediaAsset>[];
+      }
+      return selected;
+    } on MediaAcquisitionException catch (error) {
+      _clearRegisteredSources();
+      if (mounted && !_sensitiveStateCleared) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.safeMessage)));
+      }
+      return const <AiMediaAsset>[];
+    } catch (_) {
+      _clearRegisteredSources();
+      if (mounted && !_sensitiveStateCleared) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('The receipt PDF could not be opened safely.'),
+          ),
+        );
+      }
+      return const <AiMediaAsset>[];
+    } finally {
+      _picking = false;
+    }
+  }
+
   void _handleReviewHandoff(AiReviewHandoff handoff) {
     if (!mounted ||
         handoff.homeId != widget.homeId ||
         !handoff.requiresOrdinaryDomainCommand) {
+      return;
+    }
+    final purchaseRepository = widget.purchaseRepository;
+    if (handoff.kind == AiExtractionKind.receipt &&
+        purchaseRepository != null &&
+        widget.onReceiptDraftReady != null) {
+      if (_receiptHandoff != null) return;
+      final controller = ReceiptAiHandoffController(
+        handoff: handoff,
+        repository: purchaseRepository,
+        activeHomeId: widget.homeId,
+        mayWritePurchases: widget.mayWritePurchases,
+      );
+      _receiptHandoff = controller;
+      unawaited(
+        Navigator.of(context)
+            .push<void>(
+              MaterialPageRoute<void>(
+                builder: (_) => ReceiptAiHandoffPage(
+                  controller: controller,
+                  onOpenPurchasingReview: widget.onReceiptDraftReady!,
+                ),
+              ),
+            )
+            .whenComplete(() {
+              controller.dispose();
+              if (identical(_receiptHandoff, controller)) {
+                _receiptHandoff = null;
+              }
+            }),
+      );
       return;
     }
     ScaffoldMessenger.of(context).showSnackBar(
@@ -1162,6 +1617,7 @@ final class _ProductionServerAiRouteState
     if (_sensitiveStateCleared) return;
     _sensitiveStateCleared = true;
     _handlingAuthorizationLoss = true;
+    _receiptHandoff?.updateAccess(activeHomeId: '', mayWritePurchases: false);
     _clearRegisteredSources();
     unawaited(
       _controller.updateCapabilities(
@@ -1183,6 +1639,8 @@ final class _ProductionServerAiRouteState
   @override
   void dispose() {
     widget.protectedRouteRegistry.unregister(_clearSensitiveStateCallback);
+    _receiptHandoff?.dispose();
+    _receiptHandoff = null;
     _controller.removeListener(_handleControllerState);
     _clearSensitiveState();
     _controller.dispose();
@@ -1273,6 +1731,40 @@ DriftHouseholdRepository createProductionHouseholdRepository({
     idGenerator: idGenerator,
     onMutationCommitted: onMutationCommitted,
   );
+}
+
+/// Chooses the explicitly selected AI route. An active strict-local selection
+/// fails closed when it cannot be loaded or verified; only the absence of a
+/// local selection permits the server-proxy route.
+@visibleForTesting
+Future<StockPhotoAiRoute> selectProductionStockAiRoute({
+  required bool strictLocalProfileSelected,
+  StockPhotoAiRouteLoader? loadStrictLocalRoute,
+  required StockPhotoAiRouteLoader loadServerRoute,
+}) async {
+  if (!strictLocalProfileSelected) return loadServerRoute();
+  final localLoader = loadStrictLocalRoute;
+  if (localLoader == null) {
+    throw const AiPolicyViolation(
+      code: 'strict_local_provider_unavailable',
+      safeMessage:
+          'The selected local AI provider is unavailable. Switch to the '
+          'server route explicitly before using cloud AI.',
+    );
+  }
+  final route = await localLoader();
+  route.validate();
+  final readiness = await route.gateway.readiness(route.profile);
+  if (!readiness.isReady) {
+    throw AiPolicyViolation(
+      code: 'strict_local_provider_unavailable',
+      safeMessage:
+          readiness.safeMessage ??
+          'The selected local AI provider is unavailable. Switch to the '
+              'server route explicitly before using cloud AI.',
+    );
+  }
+  return route;
 }
 
 final class _StartupProgressApp extends StatelessWidget {

@@ -1,3 +1,4 @@
+import 'package:providentia/features/inventory/application/stock_photo_count_controller.dart';
 import 'package:providentia/features/inventory/presentation/inventory_controller.dart';
 import 'package:providentia/features/purchasing/presentation/purchasing_controller.dart';
 import 'package:providentia/features/shopping/presentation/shopping_controller.dart';
@@ -11,11 +12,13 @@ final class HouseholdFeatures {
     required this.inventory,
     required this.purchasing,
     required this.shopping,
+    this.stockPhotoCount,
   });
 
   final InventoryController inventory;
   final PurchasingController purchasing;
   final ShoppingController shopping;
+  final StockPhotoCountController? stockPhotoCount;
 
   void start() {
     inventory.start();
@@ -24,6 +27,7 @@ final class HouseholdFeatures {
   }
 
   void dispose() {
+    stockPhotoCount?.dispose();
     inventory.dispose();
     purchasing.dispose();
     shopping.dispose();

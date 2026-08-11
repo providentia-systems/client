@@ -41,6 +41,7 @@ void main() {
       metrics.recordAttempt(operationCount: 2);
       metrics.recordSuccess(acknowledgedCount: 1, pulledChangeCount: 3);
       metrics.recordFailure(classification: 'offline');
+      metrics.recordDuration(elapsed: const Duration(milliseconds: 5));
     }, returnsNormally);
   });
 }

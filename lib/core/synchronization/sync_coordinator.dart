@@ -78,6 +78,7 @@ final class SyncCoordinator implements AppSynchronization {
       );
     }
     _running = true;
+    final elapsed = Stopwatch()..start();
     var acknowledged = 0;
     var pulled = 0;
     try {
@@ -95,7 +96,11 @@ final class SyncCoordinator implements AppSynchronization {
       }
 
       final now = _clock().toUtc();
-      await _local.recoverInterruptedOperations(now: now);
+      final interruptedOperationIds =
+          (await _local.recoverInterruptedOperations(
+            homeId: homeId,
+            now: now,
+          )).toSet();
       await _local.requeueRetryableOperations(homeId: homeId, now: now);
       final operations = await _local.pendingOperations(
         homeId: homeId,
@@ -105,39 +110,73 @@ final class SyncCoordinator implements AppSynchronization {
       _metrics.recordAttempt(operationCount: operations.length);
 
       for (final operation in operations) {
+        if (operation.homeId != homeId || operation.deviceId.trim().isEmpty) {
+          throw const FormatException(
+            'A synchronization command crossed its home or device boundary.',
+          );
+        }
         final operationIds = <String>[operation.operationId];
         await _local.markSyncing(operationIds);
         try {
-          PushResponse response;
-          try {
-            response = await _remote.push(
-              homeId: homeId,
-              lastPulledCursor: lastPulledCursor,
-              operations: <PendingClientOperation>[operation],
-            );
-          } on AuthenticationSyncException {
-            final recovered = await _authenticationRecovery.tryRecover();
-            if (!recovered) {
+          PushOperationResult result;
+          if (interruptedOperationIds.contains(operation.operationId)) {
+            // The process may have stopped after the server durably accepted
+            // this command but before the client stored its receipt. Ask for
+            // that immutable receipt before reusing the exact operation ID.
+            OperationStatusItem? recovered;
+            try {
+              recovered = await _statusFor(operation);
+            } on AuthenticationSyncException {
               rethrow;
+            } on AuthorizationSyncException {
+              rethrow;
+            } on Exception {
+              // Status recovery is an optimization over the server's durable
+              // idempotency key. If it is unavailable after a restart, the
+              // exact command is still safe to submit again.
             }
-            response = await _remote.push(
-              homeId: homeId,
-              lastPulledCursor: lastPulledCursor,
-              operations: <PendingClientOperation>[operation],
-            );
-          }
-          if (response.results.length != 1 ||
-              response.results.single.operationId != operation.operationId) {
-            throw const FormatException(
-              'Synchronization returned an invalid command result.',
-            );
+            result =
+                recovered?.result ??
+                await _pushOne(
+                  operation: operation,
+                  homeId: homeId,
+                  lastPulledCursor: lastPulledCursor,
+                );
+          } else {
+            try {
+              result = await _pushOne(
+                operation: operation,
+                homeId: homeId,
+                lastPulledCursor: lastPulledCursor,
+              );
+            } on RetryableSyncException catch (ambiguousFailure) {
+              OperationStatusItem recovered;
+              try {
+                recovered = await _statusFor(operation);
+              } on AuthenticationSyncException {
+                rethrow;
+              } on AuthorizationSyncException {
+                rethrow;
+              } on Exception {
+                // Do not issue a second command while the first transport
+                // outcome is ambiguous and its status cannot be established.
+                throw ambiguousFailure;
+              }
+              result =
+                  recovered.result ??
+                  await _pushOne(
+                    operation: operation,
+                    homeId: homeId,
+                    lastPulledCursor: lastPulledCursor,
+                  );
+            }
           }
           await _local.applyPushResults(
-            results: response.results,
+            results: <PushOperationResult>[result],
             now: _clock().toUtc(),
             retryPolicy: _retryPolicy,
           );
-          if (response.results.single.kind == PushResultKind.acknowledged) {
+          if (result.kind == PushResultKind.acknowledged) {
             acknowledged++;
             continue;
           }
@@ -160,6 +199,11 @@ final class SyncCoordinator implements AppSynchronization {
             now: _clock().toUtc(),
             retryPolicy: _retryPolicy,
           );
+          rethrow;
+        } on AuthorizationSyncException {
+          // The app lifecycle owns revoked-home purge. Keep the command
+          // untouched so this generic denial is not misreported as a
+          // transport retry or a command-level validation error.
           rethrow;
         } on Exception {
           // A lost response is retryable. Idempotency is provided by the
@@ -278,6 +322,8 @@ final class SyncCoordinator implements AppSynchronization {
         pulledChangeCount: pulled,
       );
     } finally {
+      elapsed.stop();
+      _metrics.recordDuration(elapsed: elapsed.elapsed);
       _running = false;
     }
   }
@@ -292,5 +338,66 @@ final class SyncCoordinator implements AppSynchronization {
       now: _clock().toUtc(),
     );
     return synchronize(homeId);
+  }
+
+  Future<PushOperationResult> _pushOne({
+    required PendingClientOperation operation,
+    required String homeId,
+    required String? lastPulledCursor,
+  }) async {
+    Future<PushResponse> send() => _remote.push(
+      homeId: homeId,
+      lastPulledCursor: lastPulledCursor,
+      operations: <PendingClientOperation>[operation],
+    );
+
+    PushResponse response;
+    try {
+      response = await send();
+    } on AuthenticationSyncException {
+      final recovered = await _authenticationRecovery.tryRecover();
+      if (!recovered) {
+        rethrow;
+      }
+      response = await send();
+    }
+    if (response.results.length != 1 ||
+        response.results.single.operationId != operation.operationId) {
+      throw const FormatException(
+        'Synchronization returned an invalid command result.',
+      );
+    }
+    return response.results.single;
+  }
+
+  Future<OperationStatusItem> _statusFor(
+    PendingClientOperation operation,
+  ) async {
+    Future<OperationStatusResponse> lookup() => _remote.operationStatuses(
+      homeId: operation.homeId,
+      deviceId: operation.deviceId,
+      operationIds: <String>[operation.operationId],
+    );
+
+    OperationStatusResponse response;
+    try {
+      response = await lookup();
+    } on AuthenticationSyncException {
+      final recovered = await _authenticationRecovery.tryRecover();
+      if (!recovered) {
+        rethrow;
+      }
+      response = await lookup();
+    }
+    if (response.operations.length != 1 ||
+        response.operations.single.operationId != operation.operationId ||
+        (response.operations.single.result != null &&
+            response.operations.single.result!.operationId !=
+                operation.operationId)) {
+      throw const FormatException(
+        'Operation status returned an invalid command identity.',
+      );
+    }
+    return response.operations.single;
   }
 }

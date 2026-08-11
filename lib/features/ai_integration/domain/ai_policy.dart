@@ -241,6 +241,12 @@ final class AiPrivacyPolicy {
         host.endsWith('.local')) {
       return true;
     }
+    if (host.contains(':')) {
+      final firstGroup = int.tryParse(host.split(':').first, radix: 16);
+      // IPv6 unique-local addresses are eligible for strict-local routing.
+      // The direct gateway still rejects metadata, rebinding, and unsafe peers.
+      return firstGroup != null && firstGroup & 0xfe00 == 0xfc00;
+    }
     final octets = host.split('.').map(int.tryParse).toList(growable: false);
     if (octets.length != 4 || octets.any((part) => part == null)) {
       return false;

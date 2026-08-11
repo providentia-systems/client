@@ -74,7 +74,7 @@ const outputs = new Map([
     path.join(generatedDirectory, 'generation-manifest.json'),
     json({
       generator: 'tool/generate_api_client.mjs',
-      generatorVersion: 4,
+      generatorVersion: 5,
       contract: '../../providentia-v1.json',
       contractVersion: contract.info.version,
       contractSha256,
@@ -129,7 +129,7 @@ function validateContract(document) {
   }
   if (
     document.info?.title !== 'Providentia API' ||
-    document.info?.version !== '1.12.0'
+    document.info?.version !== '1.13.2'
   ) {
     throw new Error('Unexpected API identity or version.');
   }
@@ -153,7 +153,9 @@ function validateContract(document) {
     ['get', '/api/v1/platform/administrators', 'listPlatformAdministrators'],
     ['get', '/api/v1/homes', 'listHomes'],
     ['get', '/api/v1/homes/{homeId}/stock', 'listHomeStock'],
+    ['post', '/api/v1/homes/{homeId}/stock-count-sessions/{sessionId}/cancel', 'cancelStockCountSession'],
     ['get', '/api/v1/homes/{homeId}/receipts', 'listReceipts'],
+    ['post', '/api/v1/homes/{homeId}/receipts/{receiptId}/lines/{lineId}/unresolve', 'unresolveReceiptLine'],
     ['get', '/api/v1/homes/{homeId}/shopping-lists', 'listShoppingLists'],
     ['get', '/api/v1/homes/{homeId}/ai/settings', 'getAiSettings'],
     ['get', '/api/v1/catalog-contributions', 'listPublishedCatalogContributions'],
@@ -219,6 +221,8 @@ function validateContract(document) {
     'InventoryBalance',
     'StockCountSession',
     'Receipt',
+    'ReceiptLineDecisionResult',
+    'SyncReceiptLineUnresolvePayload',
     'ShoppingList',
     'AiExtraction',
     'CatalogWorkbench',
@@ -353,6 +357,16 @@ function validateContract(document) {
     'createdAt',
     'lastSeenAt',
   ]);
+  const receiptApprovalStatuses =
+    document.components.schemas.ReceiptLine.properties?.approvalStatus?.enum ?? [];
+  if (!receiptApprovalStatuses.includes('unresolved')) {
+    throw new Error('ReceiptLine must expose the durable unresolved decision.');
+  }
+  const pantryCommands =
+    document.components.schemas.SyncPantryCommand.properties?.commandType?.enum ?? [];
+  if (!pantryCommands.includes('purchasing.receipt-line.unresolve')) {
+    throw new Error('SyncPantryCommand must expose receipt-line unresolve.');
+  }
   assertRequiredFields(document, 'RecipientHomeInvitation', [
     'id',
     'homeId',

@@ -8,6 +8,7 @@ enum ClientOperationState {
   blockedConflict('blocked_conflict'),
   blockedValidation('blocked_validation'),
   blockedAuthorization('blocked_authorization'),
+  superseded('superseded'),
   acknowledged('acknowledged');
 
   const ClientOperationState(this.storageValue);
@@ -66,6 +67,101 @@ enum PushResultKind {
 }
 
 enum RemoteChangeKind { upsert, tombstone }
+
+enum SyncConflictRemoteKind { upsert, tombstone, unavailable }
+
+enum SyncConflictResolutionChoice {
+  acceptRemote('accept_remote'),
+  reapplyLocal('reapply_local'),
+  reconcileCount('reconcile_count');
+
+  const SyncConflictResolutionChoice(this.storageValue);
+
+  final String storageValue;
+}
+
+/// Immutable evidence for the local intent which encountered a conflict.
+final class SyncConflictLocalEvidence {
+  SyncConflictLocalEvidence({
+    required this.operationId,
+    required this.operationType,
+    required Map<String, Object?> commandPayload,
+    required Map<String, Object?>? representation,
+    required this.isDeletion,
+  }) : commandPayload = Map<String, Object?>.unmodifiable(commandPayload),
+       representation = representation == null
+           ? null
+           : Map<String, Object?>.unmodifiable(representation);
+
+  final String operationId;
+  final String operationType;
+  final Map<String, Object?> commandPayload;
+  final Map<String, Object?>? representation;
+  final bool isDeletion;
+}
+
+/// Immutable authoritative evidence captured when the conflict was detected.
+final class SyncConflictRemoteEvidence {
+  SyncConflictRemoteEvidence({
+    required this.kind,
+    required this.revision,
+    required Map<String, Object?>? representation,
+    this.deletedAt,
+  }) : representation = representation == null
+           ? null
+           : Map<String, Object?>.unmodifiable(representation);
+
+  final SyncConflictRemoteKind kind;
+  final int? revision;
+  final Map<String, Object?>? representation;
+  final DateTime? deletedAt;
+}
+
+/// Home-scoped, unresolved synchronization evidence presented for review.
+final class SyncConflict {
+  const SyncConflict({
+    required this.id,
+    required this.homeId,
+    required this.entityType,
+    required this.entityId,
+    required this.kind,
+    required this.detectedAt,
+    required this.local,
+    required this.remote,
+  });
+
+  final String id;
+  final String homeId;
+  final String entityType;
+  final String entityId;
+  final String kind;
+  final DateTime detectedAt;
+  final SyncConflictLocalEvidence local;
+  final SyncConflictRemoteEvidence remote;
+
+  bool get requiresCountReconciliation =>
+      entityType == 'inventory-count-session' ||
+      entityType == 'inventory-count-line' ||
+      local.operationType.startsWith('inventory.count-');
+
+  bool get canAcceptRemote =>
+      !requiresCountReconciliation &&
+      remote.kind != SyncConflictRemoteKind.unavailable &&
+      remote.revision != null;
+
+  bool get canReapplyLocal =>
+      !requiresCountReconciliation && remote.revision != null;
+}
+
+/// Safe failure surfaced by explicit conflict-review operations.
+final class SyncConflictResolutionException implements Exception {
+  const SyncConflictResolutionException(this.safeMessage);
+
+  final String safeMessage;
+
+  @override
+  String toString() => safeMessage;
+}
 
 final class LocalMutation {
   factory LocalMutation({
@@ -199,6 +295,22 @@ final class PushResponse {
   const PushResponse({required this.results});
 
   final List<PushOperationResult> results;
+}
+
+final class OperationStatusItem {
+  const OperationStatusItem({required this.operationId, this.result});
+
+  final String operationId;
+  final PushOperationResult? result;
+
+  bool get isKnown => result != null;
+}
+
+final class OperationStatusResponse {
+  OperationStatusResponse({required List<OperationStatusItem> operations})
+    : operations = List<OperationStatusItem>.unmodifiable(operations);
+
+  final List<OperationStatusItem> operations;
 }
 
 final class RemoteChange {

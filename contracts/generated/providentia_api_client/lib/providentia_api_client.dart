@@ -1,6 +1,6 @@
 // GENERATED FILE - DO NOT EDIT.
 // Source: contracts/providentia-v1.json
-// Contract SHA-256: 30604d238f9c29f9d6b09dbf1819c84a475cb93e94728a8b2888f9b65a865a44
+// Contract SHA-256: 1b6b7f09240ace0ba6b7e7279259687569dfbacb112ea7dbd4094fe27ccd0108
 // ignore_for_file: use_null_aware_elements
 
 library;
@@ -521,6 +521,13 @@ final class ProvidentiaApiClient {
       operationId: "cancelLoginLink",
       method: "POST",
       pathTemplate: "/api/v1/auth/login-links/{requestId}/cancel",
+      multipart: false,
+    ),
+    "cancelStockCountSession": ApiOperation(
+      operationId: "cancelStockCountSession",
+      method: "POST",
+      pathTemplate:
+          "/api/v1/homes/{homeId}/stock-count-sessions/{sessionId}/cancel",
       multipart: false,
     ),
     "changeHomeMembershipRole": ApiOperation(
@@ -1383,6 +1390,13 @@ final class ProvidentiaApiClient {
       pathTemplate: "/api/v1/homes/{homeId}/ownership-transfer",
       multipart: false,
     ),
+    "unresolveReceiptLine": ApiOperation(
+      operationId: "unresolveReceiptLine",
+      method: "POST",
+      pathTemplate:
+          "/api/v1/homes/{homeId}/receipts/{receiptId}/lines/{lineId}/unresolve",
+      multipart: false,
+    ),
     "updateAiProviderProfile": ApiOperation(
       operationId: "updateAiProviderProfile",
       method: "PUT",
@@ -1724,6 +1738,25 @@ final class ProvidentiaApiClient {
     return invokeOperation(
       operationId: "cancelLoginLink",
       pathParameters: <String, String>{"requestId": requestId},
+      query: query,
+      headers: headers,
+      body: body,
+    );
+  }
+
+  Future<ApiResponse> cancelStockCountSession({
+    required String homeId,
+    required String sessionId,
+    required Map<String, Object?> body,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "cancelStockCountSession",
+      pathParameters: <String, String>{
+        "homeId": homeId,
+        "sessionId": sessionId,
+      },
       query: query,
       headers: headers,
       body: body,
@@ -3712,6 +3745,27 @@ final class ProvidentiaApiClient {
     return invokeOperation(
       operationId: "transferHomeOwnership",
       pathParameters: <String, String>{"homeId": homeId},
+      query: query,
+      headers: headers,
+      body: body,
+    );
+  }
+
+  Future<ApiResponse> unresolveReceiptLine({
+    required String homeId,
+    required String receiptId,
+    required String lineId,
+    required Map<String, Object?> body,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "unresolveReceiptLine",
+      pathParameters: <String, String>{
+        "homeId": homeId,
+        "receiptId": receiptId,
+        "lineId": lineId,
+      },
       query: query,
       headers: headers,
       body: body,

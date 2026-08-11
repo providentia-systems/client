@@ -67,6 +67,8 @@ final class InventoryController extends ChangeNotifier {
   InventoryViewState get state => _state;
   bool get canCreatePrivateProduct =>
       _productCreationRepository?.supportsPrivateHomeProductCreation == true;
+  bool get canAddCatalogProduct =>
+      _productCreationRepository?.supportsCatalogHomeProductCreation == true;
 
   List<InventoryItem> get visibleItems => _search.filter(
     _state.items,
@@ -230,6 +232,61 @@ final class InventoryController extends ChangeNotifier {
     }
   }
 
+  Future<bool> addCatalogProduct(InventoryItem item) async {
+    final repository = _productCreationRepository;
+    if (repository == null || !repository.supportsCatalogHomeProductCreation) {
+      _setProductCreationError(
+        'Catalog product selection is unavailable in this workspace.',
+      );
+      return false;
+    }
+    if (item.homeId != homeId || item.isHomeProduct) {
+      _setProductCreationError('Choose an unselected catalog product.');
+      return false;
+    }
+    if (_state.productCreationBusy) return false;
+    _setState(
+      InventoryViewState(
+        items: _state.items,
+        criteria: _state.criteria,
+        activeSession: _state.activeSession,
+        loading: _state.loading,
+        productCreationBusy: true,
+        productCreationNotice: _state.productCreationNotice,
+        safeError: _state.safeError,
+      ),
+    );
+    try {
+      final result = await repository.createCatalogHomeProduct(
+        CatalogHomeProductDraft.fromItem(item),
+      );
+      _setState(
+        InventoryViewState(
+          items: _state.items,
+          criteria: _state.criteria,
+          activeSession: _state.activeSession,
+          loading: _state.loading,
+          productCreationNotice: result.awaitsServerConfirmation
+              ? 'The catalog product is added locally and queued; server confirmation is pending.'
+              : 'The catalog product is synchronized.',
+          safeError: _state.safeError,
+        ),
+      );
+      return true;
+    } on InventoryProductCreationException catch (error) {
+      _setProductCreationError(error.safeMessage);
+      return false;
+    } on ArgumentError catch (_) {
+      _setProductCreationError('Refresh the item master and choose again.');
+      return false;
+    } catch (_) {
+      _setProductCreationError(
+        'The catalog product could not be added safely.',
+      );
+      return false;
+    }
+  }
+
   Future<void> saveSession(StockCountSession session) {
     if (session.homeId != homeId) {
       throw StateError('Cannot save a count session for another home.');
@@ -271,6 +328,75 @@ final class InventoryController extends ChangeNotifier {
           source: CountSource.manual,
           observedQuantity: observedQuantity,
         ),
+      ),
+    );
+  }
+
+  /// Records a human-confirmed photo proposal through the same ordinary
+  /// count-line repository boundary used by manual counts. The photo reference
+  /// is deliberately opaque and ephemeral; image bytes never enter inventory
+  /// projections or the synchronization outbox.
+  Future<void> recordPhotoCount({
+    required InventoryItem item,
+    required double observedQuantity,
+    required String proposalId,
+  }) async {
+    final session = _state.activeSession;
+    if (session == null || session.status != CountSessionStatus.open) {
+      throw StateError('Start a count session before recording photo counts.');
+    }
+    if (item.homeId != homeId || !item.isHomeProduct) {
+      throw StateError('Photo counts require a product in the active home.');
+    }
+    if (!observedQuantity.isFinite || observedQuantity < 0) {
+      throw ArgumentError.value(
+        observedQuantity,
+        'observedQuantity',
+        'must be finite and non-negative',
+      );
+    }
+    final photoId = proposalId.trim();
+    if (photoId.isEmpty) {
+      throw ArgumentError.value(proposalId, 'proposalId', 'must not be empty');
+    }
+    final withPhoto = session.attachPhoto(
+      StockPhotoReference(
+        id: photoId,
+        localReference: 'ephemeral://stock-photo-review',
+        addedAt: _clock().toUtc(),
+      ),
+    );
+    final updated = withPhoto.recordLine(
+      StockCountLine(
+        id: _idGenerator(),
+        itemId: item.id,
+        status: CountLineStatus.confirmed,
+        source: CountSource.photo,
+        observedQuantity: observedQuantity,
+        photoId: photoId,
+      ),
+    );
+    await saveSession(updated);
+    // Keep only non-sensitive ordinary count data in presentation state. The
+    // stock-photo controller retains previews until explicit close/cancel.
+    _setState(
+      InventoryViewState(
+        items: _state.items,
+        criteria: _state.criteria,
+        activeSession: StockCountSession(
+          id: updated.id,
+          homeId: updated.homeId,
+          locationId: updated.locationId,
+          startedAt: updated.startedAt,
+          status: updated.status,
+          closedAt: updated.closedAt,
+          lines: updated.lines,
+        ),
+        loading: _state.loading,
+        productCreationBusy: _state.productCreationBusy,
+        productCreationNotice: _state.productCreationNotice,
+        productCreationError: _state.productCreationError,
+        safeError: _state.safeError,
       ),
     );
   }

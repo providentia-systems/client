@@ -1,8 +1,8 @@
 # Reporting and data-governance integration
 
 This client slice implements the P3 report and privacy-request boundaries for
-the pinned backend API `1.12.0`, SHA-256
-`30604d238f9c29f9d6b09dbf1819c84a475cb93e94728a8b2888f9b65a865a44`.
+the pinned backend API `1.13.2`, SHA-256
+`1b6b7f09240ace0ba6b7e7279259687569dfbacb112ea7dbd4094fe27ccd0108`.
 It does not change generated contract bytes. Both slices are composed in the
 authenticated production Account & access flow.
 

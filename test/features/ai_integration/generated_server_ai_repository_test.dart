@@ -35,6 +35,15 @@ void main() {
       expect(workspace.homeId, 'home-1');
       expect(workspace.settings.revision, 4);
       expect(workspace.settings.humanReviewRequired, isTrue);
+      expect(workspace.settings.serverPersistsUploadedMedia, isFalse);
+      expect(
+        workspace.settings.mediaHandling.directExtractionUpload,
+        AiDirectExtractionUpload.transientNotPersisted,
+      );
+      expect(
+        workspace.settings.mediaHandling.privateMediaStorage,
+        AiPrivateMediaStorage.explicitEncryptedOptIn,
+      );
       expect(workspace.profiles, hasLength(2));
       expect(workspace.profiles.first.kind, AiProviderKind.anthropic);
       expect(
@@ -47,6 +56,57 @@ void main() {
       expect(workspace.policy.extractionProfileIds, <String>['profile-1']);
     },
   );
+
+  for (final (name, unsafeSettings) in <(String, Map<String, Object?>)>[
+    (
+      'persisted direct extraction',
+      <String, Object?>{..._settings(), 'serverPersistsUploadedMedia': true},
+    ),
+    (
+      'plaintext private media',
+      <String, Object?>{
+        ..._settings(),
+        'mediaHandling': <String, Object?>{
+          ..._mediaHandling(),
+          'plaintextMediaAtRest': true,
+        },
+      },
+    ),
+    (
+      'provider transmission without consent',
+      <String, Object?>{
+        ..._settings(),
+        'mediaHandling': <String, Object?>{
+          ..._mediaHandling(),
+          'cloudProviderTransmissionRequiresConsent': false,
+        },
+      },
+    ),
+  ]) {
+    test('$name media handling fails closed', () async {
+      final repository = GeneratedServerAiRepository(
+        _client((request) async {
+          return switch (request.url.path.split('/').last) {
+            'settings' => _json(unsafeSettings),
+            'profiles' => _json(<String, Object?>{'items': <Object?>[]}),
+            'policy' => _json(_policy()),
+            _ => throw StateError('Unexpected ${request.url.path}'),
+          };
+        }),
+      );
+
+      await expectLater(
+        repository.loadWorkspace(homeId: 'home-1'),
+        throwsA(
+          isA<AiServerException>().having(
+            (error) => error.kind,
+            'kind',
+            AiServerFailureKind.invalidResponse,
+          ),
+        ),
+      );
+    });
+  }
 
   test('nested foreign home attribution fails closed', () async {
     final repository = GeneratedServerAiRepository(
@@ -210,6 +270,52 @@ void main() {
     );
   });
 
+  for (final statusCode in <int>[403, 404]) {
+    test(
+      'workspace load and settings write map HTTP $statusCode to denial',
+      () async {
+        final repository = GeneratedServerAiRepository(
+          _client(
+            (_) async => _json(<String, Object?>{
+              'type': 'about:blank',
+              'title': statusCode == 403 ? 'Forbidden' : 'Not Found',
+              'status': statusCode,
+              'detail': 'private authorization detail',
+            }, statusCode: statusCode),
+          ),
+        );
+        final denial = isA<AiServerException>()
+            .having(
+              (error) => error.kind,
+              'kind',
+              AiServerFailureKind.authorizationDenied,
+            )
+            .having(
+              (error) => error.safeMessage,
+              'safeMessage',
+              isNot(contains('private authorization detail')),
+            );
+
+        await expectLater(
+          repository.loadWorkspace(homeId: 'home-1'),
+          throwsA(denial),
+        );
+        await expectLater(
+          repository.updateSettings(
+            homeId: 'home-1',
+            update: const AiSettingsUpdate(
+              mode: AiServerMode.serverProxy,
+              provider: 'openai',
+              model: 'gpt-5-mini',
+              expectedRevision: 4,
+            ),
+          ),
+          throwsA(denial),
+        );
+      },
+    );
+  }
+
   test('malformed and forbidden responses use safe typed failures', () async {
     final malformed = GeneratedServerAiRepository(
       _client(
@@ -233,35 +339,37 @@ void main() {
       ),
     );
 
-    final forbidden = GeneratedServerAiRepository(
-      _client(
-        (_) async => _json(<String, Object?>{
-          'type': 'forbidden',
-          'title': 'Internal authorization detail',
-          'status': 403,
-          'detail': 'private policy internals',
-        }, statusCode: 403),
-      ),
-    );
-    await expectLater(
-      forbidden.loadExtractionReview(
-        homeId: 'home-1',
-        extractionId: _extractionId,
-      ),
-      throwsA(
-        isA<AiServerException>()
-            .having(
-              (error) => error.kind,
-              'kind',
-              AiServerFailureKind.forbidden,
-            )
-            .having(
-              (error) => error.safeMessage,
-              'safeMessage',
-              isNot(contains('private policy internals')),
-            ),
-      ),
-    );
+    for (final statusCode in <int>[403, 404]) {
+      final forbidden = GeneratedServerAiRepository(
+        _client(
+          (_) async => _json(<String, Object?>{
+            'type': 'forbidden',
+            'title': 'Internal authorization detail',
+            'status': statusCode,
+            'detail': 'private policy internals',
+          }, statusCode: statusCode),
+        ),
+      );
+      await expectLater(
+        forbidden.loadExtractionReview(
+          homeId: 'home-1',
+          extractionId: _extractionId,
+        ),
+        throwsA(
+          isA<AiServerException>()
+              .having(
+                (error) => error.kind,
+                'kind',
+                AiServerFailureKind.authorizationDenied,
+              )
+              .having(
+                (error) => error.safeMessage,
+                'safeMessage',
+                isNot(contains('private policy internals')),
+              ),
+        ),
+      );
+    }
   });
 }
 
@@ -295,9 +403,18 @@ Map<String, Object?> _settings({int revision = 4}) => <String, Object?>{
       <String, Object?>{'id': id, 'requiresCredential': id != 'ollama'},
   ],
   'cloudByokOnNativeClients': false,
-  'serverPersistsUploadedMedia': true,
+  'serverPersistsUploadedMedia': false,
+  'mediaHandling': _mediaHandling(),
   'humanReviewRequired': true,
   'credentialEncryptionAvailable': true,
+};
+
+Map<String, Object?> _mediaHandling() => <String, Object?>{
+  'directExtractionUpload': 'transient_not_persisted',
+  'privateMediaStorage': 'explicit_encrypted_opt_in',
+  'privateMediaRetentionOptions': <Object?>['transient', 'retained'],
+  'plaintextMediaAtRest': false,
+  'cloudProviderTransmissionRequiresConsent': true,
 };
 
 Map<String, Object?> _profile({

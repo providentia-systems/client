@@ -13,10 +13,10 @@ local `providentia_api_client` Dart package.
 
 ## Current pin
 
-- Client OpenAPI version: `1.12.0`
+- Client OpenAPI version: `1.13.2`
 - Contract SHA-256:
-  `30604d238f9c29f9d6b09dbf1819c84a475cb93e94728a8b2888f9b65a865a44`
-- Declared/generated operations: 156
+  `1b6b7f09240ace0ba6b7e7279259687569dfbacb112ea7dbd4094fe27ccd0108`
+- Declared/generated operations: 158
 
 The login-link onboarding, account-management, and current household
 integration surfaces are deliberately adopted as one compatible boundary.
@@ -36,7 +36,12 @@ Application-owned adapters compose:
 - home-scoped inventory, purchasing, shopping, reporting, and account/home
   data-governance operations with exact permission checks; and
 - home-scoped AI settings, profiles, policy, sanitized extraction review, and
-  a non-mutating handoff that still requires an ordinary domain command.
+  non-mutating review handoffs. One to eight ordered receipt pages and stock
+  photos use the bounded multipart extraction contract. A separate receipt
+  confirmation may queue an ordinary draft, after which matching, product
+  selection/private creation, approval, and explicit commit remain ordinary
+  purchasing commands. Stock candidates become only ordinary count-line
+  commands after a user supplies a concrete quantity.
 
 These application-owned adapters are composed into the signed-in production
 navigation and covered by focused transport, controller, privacy, and
@@ -50,9 +55,26 @@ retained for session identity, device management, and synchronization.
 
 Generated methods show what the pinned server contract can express; they do
 not prove that every household operation is reachable from a visible screen.
-The current inventory workspaces still include local projections while the
-typed synchronization boundary is adopted incrementally. Sync protocol v2 and
-paged bootstrap support are retained in the generated gateway.
+Inventory workspaces commit through local projections and the durable outbox.
+Sync protocol v2, revision-bound stock-count cancellation, and paged bootstrap
+support are retained in the generated gateway.
+
+Production composes verified shopping-suggestion reads, explanations, and
+explicit Add to list. Suggestion feedback, existing-line quantity edits, and
+authoritative cross-device suggestion provenance remain deferred even where a
+generated method exists; generation is not a retry/idempotency guarantee.
+
+Direct per-item product-identity contribution is distinct from receipt-driven
+catalog publication. Receipt matching does not submit a sanitized catalog
+proposal or publish a global alias. Those general Phase 7 workflows remain
+unimplemented and may not be inferred from moderation or contribution methods
+in the generated client.
+
+The generated operation-status lookup is integrated into synchronization
+response-loss recovery. A known immutable result is applied once, an unknown
+operation is retried with the exact same operation ID, unavailable or malformed
+status is deferred safely, and HTTP 403/404 is treated as a purge-class
+authorization outcome.
 
 Use:
 

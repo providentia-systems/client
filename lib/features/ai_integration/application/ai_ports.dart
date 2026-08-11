@@ -22,6 +22,16 @@ final class AiGatewayReadiness {
   bool get isReady => state == AiGatewayReadinessState.ready;
 }
 
+/// Terminal home-scoped authorization loss reported by a provider transport.
+/// It intentionally carries no backend problem detail because a foreign or
+/// revoked home is disclosed through the same non-identifying boundary.
+final class AiGatewayAuthorizationDeniedException implements Exception {
+  const AiGatewayAuthorizationDeniedException();
+
+  String get safeMessage =>
+      'Access to this household changed. AI processing was stopped.';
+}
+
 abstract interface class CredentialVault {
   bool get supportsNativeSecrets;
 

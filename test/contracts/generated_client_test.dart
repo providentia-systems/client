@@ -151,8 +151,8 @@ void main() {
       expect(await client.getMetrics(), 'providentia_up 1\n');
     });
 
-    test('publishes the complete API 1.12 operation registry', () {
-      expect(ProvidentiaApiClient.operations, hasLength(156));
+    test('publishes the complete API 1.13.2 operation registry', () {
+      expect(ProvidentiaApiClient.operations, hasLength(158));
       expect(
         ProvidentiaApiClient.operations['createAiExtraction'],
         isA<ApiOperation>()
@@ -177,7 +177,9 @@ void main() {
           'listPendingHomeInvitations',
           'listPlatformAdministrators',
           'listHomeStock',
+          'cancelStockCountSession',
           'commitReceipt',
+          'unresolveReceiptLine',
           'createShoppingSuggestionRun',
           'getInventoryReport',
         ]),

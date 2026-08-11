@@ -2,13 +2,13 @@
 
 - Date: 2026-08-11
 - Flutter target: `1.0.0+10`
-- Authoritative backend review: `providentia-systems/backend` API `1.12.0`
+- Authoritative backend review: `providentia-systems/backend` API `1.13.2`
 
 ## Contract baseline
 
-The Flutter repository pins the reviewed OpenAPI `1.12.0` artifact, validates
+The Flutter repository pins the reviewed OpenAPI `1.13.2` artifact, validates
 its SHA-256 lock, and deterministically generates a callable Dart method and
-operation-registry entry for all 156 published operations. Generated transport
+operation-registry entry for all 158 published operations. Generated transport
 stays behind application-owned adapters so authentication, authorization,
 session storage, and home lifecycle rules are explicit and testable.
 
@@ -32,7 +32,8 @@ contract update may not regress those semantics while adopting onboarding.
 | Home governance | Editable name/locale/currency/timezone; owner/manager/member/viewer sections and actions derive from server permission policies |
 | Platform administration | Visible only for current users with the platform-administrator role; supports list/grant/confirmed revoke and handles the final-active-admin safeguard |
 | Catalog sharing and administration | Active-home permissions expose three independent, revision-bound consent choices without implicit submission. Product identity additionally requires server consent, an active-home item, exact allowlisted preview, and fresh per-item checkbox. Current-user reviewer/curator roles expose real proposal, contribution, conflict, validated icon metadata, merge, and reversal workflows with permission/role/session-loss dismissal. Live acceptance remains open |
-| Household AI | Account & access exposes a route only for the active home's exact `ai.read`; `ai.use` and `ai.manage` remain independent. One selected image is re-encoded, original/prepared bytes are route-owned and cleared, every candidate is explicitly reviewed, and the result is a non-mutating handoff to ordinary purchasing/inventory commands |
+| Household AI and assisted intake | Account & access exposes server AI only for exact active-home permissions. Receipt intake supports one to eight ordered local previews with rotate/crop, sanitization, digest-bound consent, review, and ordinary draft/match/explicit commit. Inventory stock-photo counting opens an ordinary session first, accepts one to eight images, and writes only reviewed count lines. A selected verified direct-local stock route is used on supported native platforms and fails closed when unavailable or invalid; server-proxy use requires an explicit switch. Receipt direct-local AI is not composed. Ephemeral bytes are route-owned and cleared |
+| Shopping suggestions | Verified online suggestion reads, explanations, offline cache, and explicit Add to list are composed. Add-time quantity selection is available; feedback, edits to existing-line quantity, and authoritative cross-device suggestion provenance remain deferred |
 | Browser/native platforms | Web, Android, iOS, Windows, macOS, and Linux share the same polling/exchange authority; platform return links are convenience only |
 | Release engineering | Fail-closed signing/package/deployment workflows remain for Android, Apple, Windows, Linux, web, and browser acceptance |
 
@@ -41,7 +42,7 @@ compatibility surfaces do not satisfy this acceptance boundary.
 
 ## Connected acceptance boundary
 
-Against the API `1.12.0` development stack, the production composition can:
+Against the API `1.13.2` development stack, the production composition can:
 
 1. start and approve a neutral login-link request for a new or existing email;
 2. complete the private exchange in the originating client and bootstrap the
@@ -61,10 +62,12 @@ Against the API `1.12.0` development stack, the production composition can:
    `reports.read` permission;
 10. request account exports/erasure for any authenticated account and expose
     home data-governance actions only from `data.export`/`data.erasure`;
-11. load the active home's AI workspace with exact capabilities, explicitly
-    consent to one sanitized image, review every candidate, and receive a
-    non-mutating ordinary-command handoff; and
-12. exercise health plus protocol-v2/paged synchronization foundations.
+11. load the active home's AI workspace with exact capabilities, review an
+    ordered multi-page receipt, explicitly confirm its ordinary draft, match
+    lines, and leave receipt commit as a separate explicit action;
+12. open an ordinary stock count, review bounded multi-image candidates with
+    concrete quantities, and explicitly close or movement-free cancel it; and
+13. exercise health plus protocol-v2/paged synchronization foundations.
 
 The backend's canonical
 [client/user testing runbook](https://github.com/providentia-systems/backend/blob/main/docs/deployment/client-user-testing.md)
@@ -74,13 +77,26 @@ role isolation, and final-administrator protection.
 
 ## Remaining production gates
 
-The current login-link and account-management boundary does not make every
-Phase 5–8 workspace cross-device authoritative. Inventory, count, receipt,
-shopping, catalog, private-product, and feedback models must finish their typed
-synchronization adoption and two-device convergence evidence. Household AI is
-production-composed through the backend contract, but live provider/backend
-acceptance and any later ordinary-command draft integration remain open; review
-never auto-mutates inventory or purchases.
+Inventory, count, receipt, and shopping mutations now use the closed typed
+synchronization boundary, including movement-free count cancellation, with
+deterministic retry and two-database convergence coverage. This does not replace
+live two-device/backend acceptance for household, catalog, private-product, and
+feedback workflows. Household AI is production-composed through the backend
+contract, but live provider/backend acceptance remains open; review never
+auto-mutates inventory or purchases.
+
+The strict-local direct route is production-composed only for stock-photo
+counting on supported native platforms. Receipt Ollama may be configured behind
+the server proxy, but direct-local receipt extraction is not a delivered
+privacy route. General sanitized catalog proposals from receipt/stock matching
+and global alias publication remain Phase 7 work. Verified shopping
+suggestions are visible, while feedback, existing-line quantity edit, and
+cross-device suggestion provenance remain deferred.
+
+Operation-status response-loss recovery applies known immutable results once,
+exact-retries unknown operations with their existing IDs, defers unavailable or
+malformed status safely, and treats HTTP 403/404 as authorization loss. Focused
+recovery, coordinator, gateway, database, and compatibility suites are green.
 
 Catalog consent settings, explicit per-item product-identity contribution, and
 the role-scoped moderation workbench are now production-composed with focused
@@ -114,13 +130,13 @@ same-site cookie topology required by browser sessions.
 
 ## Phase exit criteria
 
-Phase 9 exits when the complete API `1.12.0` login-link, session, home,
+Phase 9 exits when the complete API `1.13.2` login-link, session, home,
 invitation, role, and administration path passes against a live deployment on
 every selected platform, including expiry, retry, revoked membership, and
 cross-home isolation.
 
-Phase 10 exits only after typed synchronization closes the remaining household
-gates, two-device offline tests prove no duplicate movements, queued AI
-recovery is idempotent, and every selected platform has signed artifacts plus
+Phase 10 exits only after the implemented typed synchronization passes live
+two-device acceptance without duplicate movements, queued AI recovery is
+idempotent in staging, and every selected platform has signed artifacts plus
 independent device/browser acceptance evidence. Workflows and placeholders are
 not release evidence.

@@ -32,7 +32,10 @@ abstract interface class LocalSyncStore {
 
   Future<void> markSyncing(List<String> operationIds);
 
-  Future<void> recoverInterruptedOperations({required DateTime now});
+  Future<List<String>> recoverInterruptedOperations({
+    required String homeId,
+    required DateTime now,
+  });
 
   Future<void> applyPushResults({
     required List<PushOperationResult> results,
@@ -61,11 +64,40 @@ abstract interface class LocalSyncStore {
   });
 }
 
+/// Atomic persistence boundary for explicit, home-scoped conflict review.
+abstract interface class LocalSyncConflictStore {
+  Stream<List<SyncConflict>> watchUnresolvedConflicts({required String homeId});
+
+  Future<List<SyncConflict>> unresolvedConflicts({required String homeId});
+
+  Future<void> acceptRemoteConflict({
+    required String homeId,
+    required String conflictId,
+    required DateTime resolvedAt,
+  });
+
+  Future<void> reapplyLocalConflict({
+    required String homeId,
+    required String conflictId,
+    required String newOperationId,
+    required DateTime resolvedAt,
+  });
+
+  Future<void> reconcileCountConflict({
+    required String homeId,
+    required String conflictId,
+    required DateTime resolvedAt,
+  });
+}
+
 /// Convenience aggregate implemented by the Drift adapter.
 ///
 /// Consumers should request the smallest port they need.
 abstract interface class LocalSyncRepository
-    implements LocalMutationRepository, LocalSyncStore {}
+    implements
+        LocalMutationRepository,
+        LocalSyncStore,
+        LocalSyncConflictStore {}
 
 abstract interface class SyncRemoteGateway {
   Future<PullPage> bootstrap({required String homeId});
@@ -74,6 +106,12 @@ abstract interface class SyncRemoteGateway {
     required String homeId,
     required String? lastPulledCursor,
     required List<PendingClientOperation> operations,
+  });
+
+  Future<OperationStatusResponse> operationStatuses({
+    required String homeId,
+    required String deviceId,
+    required List<String> operationIds,
   });
 
   Future<PullPage> pull({required String homeId, String? afterCursor});
@@ -103,6 +141,8 @@ abstract interface class SyncMetrics {
   });
 
   void recordFailure({required String classification});
+
+  void recordDuration({required Duration elapsed});
 }
 
 final class NoopSyncMetrics implements SyncMetrics {
@@ -113,6 +153,9 @@ final class NoopSyncMetrics implements SyncMetrics {
 
   @override
   void recordFailure({required String classification}) {}
+
+  @override
+  void recordDuration({required Duration elapsed}) {}
 
   @override
   void recordSuccess({

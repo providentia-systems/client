@@ -4,6 +4,7 @@ import 'package:drift/drift.dart' hide isNotNull, isNull;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:providentia/core/database/app_database.dart';
+import 'package:providentia/core/database/client_local_record_types.dart';
 import 'package:providentia/core/database/drift_local_sync_repository.dart';
 import 'package:providentia/core/synchronization/sync_models.dart';
 import 'package:providentia/core/synchronization/sync_ports.dart';
@@ -188,17 +189,27 @@ void main() {
 
   test('startup recovery requeues a process-death syncing operation', () async {
     await repository.commitLocalMutation(_mutation());
-    await repository.markSyncing(const <String>['operation-1']);
+    await repository.commitLocalMutation(
+      _mutation(operationId: 'operation-2', homeId: 'home-2'),
+    );
+    await repository.markSyncing(const <String>['operation-1', 'operation-2']);
 
-    await repository.recoverInterruptedOperations(
+    final recovered = await repository.recoverInterruptedOperations(
+      homeId: 'home-1',
       now: DateTime.utc(2026, 7, 29, 13),
     );
 
-    final operation = await database
-        .select(database.clientOperations)
-        .getSingle();
+    expect(recovered, const <String>['operation-1']);
+    final operations = await database.select(database.clientOperations).get();
+    final operation = operations.singleWhere(
+      (row) => row.operationId == 'operation-1',
+    );
     expect(operation.state, ClientOperationState.pending.storageValue);
     expect(operation.lastSafeError, contains('interrupted'));
+    expect(
+      operations.singleWhere((row) => row.operationId == 'operation-2').state,
+      ClientOperationState.syncing.storageValue,
+    );
   });
 
   test(
@@ -552,6 +563,61 @@ void main() {
     },
   );
 
+  test(
+    'bootstrap retains separately verified shopping cache and line links',
+    () async {
+      for (final (type, id) in <(String, String)>[
+        ('shopping-suggestion-cache-v1', 'verified-feed'),
+        ('shopping-suggestion-line-link-v1', 'line-1'),
+      ]) {
+        await database
+            .into(database.localRecords)
+            .insert(
+              LocalRecordsCompanion.insert(
+                homeId: 'home-1',
+                entityType: type,
+                entityId: id,
+                payload: '{}',
+                updatedAt: clock,
+              ),
+            );
+      }
+      await database
+          .into(database.localRecords)
+          .insert(
+            LocalRecordsCompanion.insert(
+              homeId: 'home-1',
+              entityType: 'stale-server-projection',
+              entityId: 'stale',
+              payload: '{}',
+              updatedAt: clock,
+            ),
+          );
+
+      await repository.replaceWithBootstrap(
+        homeId: 'home-1',
+        page: _page(
+          fromCursor: 'snapshot-cursor',
+          changes: const <RemoteChange>[],
+          pageCursor: 'snapshot-cursor',
+        ),
+      );
+
+      final records = await database.select(database.localRecords).get();
+      expect(
+        records.map((record) => record.entityType),
+        containsAll(<String>[
+          'shopping-suggestion-cache-v1',
+          'shopping-suggestion-line-link-v1',
+        ]),
+      );
+      expect(
+        records.map((record) => record.entityType),
+        isNot(contains('stale-server-projection')),
+      );
+    },
+  );
+
   test('resync replays multiple intents in deterministic order', () async {
     await repository.commitLocalMutation(
       _mutation(
@@ -702,6 +768,71 @@ void main() {
     },
   );
 
+  test(
+    'bootstrap preserves pending unresolved decision and optimistic receipt parent',
+    () async {
+      await repository.commitLocalMutation(
+        _mutation(
+          entityType: 'purchasing-receipt-line',
+          entityId: 'line-unresolved',
+          operationType: 'purchasing.receipt-line.unresolve',
+          baseRevision: 2,
+          payload: const <String, Object?>{'receiptId': 'receipt-unresolved'},
+        ),
+      );
+      await database
+          .into(database.localRecords)
+          .insertOnConflictUpdate(
+            LocalRecordsCompanion.insert(
+              homeId: 'home-1',
+              entityType: 'purchasing-receipt',
+              entityId: 'receipt-unresolved',
+              payload: jsonEncode(const <String, Object?>{
+                'status': 'draft-optimistic',
+              }),
+              revision: const Value<int>(4),
+              updatedAt: DateTime.utc(2026, 7, 29, 13),
+              synchronizedAt: const Value<DateTime?>(null),
+            ),
+          );
+
+      await repository.replaceWithBootstrap(
+        homeId: 'home-1',
+        page: _page(
+          fromCursor: 'snapshot-cursor',
+          changes: <RemoteChange>[
+            _change(
+              entityType: 'purchasing-receipt',
+              entityId: 'receipt-unresolved',
+              revision: 3,
+              cursor: 'snapshot-cursor',
+              payload: const <String, Object?>{'status': 'draft-server'},
+            ),
+          ],
+          pageCursor: 'snapshot-cursor',
+        ),
+      );
+
+      final records = await database.select(database.localRecords).get();
+      final parent = records.singleWhere(
+        (record) => record.entityType == 'purchasing-receipt',
+      );
+      expect(jsonDecode(parent.payload), <String, Object?>{
+        'status': 'draft-optimistic',
+      });
+      expect(parent.revision, 4);
+      expect(parent.synchronizedAt, isNull);
+      expect(
+        records.any(
+          (record) =>
+              record.entityType == 'purchasing-receipt-line' &&
+              record.entityId == 'line-unresolved',
+        ),
+        isTrue,
+      );
+    },
+  );
+
   test('summary stream is isolated to its requested home', () async {
     await repository.commitLocalMutation(_mutation());
     await repository.commitLocalMutation(
@@ -787,6 +918,79 @@ void main() {
       clock.microsecondsSinceEpoch,
     );
   });
+
+  test(
+    'bootstrap preserves local AI settings and rejects server injection',
+    () async {
+      for (final (type, id) in <(String, String)>[
+        (ClientLocalRecordTypes.strictLocalAiConfiguration, 'profile-1'),
+        (ClientLocalRecordTypes.strictLocalAiSelection, 'active'),
+      ]) {
+        await database
+            .into(database.localRecords)
+            .insert(
+              LocalRecordsCompanion.insert(
+                homeId: 'home-1',
+                entityType: type,
+                entityId: id,
+                payload: jsonEncode(<String, Object?>{'id': id}),
+                updatedAt: clock,
+              ),
+            );
+      }
+
+      await repository.replaceWithBootstrap(
+        homeId: 'home-1',
+        page: _page(
+          fromCursor: 'snapshot-cursor',
+          changes: const <RemoteChange>[],
+          pageCursor: 'snapshot-cursor',
+        ),
+      );
+      expect(await database.select(database.localRecords).get(), hasLength(2));
+
+      for (final type in <String>{
+        ClientLocalRecordTypes.strictLocalAiConfiguration,
+        ClientLocalRecordTypes.strictLocalAiSelection,
+      }) {
+        await expectLater(
+          repository.replaceWithBootstrap(
+            homeId: 'home-1',
+            page: _page(
+              fromCursor: 'snapshot-cursor-2',
+              changes: <RemoteChange>[
+                _change(
+                  entityType: type,
+                  entityId: 'server-injected',
+                  cursor: 'snapshot-cursor-2',
+                ),
+              ],
+              pageCursor: 'snapshot-cursor-2',
+            ),
+          ),
+          throwsStateError,
+        );
+      }
+
+      await expectLater(
+        repository.applyPullPage(
+          homeId: 'home-1',
+          page: _page(
+            fromCursor: 'snapshot-cursor',
+            changes: <RemoteChange>[
+              _change(
+                entityType: ClientLocalRecordTypes.strictLocalAiConfiguration,
+                entityId: 'server-injected',
+                cursor: 'cursor-remote-injection',
+              ),
+            ],
+            pageCursor: 'cursor-remote-injection',
+          ),
+        ),
+        throwsStateError,
+      );
+    },
+  );
 }
 
 LocalMutation _mutation({

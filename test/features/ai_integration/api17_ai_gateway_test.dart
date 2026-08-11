@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -146,6 +147,68 @@ void main() {
     },
   );
 
+  for (final statusCode in <int>[403, 404]) {
+    test('readiness HTTP $statusCode is terminal authorization denial', () {
+      const privateDetail = 'private household membership diagnostics';
+      final gateway = Api17AiGateway(
+        client: _client(
+          (_) async => _json(<String, Object?>{
+            'type': 'about:blank',
+            'title': statusCode == 403 ? 'Forbidden' : 'Not Found',
+            'status': statusCode,
+            'detail': privateDetail,
+          }, statusCode: statusCode),
+        ),
+        mediaReader: _MediaReader(_bytes),
+      );
+
+      expect(
+        gateway.readiness(_profile()),
+        throwsA(
+          isA<AiGatewayAuthorizationDeniedException>().having(
+            (error) => error.safeMessage,
+            'safeMessage',
+            isNot(contains(privateDetail)),
+          ),
+        ),
+      );
+    });
+
+    for (final kind in AiExtractionKind.values) {
+      test(
+        '${kind.name} extraction HTTP $statusCode is terminal authorization denial',
+        () {
+          const privateDetail = 'private household extraction diagnostics';
+          final gateway = Api17AiGateway(
+            client: _client(
+              (_) async => _json(<String, Object?>{
+                'type': 'about:blank',
+                'title': statusCode == 403 ? 'Forbidden' : 'Not Found',
+                'status': statusCode,
+                'detail': privateDetail,
+              }, statusCode: statusCode),
+            ),
+            mediaReader: _MediaReader(_bytes),
+          );
+
+          final extraction = kind == AiExtractionKind.receipt
+              ? gateway.extractReceipt(_request(kind))
+              : gateway.extractStockPhoto(_request(kind));
+          expect(
+            extraction,
+            throwsA(
+              isA<AiGatewayAuthorizationDeniedException>().having(
+                (error) => error.safeMessage,
+                'safeMessage',
+                isNot(contains(privateDetail)),
+              ),
+            ),
+          );
+        },
+      );
+    }
+  }
+
   test(
     'readiness uses provider kind, not household profile identity',
     () async {
@@ -223,7 +286,7 @@ void main() {
   );
 
   test(
-    'API 1.7 rejects batches and unprepared media before transmission',
+    'API 1.12 rejects empty batches and unprepared media before transmission',
     () async {
       final gateway = Api17AiGateway(
         client: _client((_) async => throw StateError('must not call server')),
@@ -238,7 +301,7 @@ void main() {
                 ),
               )
               as AiExtractionFailure<ReceiptProposal>;
-      expect(batchFailure.code, 'api17_single_image_only');
+      expect(batchFailure.code, 'api17_image_limit');
 
       final mediaFailure =
           await gateway.extractReceipt(
@@ -251,6 +314,115 @@ void main() {
       expect(mediaFailure.code, 'unsupported_media_type');
     },
   );
+
+  test(
+    'multi-image extraction preserves order and validates aggregate binding',
+    () async {
+      final secondBytes = Uint8List.fromList(
+        List<int>.generate(16, (index) => index + 16),
+      );
+      final second = PreparedAiMedia(
+        sourceMediaId: 'source-2',
+        ephemeralReference: 'memory://prepared-2',
+        previewReference: 'memory://preview-2',
+        sha256: sha256.convert(secondBytes).toString(),
+        mimeType: 'image/png',
+        byteLength: secondBytes.length,
+        width: 800,
+        height: 600,
+        pageIndex: 1,
+      );
+      final aggregate = sha256.convert(<int>[
+        ..._bytes,
+        ...secondBytes,
+      ]).toString();
+      final duplicateCandidate =
+          (_extraction('stock')['candidates']! as List<Object?>).single;
+      final gateway = Api17AiGateway(
+        client: _client((request) async {
+          if (request.method == 'POST') {
+            final body = latin1.decode(request.bodyBytes, allowInvalid: true);
+            expect(
+              body.indexOf('name="image"'),
+              lessThan(body.indexOf('name="images"')),
+            );
+            expect(body, contains('name="targetId"'));
+            expect(body, contains('count-session-1'));
+            return _json(
+              _created(candidateCount: 2, observationCount: 2),
+              statusCode: 201,
+            );
+          }
+          return _json(<String, Object?>{
+            ..._extraction('stock'),
+            'targetId': 'count-session-1',
+            'inputSha256': aggregate,
+            'inputByteCount': 32,
+            'candidates': <Object?>[
+              duplicateCandidate,
+              <String, Object?>{
+                ...(duplicateCandidate! as Map<String, Object?>),
+                'position': 1,
+              },
+            ],
+          });
+        }),
+        mediaReader: _MappedMediaReader(<String, Uint8List>{
+          'source-1': _bytes,
+          'source-2': secondBytes,
+        }),
+      );
+
+      final result = await gateway.extractStockPhoto(
+        _request(
+          AiExtractionKind.stockPhoto,
+          media: <PreparedAiMedia>[_media(), second],
+          targetId: 'count-session-1',
+        ),
+      );
+
+      final success = result as AiExtractionSuccess<StockPhotoProposal>;
+      expect(success.proposal.candidates, hasLength(1));
+      expect(
+        success.proposal.candidates.single.warnings,
+        contains(
+          'Duplicate observation candidate removed; confirm the retained count once.',
+        ),
+      );
+    },
+  );
+
+  test('duplicate receipt lines remain separate review candidates', () async {
+    final first =
+        (_extraction('receipt')['candidates']! as List<Object?>).single!
+            as Map<String, Object?>;
+    final gateway = Api17AiGateway(
+      client: _client((request) async {
+        if (request.method == 'POST') {
+          return _json(_created(candidateCount: 2), statusCode: 201);
+        }
+        return _json(<String, Object?>{
+          ..._extraction('receipt'),
+          'candidates': <Object?>[
+            first,
+            <String, Object?>{...first, 'position': 1},
+          ],
+        });
+      }),
+      mediaReader: _MediaReader(_bytes),
+    );
+
+    final result = await gateway.extractReceipt(
+      _request(AiExtractionKind.receipt),
+    );
+
+    final success = result as AiExtractionSuccess<ReceiptProposal>;
+    expect(success.proposal.lines, hasLength(2));
+    expect(
+      success.proposal.lines.map((line) => line.lineId).toSet(),
+      hasLength(2),
+    );
+  });
 
   test(
     'server and malformed extraction responses become safe failures',
@@ -584,10 +756,14 @@ http.Response _json(Object body, {int statusCode = 200}) => http.Response(
   headers: const <String, String>{'content-type': 'application/json'},
 );
 
-Map<String, Object?> _created({int candidateCount = 1}) => <String, Object?>{
+Map<String, Object?> _created({
+  int candidateCount = 1,
+  int observationCount = 1,
+}) => <String, Object?>{
   'id': 'extraction-1',
   'status': 'review_required',
   'candidateCount': candidateCount,
+  'observationCount': observationCount,
 };
 
 Map<String, Object?> _binding({
@@ -663,6 +839,7 @@ AiExtractionRequest _request(
   AiProviderProfile? profile,
   AiPrivacyMode privacyMode = AiPrivacyMode.serverProxyCloud,
   List<PreparedAiMedia>? media,
+  String? targetId,
 }) => AiExtractionRequest(
   runId: 'run-1',
   homeId: 'home-1',
@@ -678,6 +855,7 @@ AiExtractionRequest _request(
   schemaVersion: kind == AiExtractionKind.receipt ? 'receipt-v1' : 'stock-v1',
   promptVersion: 'prompt-v1',
   timeout: const Duration(seconds: 30),
+  targetId: targetId,
 );
 
 PreparedAiMedia _media({String mimeType = 'image/jpeg'}) => PreparedAiMedia(
@@ -720,4 +898,14 @@ final class _MediaReader implements PreparedMediaByteReader {
 
   @override
   Future<Uint8List> read(PreparedAiMedia media) async => bytes;
+}
+
+final class _MappedMediaReader implements PreparedMediaByteReader {
+  const _MappedMediaReader(this.bytesBySource);
+
+  final Map<String, Uint8List> bytesBySource;
+
+  @override
+  Future<Uint8List> read(PreparedAiMedia media) async =>
+      bytesBySource[media.sourceMediaId]!;
 }

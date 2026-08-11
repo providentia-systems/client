@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import 'package:providentia/features/ai_integration/application/ai_ports.dart';
 import 'package:providentia/features/ai_integration/domain/ai_models.dart';
 import 'package:providentia_api_client/providentia_api_client.dart';
@@ -10,9 +11,7 @@ abstract interface class PreparedMediaByteReader {
   Future<Uint8List> read(PreparedAiMedia media);
 }
 
-/// Server-proxy AI adapter for the single-image API 1.12 extraction contract.
-/// The application currently sends one sanitized image so disclosure can bind
-/// one exact digest even though the server also supports bounded observations.
+/// Server-proxy AI adapter for the bounded API 1.12 multi-image contract.
 final class Api17AiGateway implements AiProviderGateway {
   factory Api17AiGateway({
     required ProvidentiaApiClient client,
@@ -58,6 +57,14 @@ final class Api17AiGateway implements AiProviderGateway {
               safeMessage:
                   'The selected provider is not enabled by the server.',
             );
+    } on ProvidentiaApiException catch (error) {
+      if (error.statusCode == 403 || error.statusCode == 404) {
+        throw const AiGatewayAuthorizationDeniedException();
+      }
+      return const AiGatewayReadiness(
+        state: AiGatewayReadinessState.unavailable,
+        safeMessage: 'AI settings could not be verified.',
+      );
     } on Object {
       return const AiGatewayReadiness(
         state: AiGatewayReadinessState.unavailable,
@@ -88,6 +95,9 @@ final class Api17AiGateway implements AiProviderGateway {
         safeMessage: error.safeMessage,
       );
     } on ProvidentiaApiException catch (error) {
+      if (error.statusCode == 403 || error.statusCode == 404) {
+        throw const AiGatewayAuthorizationDeniedException();
+      }
       return AiExtractionFailure<ReceiptProposal>(
         code: 'server_${error.statusCode}',
         safeMessage: 'The AI extraction could not be completed safely.',
@@ -122,6 +132,9 @@ final class Api17AiGateway implements AiProviderGateway {
         safeMessage: error.safeMessage,
       );
     } on ProvidentiaApiException catch (error) {
+      if (error.statusCode == 403 || error.statusCode == 404) {
+        throw const AiGatewayAuthorizationDeniedException();
+      }
       return AiExtractionFailure<StockPhotoProposal>(
         code: 'server_${error.statusCode}',
         safeMessage: 'The AI extraction could not be completed safely.',
@@ -151,50 +164,62 @@ final class Api17AiGateway implements AiProviderGateway {
         'The selected privacy route cannot use the server proxy.',
       );
     }
-    if (request.media.media.length != 1) {
+    if (request.media.media.isEmpty || request.media.media.length > 8) {
       throw const _Api17AiBoundaryException(
-        'api17_single_image_only',
-        'This server version accepts one prepared image per extraction.',
+        'api17_image_limit',
+        'Select between one and eight prepared images.',
       );
     }
-    final media = request.media.media.single;
-    if (!const <String>{
-      'image/jpeg',
-      'image/png',
-      'image/webp',
-    }.contains(media.mimeType)) {
-      throw const _Api17AiBoundaryException(
-        'unsupported_media_type',
-        'Prepare the selected media as JPEG, PNG, or WebP.',
-      );
+    final preparedBytes = <Uint8List>[];
+    for (final media in request.media.media) {
+      if (!const <String>{
+        'image/jpeg',
+        'image/png',
+        'image/webp',
+      }.contains(media.mimeType)) {
+        throw const _Api17AiBoundaryException(
+          'unsupported_media_type',
+          'Prepare every selected image as JPEG, PNG, or WebP.',
+        );
+      }
+      final bytes = await _mediaReader.read(media);
+      if (bytes.length != media.byteLength ||
+          sha256.convert(bytes).toString() != media.sha256) {
+        throw const _Api17AiBoundaryException(
+          'prepared_media_changed',
+          'A prepared image changed after consent. Prepare the selection again.',
+        );
+      }
+      preparedBytes.add(bytes);
     }
-    final bytes = await _mediaReader.read(media);
-    if (bytes.length != media.byteLength) {
-      throw const _Api17AiBoundaryException(
-        'prepared_media_changed',
-        'The prepared image changed after consent. Prepare it again.',
-      );
-    }
-    if (sha256.convert(bytes).toString() != media.sha256) {
-      throw const _Api17AiBoundaryException(
-        'prepared_media_changed',
-        'The prepared image changed after consent. Prepare it again.',
-      );
+    final aggregateBytes = preparedBytes.expand((bytes) => bytes).toList();
+    final aggregateSha256 = sha256.convert(aggregateBytes).toString();
+    final aggregateByteCount = preparedBytes.fold<int>(
+      0,
+      (total, bytes) => total + bytes.length,
+    );
+    final media = request.media.media.first;
+    final formFields = <String, String>{
+      'kind': request.kind == AiExtractionKind.receipt ? 'receipt' : 'stock',
+      'transmissionConsent': 'true',
+    };
+    final targetId = request.targetId?.trim();
+    if (targetId != null && targetId.isNotEmpty) {
+      formFields['targetId'] = targetId;
     }
     final created = (await _client.createAiExtraction(
       homeId: request.homeId,
-      formFields: <String, String>{
-        'kind': request.kind == AiExtractionKind.receipt ? 'receipt' : 'stock',
-        'transmissionConsent': 'true',
-      },
-      files: <http.MultipartFile>[
-        http.MultipartFile.fromBytes(
-          'image',
-          bytes,
+      formFields: formFields,
+      files: List<http.MultipartFile>.generate(preparedBytes.length, (index) {
+        final item = request.media.media[index];
+        return http.MultipartFile.fromBytes(
+          index == 0 ? 'image' : 'images',
+          preparedBytes[index],
           filename:
-              'prepared-${media.sha256.substring(0, 12)}.${_extension(media.mimeType)}',
-        ),
-      ],
+              'prepared-${item.sha256.substring(0, 12)}.${_extension(item.mimeType)}',
+          contentType: MediaType.parse(item.mimeType),
+        );
+      }),
     )).requireObject();
     final extractionId = _string(created, 'id');
     if (created['status'] != 'review_required') {
@@ -204,8 +229,12 @@ final class Api17AiGateway implements AiProviderGateway {
       );
     }
     final createdCandidateCount = _integer(created, 'candidateCount');
+    final observationCount = _integer(created, 'observationCount');
     if (createdCandidateCount < 0 || createdCandidateCount > 200) {
       throw const FormatException('Invalid candidate count.');
+    }
+    if (observationCount != request.media.media.length) {
+      throw const FormatException('Invalid observation count.');
     }
     final extraction = (await _client.getAiExtraction(
       homeId: request.homeId,
@@ -219,7 +248,9 @@ final class Api17AiGateway implements AiProviderGateway {
     }
     _validateExtractionBinding(
       request: request,
-      media: media,
+      firstMedia: media,
+      aggregateSha256: aggregateSha256,
+      aggregateByteCount: aggregateByteCount,
       extractionId: extractionId,
       candidateCount: createdCandidateCount,
       extraction: extraction,
@@ -314,7 +345,9 @@ final class Api17AiGateway implements AiProviderGateway {
     Map<String, Object?> extraction,
   ) {
     final result = _object(extraction['result'], 'result');
-    final candidates = _objects(extraction['candidates']);
+    final candidates = _deduplicateStockCandidates(
+      _objects(extraction['candidates']),
+    );
     return StockPhotoProposal(
       id: _string(extraction, 'id'),
       runId: request.runId,
@@ -387,7 +420,9 @@ final class _Api17AiBoundaryException implements Exception {
 
 void _validateExtractionBinding({
   required AiExtractionRequest request,
-  required PreparedAiMedia media,
+  required PreparedAiMedia firstMedia,
+  required String aggregateSha256,
+  required int aggregateByteCount,
   required String extractionId,
   required int candidateCount,
   required Map<String, Object?> extraction,
@@ -397,9 +432,9 @@ void _validateExtractionBinding({
       : 'stock';
   if (_string(extraction, 'id') != extractionId ||
       _string(extraction, 'kind') != expectedKind ||
-      _string(extraction, 'inputMimeType') != media.mimeType ||
-      _string(extraction, 'inputSha256') != media.sha256 ||
-      _integer(extraction, 'inputByteCount') != media.byteLength ||
+      _string(extraction, 'inputMimeType') != firstMedia.mimeType ||
+      _string(extraction, 'inputSha256') != aggregateSha256 ||
+      _integer(extraction, 'inputByteCount') != aggregateByteCount ||
       _integer(extraction, 'schemaVersion') != 1 ||
       _integer(extraction, 'promptTemplateVersion') < 1 ||
       _string(extraction, 'provider').trim().isEmpty ||
@@ -407,6 +442,54 @@ void _validateExtractionBinding({
       _objects(extraction['candidates']).length != candidateCount) {
     throw const FormatException('Extraction response binding changed.');
   }
+  final expectedTarget = request.targetId?.trim();
+  final actualTarget = _optionalString(extraction['targetId']);
+  if ((expectedTarget == null || expectedTarget.isEmpty)
+      ? actualTarget != null
+      : actualTarget != expectedTarget) {
+    throw const FormatException('Extraction target binding changed.');
+  }
+}
+
+List<Map<String, Object?>> _deduplicateStockCandidates(
+  List<Map<String, Object?>> candidates,
+) {
+  final seen = <String, int>{};
+  final unique = <Map<String, Object?>>[];
+  for (final candidate in candidates) {
+    final payload = _object(candidate['payload'], 'candidate payload');
+    String normalized(Object? value) => value is String
+        ? value.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ')
+        : '';
+    final key = <String>[
+      normalized(payload['description']),
+      normalized(payload['product']),
+      normalized(payload['brand']),
+      normalized(payload['variant']),
+      normalized(payload['packText']),
+      normalized(payload['quantity']),
+    ].join('|');
+    final existingIndex = seen[key];
+    if (existingIndex == null) {
+      seen[key] = unique.length;
+      unique.add(candidate);
+      continue;
+    }
+    final retained = unique[existingIndex];
+    final retainedPayload = _object(retained['payload'], 'candidate payload');
+    final warnings = <String>{
+      ..._strings(retainedPayload['warnings']),
+      'Duplicate observation candidate removed; confirm the retained count once.',
+    };
+    unique[existingIndex] = <String, Object?>{
+      ...retained,
+      'payload': <String, Object?>{
+        ...retainedPayload,
+        'warnings': warnings.toList(growable: false),
+      },
+    };
+  }
+  return unique;
 }
 
 String _extension(String mimeType) => switch (mimeType) {

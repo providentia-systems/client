@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:drift/drift.dart';
 import 'package:providentia/core/database/app_database.dart';
+import 'package:providentia/core/database/client_local_record_types.dart';
 import 'package:providentia/core/security/uuid_v4.dart';
 import 'package:providentia/core/synchronization/sync_models.dart';
 import 'package:providentia/features/inventory/application/inventory_repository.dart';
@@ -81,6 +82,7 @@ final class DriftHouseholdRepository
   );
 
   static const String _inventoryItemType = 'phase5.inventory-item';
+  static const String _catalogItemType = 'inventory-item-master-product';
   static const String _countSessionType = 'phase5.stock-count-session';
   static const String _movementType = 'phase5.stock-movement';
   static const String _adjustmentIntentType = 'phase5.adjustment-intent';
@@ -90,6 +92,19 @@ final class DriftHouseholdRepository
   static const String _feedbackType = 'phase8.suggestion-feedback';
   static const String _baselineImportType = 'migration.baseline-v1';
   static const String _baselineSourceType = 'migration.baseline-source-v1';
+  static const Map<String, String> _reviewedOpeningStockSourceLinks =
+      <String, String>{
+        'stock-26':
+            'review-ground-coffee-jacobs-barista-classic-pack-size-pending-279',
+        'stock-30': 'review-tomato-sauce-all-gold-pack-size-pending-282',
+        'stock-31': 'review-tomato-sauce-pack-size-pending-283',
+        'stock-32': 'review-sweet-chilli-sauce-pack-size-pending-284',
+        'stock-46': 'review-oxi-laundry-stain-remover-pack-size-pending-287',
+        'stock-50': 'review-thin-bleach-pack-size-pending-288',
+        'stock-55': 'review-insecticide-repellent-tabard-pack-size-pending-289',
+        'stock-56': 'review-air-freshener-pack-size-pending-290',
+        'stock-59': 'review-steel-wool-scrubbies-pack-size-pending-292',
+      };
 
   static const String _homeProductType = 'inventory-home-product';
   static const String _balanceType = 'inventory-balance';
@@ -100,6 +115,8 @@ final class DriftHouseholdRepository
   static const String _receiptLineType = 'purchasing-receipt-line';
   static const String _serverShoppingListType = 'shopping-list';
   static const String _serverShoppingLineType = 'shopping-list-line';
+  static const String _shoppingSuggestionLineLinkType =
+      ClientLocalRecordTypes.shoppingSuggestionLineLink;
 
   final AppDatabase _database;
   final DateTime Function() _clock;
@@ -114,11 +131,15 @@ final class DriftHouseholdRepository
   bool get supportsPrivateHomeProductCreation => _synchronizesMutations;
 
   @override
+  bool get supportsCatalogHomeProductCreation => _synchronizesMutations;
+
+  @override
   Stream<List<InventoryItem>> watchItems({required String homeId}) {
     return _watchRecordTypes(
       homeId: homeId,
       entityTypes: const <String>{
         _inventoryItemType,
+        _catalogItemType,
         _homeProductType,
         _balanceType,
       },
@@ -179,6 +200,161 @@ final class DriftHouseholdRepository
     );
     _triggerForegroundSync();
     return result;
+  }
+
+  @override
+  Future<InventoryProductCreationResult> createCatalogHomeProduct(
+    CatalogHomeProductDraft draft,
+  ) async {
+    if (!_synchronizesMutations) {
+      throw const InventoryProductCreationException(
+        'Catalog product selection requires the synchronized household workspace.',
+      );
+    }
+    _requireHomeUuid(draft.homeId);
+    _requireUuid(draft.productId, 'catalog product');
+    _requireUuid(draft.packId, 'catalog pack');
+    final at = _clock().toUtc();
+    final result = await _database.transaction<InventoryProductCreationResult>(
+      () async {
+        final cachedRows =
+            await (_database.select(_database.localRecords)..where(
+                  (row) =>
+                      row.homeId.equals(draft.homeId) &
+                      row.entityType.equals(_catalogItemType),
+                ))
+                .get();
+        InventoryItem? cachedItem;
+        for (final row in cachedRows) {
+          final candidate = _decodeInventoryItem(row.payload);
+          if (candidate.homeId != draft.homeId) {
+            throw StateError('Cross-home item-master cache was rejected.');
+          }
+          if (candidate.productId == draft.productId &&
+              candidate.packId == draft.packId) {
+            cachedItem = candidate;
+            break;
+          }
+        }
+        if (cachedItem == null) {
+          throw const InventoryProductCreationException(
+            'Refresh the item master before adding this catalog pack.',
+          );
+        }
+        if (cachedItem.isHomeProduct) {
+          throw const InventoryProductCreationException(
+            'This catalog pack is already part of the household item master.',
+          );
+        }
+        final duplicate =
+            await (_database.select(_database.localRecords)..where(
+                  (row) =>
+                      row.homeId.equals(draft.homeId) &
+                      row.entityType.equals(_homeProductType),
+                ))
+                .get();
+        for (final row in duplicate) {
+          final payload = _validatedProjection(row, draft.homeId);
+          if (_nullableString(payload['packId']) == draft.packId &&
+              _optionalString(payload['status'], fallback: 'active') ==
+                  'active') {
+            throw const InventoryProductCreationException(
+              'This catalog pack is already part of the household item master.',
+            );
+          }
+        }
+        final homeProductId = _nextUuid('catalog home product');
+        final representation = <String, Object?>{
+          'productId': draft.productId,
+          'packId': draft.packId,
+          'privateName': null,
+          'originalPackText': null,
+          'productName': cachedItem.canonicalName,
+          'packText': cachedItem.packSize,
+          'categoryName': cachedItem.category,
+          'brandName': cachedItem.brand,
+          'aliases': cachedItem.aliases,
+          'status': 'active',
+        };
+        await _writeProjection(
+          homeId: draft.homeId,
+          entityType: _homeProductType,
+          entityId: homeProductId,
+          revision: 1,
+          representation: representation,
+          at: at,
+        );
+        await _insertGeneratedCommand(
+          homeId: draft.homeId,
+          entityType: _homeProductType,
+          entityId: homeProductId,
+          commandType: 'inventory.home-product.create',
+          baseRevision: null,
+          payload: <String, Object?>{
+            'productId': draft.productId,
+            'packId': draft.packId,
+            'privateName': null,
+            'originalPackText': null,
+          },
+          at: at,
+        );
+        return InventoryProductCreationResult(
+          homeProductId: homeProductId,
+          revision: 1,
+          disposition: InventoryProductCreationDisposition.queued,
+        );
+      },
+    );
+    _triggerForegroundSync();
+    return result;
+  }
+
+  /// Atomically replaces only the public item-master cache for [homeId].
+  /// Home-private and pending local records are deliberately left untouched.
+  Future<void> replaceCatalogItemMaster({
+    required String homeId,
+    required List<InventoryItem> items,
+  }) async {
+    _requireHomeUuid(homeId);
+    final ids = <String>{};
+    final packs = <String>{};
+    for (final item in items) {
+      _requireUuid(item.id, 'item-master item');
+      if (item.productId != null) {
+        _requireUuid(item.productId!, 'item-master product');
+      }
+      if (item.packId != null) {
+        _requireUuid(item.packId!, 'item-master pack');
+      }
+      if (item.homeId != homeId ||
+          item.productId == null ||
+          item.packId == null ||
+          !ids.add(item.id) ||
+          !packs.add(item.packId!) ||
+          (!item.isHomeProduct &&
+              (item.id != item.packId || item.currentQuantity != null)) ||
+          (item.isHomeProduct && item.currentQuantity == null)) {
+        throw const FormatException(
+          'The item-master snapshot is not safe to cache.',
+        );
+      }
+    }
+    await _database.transaction(() async {
+      await (_database.delete(_database.localRecords)..where(
+            (row) =>
+                row.homeId.equals(homeId) &
+                row.entityType.equals(_catalogItemType),
+          ))
+          .go();
+      for (final item in items) {
+        await _writeRecord(
+          homeId: homeId,
+          entityType: _catalogItemType,
+          entityId: item.id,
+          payload: _encodeInventoryItem(item),
+        );
+      }
+    });
   }
 
   @override
@@ -610,7 +786,8 @@ final class DriftHouseholdRepository
           );
         }
         final approvalStatus = _requiredString(linePayload, 'approvalStatus');
-        if (approvalStatus == 'approved') {
+        if (approvalStatus == 'approved' ||
+            approvalStatus == 'approved-catalog') {
           if (_nullableString(linePayload['homeProductId']) != homeProductId) {
             throw const PurchaseCaptureException(
               'An approved receipt line cannot be rematched offline.',
@@ -622,7 +799,7 @@ final class DriftHouseholdRepository
             commandType: 'purchasing.receipt-line.approve',
           );
         }
-        if (approvalStatus != 'unreviewed') {
+        if (approvalStatus != 'unreviewed' && approvalStatus != 'unresolved') {
           throw const PurchaseCaptureException(
             'The receipt line has an unsupported review state.',
           );
@@ -676,6 +853,97 @@ final class DriftHouseholdRepository
   }
 
   @override
+  Future<PurchaseMutationResult> markReceiptLineUnresolved({
+    required String homeId,
+    required String receiptId,
+    required String lineId,
+  }) async {
+    _requireSynchronizedPurchasing();
+    _requireHomeUuid(homeId);
+    _requireUuid(receiptId, 'purchase receipt');
+    _requireUuid(lineId, 'purchase receipt line');
+    final at = _clock().toUtc();
+    final result = await _database.transaction<PurchaseMutationResult>(
+      () async {
+        final receipt = await _requiredDraftReceipt(
+          homeId: homeId,
+          receiptId: receiptId,
+        );
+        final line = await _record(
+          homeId: homeId,
+          entityType: _receiptLineType,
+          entityId: lineId,
+        );
+        if (line == null) {
+          throw const PurchaseCaptureException(
+            'The receipt line is unavailable in this home.',
+          );
+        }
+        final linePayload = _validatedProjection(line, homeId);
+        if (_requiredString(linePayload, 'receiptId') != receiptId) {
+          throw const PurchaseCaptureException(
+            'The receipt line does not belong to this receipt.',
+          );
+        }
+        final approvalStatus = _requiredString(linePayload, 'approvalStatus');
+        if (approvalStatus == 'unresolved') {
+          return _existingMutationResult(
+            row: line,
+            entityId: lineId,
+            commandType: 'purchasing.receipt-line.unresolve',
+          );
+        }
+        if (approvalStatus != 'unreviewed' &&
+            approvalStatus != 'approved' &&
+            approvalStatus != 'approved-catalog') {
+          throw const PurchaseCaptureException(
+            'The receipt line has an unsupported review state.',
+          );
+        }
+        final receiptPayload = _validatedProjection(receipt, homeId);
+        await _writeProjection(
+          homeId: homeId,
+          entityType: _receiptLineType,
+          entityId: lineId,
+          revision: line.revision + 1,
+          representation: <String, Object?>{
+            ..._withoutProjectionMetadata(linePayload),
+            'homeProductId': null,
+            'approvalStatus': 'unresolved',
+          },
+          at: at,
+        );
+        await _writeProjection(
+          homeId: homeId,
+          entityType: _receiptType,
+          entityId: receiptId,
+          revision: receipt.revision + 1,
+          representation: _withoutProjectionMetadata(receiptPayload),
+          at: at,
+        );
+        await _insertGeneratedCommand(
+          homeId: homeId,
+          entityType: _receiptLineType,
+          entityId: lineId,
+          commandType: 'purchasing.receipt-line.unresolve',
+          baseRevision: line.revision,
+          payload: <String, Object?>{'receiptId': receiptId},
+          at: at,
+        );
+        return PurchaseMutationResult(
+          entityId: lineId,
+          revision: line.revision + 1,
+          disposition: PurchaseMutationDisposition.queued,
+        );
+      },
+    );
+    if (result.awaitsServerConfirmation) {
+      _triggerForegroundSync();
+    }
+    return result;
+  }
+
+  @override
   Future<PurchaseMutationResult> commitReceipt({
     required String homeId,
     required String receiptId,
@@ -684,94 +952,97 @@ final class DriftHouseholdRepository
     _requireHomeUuid(homeId);
     _requireUuid(receiptId, 'purchase receipt');
     final at = _clock().toUtc();
-    final result = await _database.transaction<PurchaseMutationResult>(
-      () async {
-        final receipt = await _record(
-          homeId: homeId,
-          entityType: _receiptType,
-          entityId: receiptId,
+    final result = await _database.transaction<PurchaseMutationResult>(() async {
+      final receipt = await _record(
+        homeId: homeId,
+        entityType: _receiptType,
+        entityId: receiptId,
+      );
+      if (receipt == null) {
+        throw const PurchaseCaptureException(
+          'The receipt is unavailable in this home.',
         );
-        if (receipt == null) {
-          throw const PurchaseCaptureException(
-            'The receipt is unavailable in this home.',
-          );
-        }
-        final receiptPayload = _validatedProjection(receipt, homeId);
-        final status = _requiredString(receiptPayload, 'status');
-        if (status == 'committed') {
-          return _existingMutationResult(
-            row: receipt,
-            entityId: receiptId,
-            commandType: 'purchasing.receipt.commit',
-          );
-        }
-        if (status != 'draft') {
-          throw const PurchaseCaptureException(
-            'Only a draft receipt can be committed.',
-          );
-        }
-        final lines = await _receiptLineRecords(
-          homeId: homeId,
-          receiptId: receiptId,
-        );
-        if (lines.isEmpty) {
-          throw const PurchaseCaptureException(
-            'Add and approve at least one receipt line before commit.',
-          );
-        }
-        for (final line in lines.values) {
-          final payload = _validatedProjection(line, homeId);
-          final homeProductId = _nullableString(payload['homeProductId']);
-          if (_requiredString(payload, 'approvalStatus') != 'approved' ||
-              homeProductId == null) {
-            throw const PurchaseCaptureException(
-              'Every receipt line must be explicitly matched and approved.',
-            );
-          }
-          final product = await _record(
-            homeId: homeId,
-            entityType: _homeProductType,
-            entityId: homeProductId,
-          );
-          if (product == null ||
-              _optionalString(
-                    _validatedProjection(product, homeId)['status'],
-                    fallback: 'active',
-                  ) !=
-                  'active') {
-            throw const PurchaseCaptureException(
-              'An approved receipt product is unavailable in this home.',
-            );
-          }
-        }
-        await _writeProjection(
-          homeId: homeId,
-          entityType: _receiptType,
-          entityId: receiptId,
-          revision: receipt.revision + 1,
-          representation: <String, Object?>{
-            ..._withoutProjectionMetadata(receiptPayload),
-            'status': 'committed',
-            '_clientCommitQueuedAt': at.toIso8601String(),
-          },
-          at: at,
-        );
-        await _insertGeneratedCommand(
-          homeId: homeId,
-          entityType: _receiptType,
+      }
+      final receiptPayload = _validatedProjection(receipt, homeId);
+      final status = _requiredString(receiptPayload, 'status');
+      if (status == 'committed') {
+        return _existingMutationResult(
+          row: receipt,
           entityId: receiptId,
           commandType: 'purchasing.receipt.commit',
-          baseRevision: receipt.revision,
-          payload: const <String, Object?>{},
-          at: at,
         );
-        return PurchaseMutationResult(
-          entityId: receiptId,
-          revision: receipt.revision + 1,
-          disposition: PurchaseMutationDisposition.queued,
+      }
+      if (status != 'draft') {
+        throw const PurchaseCaptureException(
+          'Only a draft receipt can be committed.',
         );
-      },
-    );
+      }
+      final lines = await _receiptLineRecords(
+        homeId: homeId,
+        receiptId: receiptId,
+      );
+      if (lines.isEmpty) {
+        throw const PurchaseCaptureException(
+          'Add and approve at least one receipt line before commit.',
+        );
+      }
+      for (final line in lines.values) {
+        final payload = _validatedProjection(line, homeId);
+        final homeProductId = _nullableString(payload['homeProductId']);
+        final approvalStatus = _requiredString(payload, 'approvalStatus');
+        if (approvalStatus == 'unresolved' && homeProductId == null) {
+          continue;
+        }
+        if ((approvalStatus != 'approved' &&
+                approvalStatus != 'approved-catalog') ||
+            homeProductId == null) {
+          throw const PurchaseCaptureException(
+            'Every receipt line must be approved or intentionally left unresolved.',
+          );
+        }
+        final product = await _record(
+          homeId: homeId,
+          entityType: _homeProductType,
+          entityId: homeProductId,
+        );
+        if (product == null ||
+            _optionalString(
+                  _validatedProjection(product, homeId)['status'],
+                  fallback: 'active',
+                ) !=
+                'active') {
+          throw const PurchaseCaptureException(
+            'An approved receipt product is unavailable in this home.',
+          );
+        }
+      }
+      await _writeProjection(
+        homeId: homeId,
+        entityType: _receiptType,
+        entityId: receiptId,
+        revision: receipt.revision + 1,
+        representation: <String, Object?>{
+          ..._withoutProjectionMetadata(receiptPayload),
+          'status': 'committed',
+          '_clientCommitQueuedAt': at.toIso8601String(),
+        },
+        at: at,
+      );
+      await _insertGeneratedCommand(
+        homeId: homeId,
+        entityType: _receiptType,
+        entityId: receiptId,
+        commandType: 'purchasing.receipt.commit',
+        baseRevision: receipt.revision,
+        payload: const <String, Object?>{},
+        at: at,
+      );
+      return PurchaseMutationResult(
+        entityId: receiptId,
+        revision: receipt.revision + 1,
+        disposition: PurchaseMutationDisposition.queued,
+      );
+    });
     if (result.awaitsServerConfirmation) {
       _triggerForegroundSync();
     }
@@ -786,6 +1057,7 @@ final class DriftHouseholdRepository
         _shoppingListType,
         _serverShoppingListType,
         _serverShoppingLineType,
+        _shoppingSuggestionLineLinkType,
       },
     ).map((rows) => _projectActiveShoppingList(homeId, rows));
   }
@@ -884,6 +1156,14 @@ final class DriftHouseholdRepository
       items[item.id] = item;
     }
 
+    for (final row in rows.where((row) => row.entityType == _catalogItemType)) {
+      final item = _decodeInventoryItem(row.payload);
+      if (row.homeId != homeId || item.homeId != homeId) {
+        throw StateError('Cross-home item-master cache was rejected.');
+      }
+      items[item.id] = item;
+    }
+
     for (final row in rows.where((row) => row.entityType == _homeProductType)) {
       final payload = _validatedProjection(row, homeId);
       final status = _optionalString(payload['status'], fallback: 'active');
@@ -891,8 +1171,22 @@ final class DriftHouseholdRepository
       final privateName = _nullableString(payload['privateName']);
       final productName = _nullableString(payload['productName']);
       final productId = _nullableString(payload['productId']);
+      final packId = _nullableString(payload['packId']);
       final originalPackText = _nullableString(payload['originalPackText']);
+      InventoryItem? catalogItem = items[row.entityId];
+      if (catalogItem == null && packId != null) {
+        for (final candidate in items.values.toList(growable: false)) {
+          if (!candidate.isHomeProduct &&
+              candidate.productId == productId &&
+              candidate.packId == packId) {
+            catalogItem = candidate;
+            items.remove(candidate.id);
+            break;
+          }
+        }
+      }
       final category =
+          catalogItem?.category ??
           _nullableString(payload['categoryName']) ??
           _nullableString(payload['category']) ??
           'Uncategorized';
@@ -902,14 +1196,23 @@ final class DriftHouseholdRepository
         canonicalName:
             privateName ??
             productName ??
+            catalogItem?.canonicalName ??
             (productId == null
                 ? 'Private item ${row.entityId.substring(0, 8)}'
                 : 'Product ${productId.substring(0, 8)}'),
-        packSize: originalPackText ?? 'Unspecified pack',
+        packSize:
+            originalPackText ?? catalogItem?.packSize ?? 'Unspecified pack',
         category: category,
-        brand: _optionalString(payload['brandName']),
-        currentQuantity: balances[row.entityId],
+        brand: catalogItem?.brand ?? _optionalString(payload['brandName']),
+        aliases:
+            catalogItem?.aliases ??
+            (payload['aliases'] == null
+                ? const <String>[]
+                : _stringList(payload['aliases'], 'aliases')),
+        currentQuantity: balances[row.entityId] ?? catalogItem?.currentQuantity,
         isHomeProduct: true,
+        productId: productId,
+        packId: packId,
       );
     }
 
@@ -1060,6 +1363,8 @@ final class DriftHouseholdRepository
       final approvalStatus = switch (approvalName) {
         'unreviewed' => PurchaseLineApprovalStatus.unreviewed,
         'approved' => PurchaseLineApprovalStatus.approved,
+        'approved-catalog' => PurchaseLineApprovalStatus.approvedCatalog,
+        'unresolved' => PurchaseLineApprovalStatus.unresolved,
         _ => throw FormatException(
           'Unsupported receipt-line approval status "$approvalName".',
         ),
@@ -1274,6 +1579,14 @@ final class DriftHouseholdRepository
       legacyLists.add(list);
     }
 
+    final suggestionLinks = <String, Map<String, Object?>>{};
+    for (final row in rows.where(
+      (candidate) => candidate.entityType == _shoppingSuggestionLineLinkType,
+    )) {
+      final payload = _validatedProjection(row, homeId);
+      suggestionLinks[row.entityId] = payload;
+    }
+
     final serverLists =
         rows
             .where((row) => row.entityType == _serverShoppingListType)
@@ -1291,24 +1604,44 @@ final class DriftHouseholdRepository
       )) {
         final linePayload = _validatedProjection(lineRow, homeId);
         if (_requiredString(linePayload, 'listId') != row.entityId) continue;
-        final source = _requiredString(linePayload, 'source');
+        final source = _nullableString(linePayload['source']) ?? 'manual';
+        final link = suggestionLinks[lineRow.entityId];
+        if (link != null &&
+            (_requiredString(link, 'listId') != row.entityId ||
+                _requiredString(link, 'homeProductId') !=
+                    _nullableString(linePayload['homeProductId']))) {
+          throw const FormatException(
+            'Suggestion-line metadata does not match its server projection.',
+          );
+        }
         lines.add(
           ShoppingListLine(
             id: lineRow.entityId,
             homeId: homeId,
             name: _requiredString(linePayload, 'description'),
             quantity: _requiredDecimal(linePayload, 'quantityToBuy'),
-            origin: source == 'manual'
-                ? ShoppingLineOrigin.manual
-                : ShoppingLineOrigin.suggestion,
+            origin: link != null || source != 'manual'
+                ? ShoppingLineOrigin.suggestion
+                : ShoppingLineOrigin.manual,
             createdAt:
                 _optionalDateTime(linePayload['_clientCreatedAt']) ??
                 lineRow.updatedAt.toUtc(),
-            productPackId: _nullableString(linePayload['homeProductId']),
+            suggestionId: link == null
+                ? null
+                : _requiredString(link, 'suggestionId'),
+            homeProductId: _nullableString(linePayload['homeProductId']),
+            selectedPackId: link == null
+                ? null
+                : _nullableString(link['selectedPackId']),
             checked:
                 linePayload['checked'] == true ||
                 _nullableString(linePayload['checkedAt']) != null,
-            explanation: _nullableString(linePayload['explanation']),
+            explanation:
+                _nullableString(linePayload['explanation']) ??
+                (link == null
+                    ? null
+                    : 'Evidence-based legacy suggestion. Open the live '
+                          'explanation to review factors and limitations.'),
           ),
         );
       }
@@ -1464,15 +1797,28 @@ final class DriftHouseholdRepository
         throw StateError('Only an open synchronized count can be changed.');
       }
       if (session.status == CountSessionStatus.cancelled) {
-        throw UnsupportedError(
-          'Count cancellation is not published by sync protocol v2.',
+        await _writeProjection(
+          homeId: session.homeId,
+          entityType: _serverCountSessionType,
+          entityId: session.id,
+          revision: existing.revision + 1,
+          representation: _countSessionRepresentation(session),
+          at: at,
         );
-      }
-      if (session.photos.isNotEmpty) {
-        throw UnsupportedError(
-          'Count photo attachment requires the published media workflow.',
+        await _insertGeneratedCommand(
+          homeId: session.homeId,
+          entityType: _serverCountSessionType,
+          entityId: session.id,
+          commandType: 'inventory.count-session.cancel',
+          baseRevision: existing.revision,
+          payload: const <String, Object?>{},
+          at: at,
         );
+        changed = true;
+        return;
       }
+      // Photo references are review-only, ephemeral client state. They are
+      // intentionally neither projected nor placed in synchronization payloads.
 
       final persistedLines = await _countLineRecords(
         homeId: session.homeId,
@@ -1564,10 +1910,11 @@ final class DriftHouseholdRepository
       _requireUuid(line.id, 'count line');
       _requireUuid(line.itemId, 'home product');
       if (line.status != CountLineStatus.confirmed ||
-          line.source != CountSource.manual ||
+          (line.source != CountSource.manual &&
+              line.source != CountSource.photo) ||
           line.observedQuantity == null) {
         throw UnsupportedError(
-          'Only confirmed manual count lines are supported by this workflow.',
+          'Only confirmed manual or photo count lines are supported by this workflow.',
         );
       }
       final product = await _record(
@@ -1609,7 +1956,7 @@ final class DriftHouseholdRepository
           'homeProductId': line.itemId,
           'quantity': _decimal(line.observedQuantity!),
           'confidence': null,
-          'source': 'manual',
+          'source': line.source == CountSource.photo ? 'photo' : 'manual',
           'notes': '',
         },
         at: at,
@@ -1702,6 +2049,21 @@ final class DriftHouseholdRepository
           representation: _shoppingLineRepresentation(list.id, line),
           at: at,
         );
+        if (line.suggestionId != null) {
+          await _writeRecord(
+            homeId: list.homeId,
+            entityType: _shoppingSuggestionLineLinkType,
+            entityId: line.id,
+            payload: <String, Object?>{
+              'id': line.id,
+              'homeId': list.homeId,
+              'listId': list.id,
+              'suggestionId': line.suggestionId,
+              'homeProductId': line.homeProductId,
+              'selectedPackId': line.selectedPackId,
+            },
+          );
+        }
         await _writeProjection(
           homeId: list.homeId,
           entityType: _serverShoppingListType,
@@ -1719,8 +2081,9 @@ final class DriftHouseholdRepository
           payload: <String, Object?>{
             'listId': list.id,
             'homeProductId':
-                line.productPackId != null && isUuid(line.productPackId!)
-                ? line.productPackId
+                _shoppingHomeProductId(line) != null &&
+                    isUuid(_shoppingHomeProductId(line)!)
+                ? _shoppingHomeProductId(line)
                 : null,
             'description': line.name,
             'quantity': _decimal(line.quantity),
@@ -1740,7 +2103,7 @@ final class DriftHouseholdRepository
         final oldProduct = _nullableString(payload['homeProductId']);
         if ((oldQuantity - line.quantity).abs() > 0.00000001 ||
             oldName != line.name ||
-            oldProduct != line.productPackId) {
+            oldProduct != _shoppingHomeProductId(line)) {
           throw UnsupportedError(
             'Shopping-line edits are not published by sync protocol v2.',
           );
@@ -1847,6 +2210,8 @@ final class DriftHouseholdRepository
     );
 
     final itemCandidates = <String, List<InventoryItem>>{};
+    final stockCandidates = <String, List<InventoryItem>>{};
+    final itemsBySourceId = <String, InventoryItem>{};
     for (final row in itemRows) {
       final product = _requiredString(row, 'product');
       final packSize = _requiredString(row, 'packSize');
@@ -1866,6 +2231,13 @@ final class DriftHouseholdRepository
             () => <InventoryItem>[],
           )
           .add(item);
+      stockCandidates
+          .putIfAbsent(
+            _productBrandPackKey(product, item.brand, packSize),
+            () => <InventoryItem>[],
+          )
+          .add(item);
+      itemsBySourceId[item.id] = item;
     }
 
     var exactStockMatches = 0;
@@ -1876,24 +2248,40 @@ final class DriftHouseholdRepository
     };
     for (final row in stockRows) {
       final product = _requiredString(row, 'product');
-      final packSize = _requiredString(row, 'packSize');
+      final sourcePackSize = _optionalString(row['packSize']);
       final quantity = _requiredNumber(row, 'quantity');
       currentUnits += quantity;
-      final matches =
-          itemCandidates[_productPackKey(product, packSize)] ??
+      var matches =
+          stockCandidates[_productBrandPackKey(
+            product,
+            _optionalString(row['brand']),
+            sourcePackSize,
+          )] ??
           const <InventoryItem>[];
+      final sourceId = _requiredString(row, 'id');
+      final reviewedSourceId = _reviewedOpeningStockSourceLinks[sourceId];
+      if (matches.length != 1 && reviewedSourceId != null) {
+        final reviewedItem = itemsBySourceId[reviewedSourceId];
+        if (reviewedItem == null) {
+          throw FormatException(
+            'A reviewed opening-stock item is unavailable: $reviewedSourceId.',
+          );
+        }
+        matches = <InventoryItem>[reviewedItem];
+      }
       if (matches.length == 1) {
         exactStockMatches++;
         importedItems[matches.single.id] = matches.single.copyWith(
           currentQuantity: quantity,
         );
       } else {
-        final sourceId = _requiredString(row, 'id');
         importedItems['baseline-$sourceId'] = InventoryItem(
           id: 'baseline-$sourceId',
           homeId: homeId,
           canonicalName: product,
-          packSize: packSize,
+          packSize: sourcePackSize.isEmpty
+              ? 'Pack size pending'
+              : sourcePackSize,
           category: _requiredString(row, 'category'),
           brand: _optionalString(row['brand']),
           unit: _optionalString(row['unit'], fallback: 'units'),
@@ -2067,7 +2455,7 @@ final class DriftHouseholdRepository
     'homeProductId': line.itemId,
     'quantity': _decimal(line.observedQuantity!),
     'confidence': null,
-    'source': 'manual',
+    'source': line.source == CountSource.photo ? 'photo' : 'manual',
     'notes': '',
     'status': 'confirmed',
   };
@@ -2077,11 +2465,17 @@ final class DriftHouseholdRepository
     ShoppingListLine line,
   ) => <String, Object?>{
     'listId': listId,
-    'homeProductId': line.productPackId,
+    'homeProductId': _shoppingHomeProductId(line),
     'description': line.name,
-    'source': 'manual',
+    'source': line.origin == ShoppingLineOrigin.suggestion
+        ? 'suggestion'
+        : 'manual',
     'quantityToBuy': _decimal(line.quantity),
-    'explanation': 'Added manually.',
+    'explanation':
+        line.explanation ??
+        (line.origin == ShoppingLineOrigin.suggestion
+            ? 'Evidence-based legacy suggestion.'
+            : 'Added manually.'),
     'confidence': null,
     'checkedAt': line.checked ? _clock().toUtc().toIso8601String() : null,
     'checked': line.checked,
@@ -2093,12 +2487,24 @@ final class DriftHouseholdRepository
       throw StateError('Cross-home shopping-list line was rejected.');
     }
     _requireUuid(line.id, 'shopping-list line');
-    if (line.productPackId != null) {
-      _requireUuid(line.productPackId!, 'shopping-list home product');
+    final homeProductId = _shoppingHomeProductId(line);
+    if (homeProductId != null) {
+      _requireUuid(homeProductId, 'shopping-list home product');
     }
-    if (line.origin != ShoppingLineOrigin.manual || line.checked) {
+    if (line.suggestionId != null) {
+      _requireUuid(line.suggestionId!, 'shopping suggestion');
+      if (homeProductId == null) {
+        throw ArgumentError(
+          'A suggested shopping line requires a home product.',
+        );
+      }
+    }
+    if (line.selectedPackId != null) {
+      _requireUuid(line.selectedPackId!, 'shopping suggestion selected pack');
+    }
+    if (line.checked) {
       throw UnsupportedError(
-        'Only unchecked manual shopping-list lines can be created offline.',
+        'Only unchecked shopping-list lines can be created offline.',
       );
     }
     if (!line.quantity.isFinite || line.quantity <= 0) {
@@ -2206,7 +2612,10 @@ final class DriftHouseholdRepository
             operation.homeId.equals(row.homeId) &
             operation.entityType.equals(row.entityType) &
             operation.entityId.equals(entityId) &
-            operation.operationType.equals(commandType),
+            operation.operationType.equals(commandType) &
+            operation.state.isNotValue(
+              ClientOperationState.superseded.storageValue,
+            ),
       )
       ..orderBy(<OrderingTerm Function(ClientOperations)>[
         (operation) => OrderingTerm.desc(operation.clientTimestamp),
@@ -2240,6 +2649,9 @@ final class DriftHouseholdRepository
           operation.lastSafeError ??
               'The queued receipt change needs attention before retry.',
         ),
+      ClientOperationState.superseded => throw StateError(
+        'A superseded operation escaped the active-operation query.',
+      ),
     };
     return PurchaseMutationResult(
       entityId: entityId,
@@ -2515,6 +2927,8 @@ Map<String, Object?> _encodeInventoryItem(InventoryItem item) =>
       'aliases': item.aliases,
       'currentQuantity': item.currentQuantity,
       'isHomeProduct': item.isHomeProduct,
+      if (item.productId != null) 'productId': item.productId,
+      if (item.packId != null) 'packId': item.packId,
     };
 
 InventoryItem _decodeInventoryItem(String encoded) {
@@ -2530,6 +2944,8 @@ InventoryItem _decodeInventoryItem(String encoded) {
     aliases: _stringList(json['aliases'], 'aliases'),
     currentQuantity: _optionalNumber(json['currentQuantity']),
     isHomeProduct: json['isHomeProduct'] == true,
+    productId: _nullableString(json['productId']),
+    packId: _nullableString(json['packId']),
   );
 }
 
@@ -2716,6 +3132,9 @@ Map<String, Object?> _encodeShoppingList(ShoppingList list) =>
               'quantity': line.quantity,
               'origin': line.origin.name,
               'createdAt': line.createdAt.toUtc().toIso8601String(),
+              'suggestionId': line.suggestionId,
+              'homeProductId': line.homeProductId,
+              'selectedPackId': line.selectedPackId,
               'productPackId': line.productPackId,
               'checked': line.checked,
               'explanation': line.explanation,
@@ -2723,6 +3142,9 @@ Map<String, Object?> _encodeShoppingList(ShoppingList list) =>
           )
           .toList(growable: false),
     };
+
+String? _shoppingHomeProductId(ShoppingListLine line) =>
+    line.homeProductId ?? line.productPackId;
 
 ShoppingList _decodeShoppingList(String encoded) {
   final json = _decodeObject(encoded, 'shopping list');
@@ -2744,6 +3166,9 @@ ShoppingList _decodeShoppingList(String encoded) {
             createdAt: DateTime.parse(
               _requiredString(line, 'createdAt'),
             ).toUtc(),
+            suggestionId: _nullableString(line['suggestionId']),
+            homeProductId: _nullableString(line['homeProductId']),
+            selectedPackId: _nullableString(line['selectedPackId']),
             productPackId: _nullableString(line['productPackId']),
             checked: line['checked'] == true,
             explanation: _nullableString(line['explanation']),
@@ -2949,6 +3374,9 @@ String _normalize(String value) =>
 
 String _productPackKey(String product, String packSize) =>
     '${_normalize(product)}\u0000${_normalize(packSize)}';
+
+String _productBrandPackKey(String product, String brand, String packSize) =>
+    '${_normalize(product)}\u0000${_normalize(brand)}\u0000${_normalize(packSize)}';
 
 void _requireBaselineCount(int actual, int expected, String name) {
   if (actual != expected) {

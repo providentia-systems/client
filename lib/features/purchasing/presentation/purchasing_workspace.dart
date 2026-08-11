@@ -340,7 +340,7 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
         const SizedBox(height: 8),
         if (!capture.reviewComplete)
           const Text(
-            'Every line must be matched and approved before commit.',
+            'Every line must be approved or intentionally left unresolved before commit.',
             key: Key('purchase-review-required'),
           ),
         FilledButton(
@@ -372,9 +372,25 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
           'Approved: ${match?.name ?? 'Private home product'} · '
           'revision ${line.revision}',
         ),
+        trailing: TextButton(
+          key: Key('purchase-leave-unresolved-${line.id}'),
+          onPressed: widget.controller.state.captureBusy
+              ? null
+              : () => widget.controller.leaveLineUnresolved(line.id),
+          child: const Text('Leave unresolved'),
+        ),
       );
     }
-    final candidates = widget.controller.state.matchCandidates;
+    final ranked = widget.controller.rankedCandidatesFor(line);
+    final candidates = ranked.map((entry) => entry.candidate).toList();
+    RankedPurchaseMatchCandidate? selected;
+    final selectedId = _selectedProducts[line.id];
+    for (final entry in ranked) {
+      if (entry.candidate.id == selectedId) {
+        selected = entry;
+        break;
+      }
+    }
     return Card.outlined(
       key: Key('purchase-line-${line.id}'),
       child: Padding(
@@ -383,10 +399,22 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
             Text(line.rawDescription),
+            if (line.unresolved)
+              Text(
+                'Intentionally unresolved · revision ${line.revision}. You may still approve it later.',
+                key: Key('purchase-unresolved-state-${line.id}'),
+              ),
+            if (ranked.isNotEmpty) ...<Widget>[
+              const SizedBox(height: 4),
+              Text(
+                'Top suggestion: ${_matchBasisLabel(ranked.first.basis)}',
+                key: Key('purchase-match-basis-top-${line.id}'),
+              ),
+            ],
             const SizedBox(height: 8),
             DropdownButtonFormField<String>(
               key: Key('purchase-line-match-${line.id}'),
-              initialValue: _selectedProducts[line.id],
+              initialValue: selected?.candidate.id,
               items: candidates
                   .map(
                     (candidate) => DropdownMenuItem<String>(
@@ -404,6 +432,15 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
               }),
               decoration: const InputDecoration(labelText: 'Match product'),
             ),
+            if (selected != null) ...<Widget>[
+              const SizedBox(height: 4),
+              Text(
+                'Why this match: ${_matchBasisLabel(selected.basis)} · '
+                '${selected.candidate.brand.isEmpty ? 'No brand listed' : selected.candidate.brand} · '
+                '${selected.candidate.category}',
+                key: Key('purchase-match-basis-${line.id}'),
+              ),
+            ],
             const SizedBox(height: 8),
             FilledButton.tonal(
               key: Key('purchase-approve-line-${line.id}'),
@@ -411,15 +448,60 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
                   widget.controller.state.captureBusy ||
                       _selectedProducts[line.id] == null
                   ? null
-                  : () => widget.controller.approveLine(
+                  : () => widget.controller.approveCandidate(
                       lineId: line.id,
-                      homeProductId: _selectedProducts[line.id]!,
+                      candidateId: _selectedProducts[line.id]!,
                     ),
-              child: const Text('Approve match'),
+              child: Text(_matchActionLabel(selected?.candidate)),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              key: Key('purchase-create-private-${line.id}'),
+              onPressed:
+                  widget.controller.state.captureBusy ||
+                      !widget.controller.canCreatePrivateProduct
+                  ? null
+                  : () => _createPrivateProduct(line),
+              icon: const Icon(Icons.lock_outline),
+              label: const Text('Create private home product'),
+            ),
+            TextButton(
+              key: Key('purchase-leave-unresolved-${line.id}'),
+              onPressed: widget.controller.state.captureBusy
+                  ? null
+                  : () {
+                      setState(() => _selectedProducts.remove(line.id));
+                      widget.controller.leaveLineUnresolved(line.id);
+                    },
+              child: Text(
+                line.unresolved
+                    ? 'Retry unresolved decision'
+                    : 'Leave unresolved',
+              ),
+            ),
+            Text(
+              'Matches and private products stay within this home. This action does not publish aliases or create catalog proposals; use the separate catalog contribution workflow for that.',
+              key: Key('purchase-no-alias-publication-${line.id}'),
             ),
           ],
         ),
       ),
+    );
+  }
+
+  Future<void> _createPrivateProduct(PurchaseReceiptLineCapture line) async {
+    final draft = await showDialog<({String name, String pack})>(
+      context: context,
+      builder: (context) => _PrivateProductDialog(
+        suggestedName: line.rawDescription,
+        suggestedPack: line.originalPackText ?? '',
+      ),
+    );
+    if (!mounted || draft == null) return;
+    await widget.controller.createPrivateProductAndApprove(
+      lineId: line.id,
+      privateName: draft.name,
+      originalPackText: draft.pack,
     );
   }
 
@@ -480,6 +562,76 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
   }
 }
 
+class _PrivateProductDialog extends StatefulWidget {
+  const _PrivateProductDialog({
+    required this.suggestedName,
+    required this.suggestedPack,
+  });
+
+  final String suggestedName;
+  final String suggestedPack;
+
+  @override
+  State<_PrivateProductDialog> createState() => _PrivateProductDialogState();
+}
+
+class _PrivateProductDialogState extends State<_PrivateProductDialog> {
+  late final TextEditingController _name = TextEditingController(
+    text: widget.suggestedName,
+  );
+  late final TextEditingController _pack = TextEditingController(
+    text: widget.suggestedPack,
+  );
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _pack.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Create private home product'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          TextField(
+            key: const Key('purchase-private-product-name'),
+            controller: _name,
+            maxLength: 191,
+            decoration: const InputDecoration(labelText: 'Private name'),
+          ),
+          TextField(
+            key: const Key('purchase-private-product-pack'),
+            controller: _pack,
+            maxLength: 191,
+            decoration: const InputDecoration(labelText: 'Original pack text'),
+          ),
+          const Text(
+            'This creates only a home-private product. It does not publish a global alias or catalog proposal.',
+          ),
+        ],
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          key: const Key('purchase-private-product-confirm'),
+          onPressed: () {
+            if (_name.text.trim().isEmpty) return;
+            Navigator.pop(context, (name: _name.text, pack: _pack.text));
+          },
+          child: const Text('Create and approve'),
+        ),
+      ],
+    );
+  }
+}
+
 class _PurchaseGroupCard extends StatelessWidget {
   const _PurchaseGroupCard({required this.group});
 
@@ -513,6 +665,30 @@ class _PurchaseGroupCard extends StatelessWidget {
     );
   }
 }
+
+String _matchActionLabel(PurchaseMatchCandidate? candidate) =>
+    switch (candidate?.kind) {
+      PurchaseMatchCandidateKind.unselectedPublishedPack =>
+        'Add pack to home and approve',
+      PurchaseMatchCandidateKind.privateHomeProduct =>
+        'Approve private home product',
+      PurchaseMatchCandidateKind.selectedCatalogPack =>
+        'Approve existing home product',
+      null => 'Approve match',
+    };
+
+String _matchBasisLabel(PurchaseMatchBasis basis) => switch (basis) {
+  PurchaseMatchBasis.exactDescriptionAndPack =>
+    'exact normalized description and pack',
+  PurchaseMatchBasis.exactDescriptionOrAlias =>
+    'exact canonical name or approved alias',
+  PurchaseMatchBasis.exactPack => 'exact normalized pack text',
+  PurchaseMatchBasis.partialDescription => 'description contains the item name',
+  PurchaseMatchBasis.metadataOverlap =>
+    'shared canonical, brand, category, pack, or alias terms',
+  PurchaseMatchBasis.itemMasterFallback =>
+    'available in the verified offline item master',
+};
 
 String _money(Money money) =>
     '${money.currency} ${(money.minorUnits / 100).toStringAsFixed(2)}';

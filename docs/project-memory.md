@@ -46,7 +46,7 @@ launch. It does not reopen the owner-selected name.
 
 ## Current integration note — 2026-08-11
 
-- The client pins the reviewed OpenAPI `1.12.0` boundary and generates 156
+- The client pins the reviewed OpenAPI `1.13.2` boundary and generates 158
   operations. Contract, lock, manifest, and generated Dart are
   updated as one deliberate change.
 - Product onboarding is email-only login-link authentication. The originating
@@ -70,8 +70,9 @@ launch. It does not reopen the owner-selected name.
 - Home roles (`owner`, `manager`, `member`, `viewer`) and platform roles are
   separate authorization domains. A platform role grants no private home
   access.
-- The visible household workspaces are mostly local-only and must not be used
-  as evidence that the corresponding backend APIs have been tested end to end.
+- Household mutations commit to Drift first and use the durable typed sync
+  outbox. Local and simulated convergence tests are not a substitute for live
+  backend, provider, or supported-platform acceptance evidence.
 - Local Drift storage is not application-encrypted. Encryption and key
   lifecycle remain an explicit release decision and must not be claimed as a
   completed control.

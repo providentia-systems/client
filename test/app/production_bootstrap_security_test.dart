@@ -61,6 +61,13 @@ void main() {
     expect(source, contains('HouseholdWorkspaceAccess.fromPermissions'));
     expect(source, contains('SyncAvailability.authorizationDenied'));
     expect(source, contains('RevocationGuardedSynchronization'));
+    expect(source, contains('with WidgetsBindingObserver'));
+    expect(source, contains('WidgetsBinding.instance.addObserver(this)'));
+    expect(source, contains('WidgetsBinding.instance.removeObserver(this)'));
+    expect(source, contains('AppLifecycleState.resumed'));
+    expect(source, contains('ProductionResumeSyncGate'));
+    expect(source, contains('PrivacySafeSyncMetrics'));
+    expect(source, contains('CallbackSyncMetricsSnapshotSink'));
     expect(source, contains('revokeAndWait(homeId)'));
     expect(source, contains('RevokedHomeDataPurger'));
     expect(

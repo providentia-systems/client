@@ -150,7 +150,8 @@ final class GeneratedServerAiRepository implements ServerAiRepository {
         ],
         credentialEncryptionAvailable: true,
         humanReviewRequired: true,
-        serverPersistsUploadedMedia: true,
+        serverPersistsUploadedMedia: false,
+        mediaHandling: _safeMediaHandling,
       );
       final parsed = _profile(object, homeId, settings);
       if ((draft.id != null && parsed.id != draft.id) ||
@@ -296,7 +297,7 @@ final class GeneratedServerAiRepository implements ServerAiRepository {
     } on ProvidentiaApiException catch (error) {
       throw AiServerException(switch (error.statusCode) {
         401 => AiServerFailureKind.authenticationRequired,
-        403 || 404 => AiServerFailureKind.forbidden,
+        403 || 404 => AiServerFailureKind.authorizationDenied,
         409 => AiServerFailureKind.conflict,
         400 || 413 || 415 || 422 => AiServerFailureKind.validation,
         _ => AiServerFailureKind.unavailable,
@@ -328,9 +329,12 @@ AiServerSettings _settings(Map<String, Object?> object, String homeId) {
   }
   if (_boolean(object, 'cloudByokOnNativeClients') ||
       !_boolean(object, 'humanReviewRequired') ||
-      !_boolean(object, 'serverPersistsUploadedMedia')) {
+      _boolean(object, 'serverPersistsUploadedMedia')) {
     throw const FormatException('Unsafe AI privacy flags.');
   }
+  final mediaHandling = _mediaHandling(
+    _object(object['mediaHandling'], 'AI media handling'),
+  );
   final available = _objectList(object, 'availableServerProviders')
       .map((item) {
         final id = _string(item, 'id');
@@ -359,9 +363,59 @@ AiServerSettings _settings(Map<String, Object?> object, String homeId) {
       'credentialEncryptionAvailable',
     ),
     humanReviewRequired: true,
-    serverPersistsUploadedMedia: true,
+    serverPersistsUploadedMedia: false,
+    mediaHandling: mediaHandling,
   );
 }
+
+AiMediaHandling _mediaHandling(Map<String, Object?> object) {
+  final directExtractionUpload = switch (_string(
+    object,
+    'directExtractionUpload',
+  )) {
+    'transient_not_persisted' => AiDirectExtractionUpload.transientNotPersisted,
+    _ => throw const FormatException(
+      'Unsafe direct-extraction media handling.',
+    ),
+  };
+  final privateMediaStorage = switch (_string(object, 'privateMediaStorage')) {
+    'explicit_encrypted_opt_in' => AiPrivateMediaStorage.explicitEncryptedOptIn,
+    _ => throw const FormatException('Unsafe private-media storage policy.'),
+  };
+  final retentionValues = _stringList(object, 'privateMediaRetentionOptions');
+  final retentionOptions = retentionValues.map((value) {
+    return switch (value) {
+      'transient' => AiPrivateMediaRetention.transient,
+      'retained' => AiPrivateMediaRetention.retained,
+      _ => throw const FormatException(
+        'Unsafe private-media retention option.',
+      ),
+    };
+  }).toSet();
+  if (retentionValues.length != retentionOptions.length ||
+      _boolean(object, 'plaintextMediaAtRest') ||
+      !_boolean(object, 'cloudProviderTransmissionRequiresConsent')) {
+    throw const FormatException('Unsafe AI media-handling policy.');
+  }
+  return AiMediaHandling(
+    directExtractionUpload: directExtractionUpload,
+    privateMediaStorage: privateMediaStorage,
+    privateMediaRetentionOptions: retentionOptions,
+    plaintextMediaAtRest: false,
+    cloudProviderTransmissionRequiresConsent: true,
+  );
+}
+
+final AiMediaHandling _safeMediaHandling = AiMediaHandling(
+  directExtractionUpload: AiDirectExtractionUpload.transientNotPersisted,
+  privateMediaStorage: AiPrivateMediaStorage.explicitEncryptedOptIn,
+  privateMediaRetentionOptions: const <AiPrivateMediaRetention>{
+    AiPrivateMediaRetention.transient,
+    AiPrivateMediaRetention.retained,
+  },
+  plaintextMediaAtRest: false,
+  cloudProviderTransmissionRequiresConsent: true,
+);
 
 AiProviderProfile _profile(
   Map<String, Object?> object,
@@ -460,9 +514,13 @@ AiExtractionReview _extractionReview(
     'stock' => AiExtractionKind.stockPhoto,
     _ => throw const FormatException('Unknown AI extraction kind.'),
   };
+  final receiptHeader = kind == AiExtractionKind.receipt
+      ? _receiptHeader(object['result'])
+      : null;
   final candidates = _objectList(object, 'candidates')
       .map((candidate) {
         final payload = _object(candidate['payload'], 'candidate payload');
+        _validateCandidatePayload(payload);
         final candidateType = switch (_string(candidate, 'candidateType')) {
           'receipt_line' => AiCandidateType.receiptLine,
           'stock_item' => AiCandidateType.stockItem,
@@ -497,6 +555,9 @@ AiExtractionReview _extractionReview(
             _ => throw const FormatException('Unknown AI candidate status.'),
           },
           revision: _integer(candidate, 'revision', minimum: 1),
+          receiptPayload: candidateType == AiCandidateType.receiptLine
+              ? _receiptCandidatePayload(payload, receiptHeader)
+              : null,
         );
       })
       .toList(growable: false);
@@ -509,6 +570,76 @@ AiExtractionReview _extractionReview(
     extractionId: extractionId,
     kind: kind,
     candidates: candidates,
+  );
+}
+
+AiReceiptHeaderPayload? _receiptHeader(Object? value) {
+  if (value == null) return null;
+  final result = _object(value, 'AI extraction result');
+  _requireExactKeys(result, _receiptResultKeys, 'AI extraction result');
+  if (_string(result, 'documentType') != 'receipt') {
+    throw const FormatException('AI receipt result changed kind.');
+  }
+  _boundedStringList(result['warnings'], 'receipt warnings', 50);
+  if (result['candidates'] is! List<Object?>) {
+    throw const FormatException('Invalid receipt result candidates.');
+  }
+  return AiReceiptHeaderPayload(
+    merchant: _nullableBoundedText(result, 'merchant', 191),
+    receiptNumber: _nullableBoundedText(result, 'receiptNumber', 191),
+    purchaseDate: _nullableDate(result, 'purchaseDate'),
+    currency: _nullableCurrency(result, 'currency'),
+    totalMinorUnits: _nullableMinorUnits(result, 'totalAmount'),
+    taxMinorUnits: _nullableMinorUnits(result, 'taxAmount'),
+    notes: _nullableBoundedText(result, 'notes', 2000),
+  );
+}
+
+AiReceiptCandidatePayload _receiptCandidatePayload(
+  Map<String, Object?> payload,
+  AiReceiptHeaderPayload? header,
+) => AiReceiptCandidatePayload(
+  rawText: _nullableBoundedText(payload, 'rawText', 500),
+  description: _boundedString(payload, 'description', 500),
+  quantity: _positiveDecimal(payload, 'quantity'),
+  packText: _nullableBoundedText(payload, 'packText', 191),
+  unitPriceMinorUnits: _nullableMinorUnits(payload, 'unitPrice'),
+  lineTotalMinorUnits: _nullableMinorUnits(payload, 'lineTotal'),
+  header: header,
+);
+
+void _validateCandidatePayload(Map<String, Object?> payload) {
+  _requireExactKeys(payload, _candidatePayloadKeys, 'AI candidate payload');
+  _boundedString(payload, 'description', 500);
+  for (final field in <String>['rawText', 'brand', 'product', 'variant']) {
+    _nullableBoundedText(payload, field, 500);
+  }
+  _nonNegativeDecimal(payload, 'quantity');
+  _nullableBoundedText(payload, 'packText', 191);
+  for (final field in <String>[
+    'unitPrice',
+    'lineTotal',
+    'discountAmount',
+    'taxAmount',
+  ]) {
+    _nullableMinorUnits(payload, field);
+  }
+  final boundingRegion = payload['boundingRegion'];
+  if (boundingRegion != null && boundingRegion is! Map<String, Object?>) {
+    throw const FormatException('Invalid AI candidate bounding region.');
+  }
+  final confidence = payload['confidence'];
+  if (confidence is! num || confidence < 0 || confidence > 1) {
+    throw const FormatException('Invalid AI candidate confidence.');
+  }
+  if (payload['fieldConfidence'] is! Map<String, Object?>) {
+    throw const FormatException('Invalid AI candidate field confidence.');
+  }
+  _boundedStringList(payload['warnings'], 'candidate warnings', 20);
+  _boundedStringList(
+    payload['unresolvedValues'],
+    'candidate unresolved values',
+    20,
   );
 }
 
@@ -634,6 +765,108 @@ String? _nullableString(Map<String, Object?> object, String key) {
 String? _optionalString(Object? value) =>
     value is String && value.trim().isNotEmpty ? value : null;
 
+String _boundedString(Map<String, Object?> object, String key, int maximum) {
+  final value = _string(object, key).trim();
+  if (value.length > maximum) throw FormatException('Invalid $key.');
+  return value;
+}
+
+String? _nullableBoundedText(
+  Map<String, Object?> object,
+  String key,
+  int maximum,
+) {
+  if (!object.containsKey(key)) throw FormatException('Missing $key.');
+  final value = object[key];
+  if (value == null) return null;
+  if (value is! String || value.length > maximum) {
+    throw FormatException('Invalid $key.');
+  }
+  final normalized = value.trim();
+  return normalized.isEmpty ? null : normalized;
+}
+
+double _positiveDecimal(Map<String, Object?> object, String key) {
+  final parsed = _nonNegativeDecimal(object, key);
+  if (parsed <= 0) throw FormatException('Invalid $key.');
+  return parsed;
+}
+
+double _nonNegativeDecimal(Map<String, Object?> object, String key) {
+  final value = object[key];
+  if (value is! String || !_decimalPattern.hasMatch(value)) {
+    throw FormatException('Invalid $key.');
+  }
+  final parsed = double.tryParse(value);
+  if (parsed == null || !parsed.isFinite || parsed < 0) {
+    throw FormatException('Invalid $key.');
+  }
+  return parsed;
+}
+
+int? _nullableMinorUnits(Map<String, Object?> object, String key) {
+  if (!object.containsKey(key)) throw FormatException('Missing $key.');
+  final value = object[key];
+  if (value == null) return null;
+  if (value is! String) throw FormatException('Invalid $key.');
+  final match = _decimalPartsPattern.firstMatch(value);
+  if (match == null) throw FormatException('Invalid $key.');
+  final fraction = match.group(2) ?? '';
+  if (fraction.length > 2 && fraction.substring(2).contains(RegExp('[1-9]'))) {
+    throw FormatException('Invalid $key precision.');
+  }
+  final whole = int.tryParse(match.group(1)!);
+  final cents = int.tryParse('${fraction}00'.substring(0, 2));
+  if (whole == null || cents == null) throw FormatException('Invalid $key.');
+  return whole * 100 + cents;
+}
+
+DateTime? _nullableDate(Map<String, Object?> object, String key) {
+  final raw = _nullableBoundedText(object, key, 10);
+  if (raw == null) return null;
+  final match = _datePattern.firstMatch(raw);
+  if (match == null) throw FormatException('Invalid $key.');
+  final parsed = DateTime.utc(
+    int.parse(match.group(1)!),
+    int.parse(match.group(2)!),
+    int.parse(match.group(3)!),
+  );
+  if ('${parsed.year.toString().padLeft(4, '0')}-'
+          '${parsed.month.toString().padLeft(2, '0')}-'
+          '${parsed.day.toString().padLeft(2, '0')}' !=
+      raw) {
+    throw FormatException('Invalid $key.');
+  }
+  return parsed;
+}
+
+String? _nullableCurrency(Map<String, Object?> object, String key) {
+  final value = _nullableBoundedText(object, key, 3);
+  if (value != null && !_currencyPattern.hasMatch(value)) {
+    throw FormatException('Invalid $key.');
+  }
+  return value;
+}
+
+void _boundedStringList(Object? value, String label, int maximum) {
+  if (value is! List<Object?> ||
+      value.length > maximum ||
+      value.any((item) => item is! String || item.length > 500)) {
+    throw FormatException('Invalid $label.');
+  }
+}
+
+void _requireExactKeys(
+  Map<String, Object?> object,
+  Set<String> expected,
+  String label,
+) {
+  if (object.length != expected.length ||
+      !object.keys.every(expected.contains)) {
+    throw FormatException('Unexpected $label fields.');
+  }
+}
+
 bool _boolean(Map<String, Object?> object, String key) {
   final value = object[key];
   if (value is! bool) throw FormatException('Missing $key.');
@@ -672,3 +905,38 @@ const Set<String> _serverProviderIds = <String>{
   'ollama',
 };
 final RegExp _profileIdPattern = RegExp(r'^[A-Za-z0-9-]{1,36}$');
+final RegExp _decimalPattern = RegExp(r'^[0-9]+(?:\.[0-9]+)?$');
+final RegExp _decimalPartsPattern = RegExp(r'^([0-9]+)(?:\.([0-9]+))?$');
+final RegExp _datePattern = RegExp(r'^(\d{4})-(\d{2})-(\d{2})$');
+final RegExp _currencyPattern = RegExp(r'^[A-Z]{3}$');
+const Set<String> _candidatePayloadKeys = <String>{
+  'candidateType',
+  'rawText',
+  'description',
+  'brand',
+  'product',
+  'variant',
+  'quantity',
+  'packText',
+  'unitPrice',
+  'lineTotal',
+  'discountAmount',
+  'taxAmount',
+  'boundingRegion',
+  'confidence',
+  'fieldConfidence',
+  'warnings',
+  'unresolvedValues',
+};
+const Set<String> _receiptResultKeys = <String>{
+  'documentType',
+  'merchant',
+  'receiptNumber',
+  'purchaseDate',
+  'currency',
+  'totalAmount',
+  'taxAmount',
+  'notes',
+  'warnings',
+  'candidates',
+};
