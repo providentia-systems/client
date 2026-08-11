@@ -57,12 +57,24 @@ final class MediaAcquisitionService {
     required AiExtractionKind purpose,
     int limit = 12,
   }) async {
+    if (purpose == AiExtractionKind.receipt && (limit < 1 || limit > 8)) {
+      throw const MediaAcquisitionException(
+        'Select between 1 and 8 receipt images.',
+      );
+    }
     final selected = await _imagePicker.pickMultiImage(limit: limit);
-    return Future.wait(
-      selected.map(
-        (file) => _registerXFile(file, homeId: homeId, purpose: purpose),
-      ),
-    );
+    final assets = <AiMediaAsset>[];
+    for (var index = 0; index < selected.length; index++) {
+      assets.add(
+        await _registerXFile(
+          selected[index],
+          homeId: homeId,
+          purpose: purpose,
+          pageIndex: purpose == AiExtractionKind.receipt ? index : null,
+        ),
+      );
+    }
+    return assets;
   }
 
   Future<AiMediaAsset?> recordVideo({
@@ -111,6 +123,7 @@ final class MediaAcquisitionService {
     XFile file, {
     required String homeId,
     required AiExtractionKind purpose,
+    int? pageIndex,
   }) async {
     final bytes = await file.readAsBytes();
     return _registerBytes(
@@ -119,6 +132,7 @@ final class MediaAcquisitionService {
       mimeType: file.mimeType ?? _mimeType(file.name.split('.').last),
       homeId: homeId,
       purpose: purpose,
+      pageIndex: pageIndex,
     );
   }
 
@@ -128,6 +142,7 @@ final class MediaAcquisitionService {
     required String mimeType,
     required String homeId,
     required AiExtractionKind purpose,
+    int? pageIndex,
   }) {
     if (bytes.length < 16 || bytes.length > maximumSourceBytes) {
       throw const MediaAcquisitionException(
@@ -135,14 +150,16 @@ final class MediaAcquisitionService {
       );
     }
     final digest = sha256.convert(bytes).toString();
+    final pageSuffix = pageIndex == null ? '' : '-page-$pageIndex';
     final asset = AiMediaAsset(
-      id: 'source-${digest.substring(0, 24)}',
+      id: 'source-${digest.substring(0, 24)}$pageSuffix',
       homeId: homeId,
       localReference: 'registered://$name',
       purpose: purpose,
       mimeType: mimeType,
       byteLength: bytes.length,
       createdAt: DateTime.now().toUtc(),
+      pageIndex: pageIndex,
     );
     _registry.register(asset, bytes);
     return asset;

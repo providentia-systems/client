@@ -85,6 +85,259 @@ void main() {
   });
 
   test(
+    'protocol 2 sends the revisioned unresolved receipt decision exactly',
+    () async {
+      late Map<String, Object?> requestBody;
+      final client = generated.ProvidentiaApiClient(
+        baseUri: Uri.parse('https://api.example.test'),
+        httpClient: MockClient((request) async {
+          requestBody = jsonDecode(request.body) as Map<String, Object?>;
+          return http.Response(
+            jsonEncode(<String, Object?>{
+              'protocolVersion': 2,
+              'batchId': requestBody['batchId'],
+              'requestId': 'unresolved-push',
+              'serverTime': '2026-08-11T12:00:00Z',
+              'results': <Object?>[
+                <String, Object?>{
+                  'operationId': operationId,
+                  'status': 'accepted',
+                  'revision': 3,
+                  'changeCursor': 'cursor-unresolved',
+                  'result': <String, Object?>{
+                    'id': '0198a0b1-c2d3-7e4f-b456-789abcdef012',
+                    'revision': 3,
+                    'approvalStatus': 'unresolved',
+                  },
+                },
+              ],
+              'highWaterCursor': 'cursor-unresolved',
+            }),
+            200,
+          );
+        }),
+      );
+
+      final response = await GeneratedSyncGateway(client).push(
+        homeId: homeId,
+        lastPulledCursor: null,
+        operations: <PendingClientOperation>[
+          PendingClientOperation(
+            operationId: operationId,
+            deviceId: deviceId,
+            homeId: homeId,
+            entityType: 'purchasing-receipt-line',
+            entityId: '0198a0b1-c2d3-7e4f-b456-789abcdef012',
+            operationType: 'purchasing.receipt-line.unresolve',
+            baseRevision: 2,
+            clientTimestamp: DateTime.utc(2026, 8, 11, 11),
+            payloadSchemaVersion: 1,
+            payload: const <String, Object?>{
+              'receiptId': '0198a0b1-c2d3-7e4f-b456-789abcdef013',
+            },
+            retryCount: 0,
+          ),
+        ],
+      );
+
+      final command =
+          (requestBody['operations'] as List<Object?>).single
+              as Map<String, Object?>;
+      expect(command['commandType'], 'purchasing.receipt-line.unresolve');
+      expect(command['baseRevision'], 2);
+      expect(command['payload'], <String, Object?>{
+        'receiptId': '0198a0b1-c2d3-7e4f-b456-789abcdef013',
+      });
+      expect(response.results.single.kind, PushResultKind.acknowledged);
+      expect(response.results.single.acceptedRevision, 3);
+    },
+  );
+
+  test(
+    'operation status preserves request order and mixed known/unknown results',
+    () async {
+      const unknownOperationId = '0198a0b1-c2d3-7e4f-9234-56789abcdef1';
+      late http.Request captured;
+      final client = generated.ProvidentiaApiClient(
+        baseUri: Uri.parse('https://api.example.test'),
+        httpClient: MockClient((request) async {
+          captured = request;
+          return http.Response(
+            jsonEncode(<String, Object?>{
+              'protocolVersion': 2,
+              // Deliberately return the valid set in a different order. The
+              // gateway restores caller order before exposing the response.
+              'operations': <Object?>[
+                <String, Object?>{
+                  'operationId': unknownOperationId,
+                  'known': false,
+                },
+                <String, Object?>{
+                  'operationId': operationId,
+                  'known': true,
+                  'result': <String, Object?>{
+                    'operationId': operationId,
+                    'status': 'accepted',
+                    'commandType': 'inventory.location.create',
+                    'entityId': '0198a0b1-c2d3-7e4f-b456-789abcdef012',
+                    'result': <String, Object?>{
+                      'id': '0198a0b1-c2d3-7e4f-b456-789abcdef012',
+                      'revision': 4,
+                    },
+                  },
+                },
+              ],
+            }),
+            200,
+          );
+        }),
+      );
+
+      final response = await GeneratedSyncGateway(client).operationStatuses(
+        homeId: homeId,
+        deviceId: deviceId,
+        operationIds: const <String>[operationId, unknownOperationId],
+      );
+
+      expect(captured.url.path, '/api/v1/homes/$homeId/sync/operation-status');
+      expect(captured.method, 'POST');
+      expect(jsonDecode(captured.body), <String, Object?>{
+        'deviceId': deviceId,
+        'operationIds': <Object?>[operationId, unknownOperationId],
+      });
+      expect(
+        response.operations.map((item) => item.operationId),
+        const <String>[operationId, unknownOperationId],
+      );
+      expect(response.operations.first.isKnown, isTrue);
+      expect(
+        response.operations.first.result!.kind,
+        PushResultKind.acknowledged,
+      );
+      expect(response.operations.first.result!.acceptedRevision, 4);
+      expect(response.operations.last.isKnown, isFalse);
+    },
+  );
+
+  for (final statusCode in <int>[403, 404]) {
+    test(
+      'operation status HTTP $statusCode is authorization failure',
+      () async {
+        final client = generated.ProvidentiaApiClient(
+          baseUri: Uri.parse('https://api.example.test'),
+          httpClient: MockClient(
+            (_) async => http.Response(
+              jsonEncode(<String, Object?>{
+                'type': 'about:blank',
+                'title': statusCode == 403 ? 'Forbidden' : 'Not Found',
+                'status': statusCode,
+                'detail': 'Home access is unavailable.',
+                'requestId': 'status-$statusCode',
+              }),
+              statusCode,
+            ),
+          ),
+        );
+
+        await expectLater(
+          GeneratedSyncGateway(client).operationStatuses(
+            homeId: homeId,
+            deviceId: deviceId,
+            operationIds: const <String>[operationId],
+          ),
+          throwsA(isA<AuthorizationSyncException>()),
+        );
+      },
+    );
+  }
+
+  test(
+    'operation status rejects malformed or cross-boundary response fields',
+    () async {
+      for (final operations in <List<Object?>>[
+        <Object?>[
+          <String, Object?>{
+            'operationId': operationId,
+            'known': false,
+            'result': null,
+          },
+        ],
+        <Object?>[
+          <String, Object?>{
+            'operationId': operationId,
+            'known': false,
+            'homeId': homeId,
+          },
+        ],
+        <Object?>[
+          <String, Object?>{
+            'operationId': operationId,
+            'known': true,
+            'result': <String, Object?>{
+              'operationId': operationId,
+              'status': 'accepted',
+              'deviceId': deviceId,
+            },
+          },
+        ],
+      ]) {
+        final client = generated.ProvidentiaApiClient(
+          baseUri: Uri.parse('https://api.example.test'),
+          httpClient: MockClient(
+            (_) async => http.Response(
+              jsonEncode(<String, Object?>{
+                'protocolVersion': 2,
+                'operations': operations,
+              }),
+              200,
+            ),
+          ),
+        );
+
+        await expectLater(
+          GeneratedSyncGateway(client).operationStatuses(
+            homeId: homeId,
+            deviceId: deviceId,
+            operationIds: const <String>[operationId],
+          ),
+          throwsFormatException,
+        );
+      }
+    },
+  );
+
+  test(
+    'operation status rejects malformed request identities before HTTP',
+    () async {
+      final gateway = GeneratedSyncGateway(
+        generated.ProvidentiaApiClient(
+          baseUri: Uri.parse('https://api.example.test'),
+          httpClient: MockClient((_) async {
+            fail('Malformed status identities must not perform HTTP.');
+          }),
+        ),
+      );
+
+      await expectLater(
+        gateway.operationStatuses(
+          homeId: homeId,
+          deviceId: 'device-from-another-boundary',
+          operationIds: const <String>[operationId],
+        ),
+        throwsFormatException,
+      );
+      await expectLater(
+        gateway.operationStatuses(
+          homeId: homeId,
+          deviceId: deviceId,
+          operationIds: const <String>[operationId, operationId],
+        ),
+        throwsFormatException,
+      );
+    },
+  );
+
+  test(
     'initial pull omits cursor and preserves canonical genesis cursor',
     () async {
       late http.Request captured;
@@ -313,51 +566,9 @@ void main() {
     },
   );
 
-  test(
-    'HTTP 403 blocks each pushed operation as authorization failure',
-    () async {
-      final client = generated.ProvidentiaApiClient(
-        baseUri: Uri.parse('https://api.example.test'),
-        httpClient: MockClient((_) async {
-          return http.Response(
-            jsonEncode(<String, Object?>{
-              'type': 'about:blank',
-              'title': 'Forbidden',
-              'status': 403,
-              'detail': 'Membership was revoked.',
-              'requestId': 'request-3',
-            }),
-            403,
-          );
-        }),
-      );
-      final operation = PendingClientOperation(
-        operationId: operationId,
-        deviceId: deviceId,
-        homeId: homeId,
-        entityType: 'home-preference',
-        entityId: '0198a0b1-c2d3-7e4f-b456-789abcdef012',
-        operationType: 'put',
-        clientTimestamp: DateTime.utc(2026, 7, 30, 11),
-        payloadSchemaVersion: 1,
-        payload: const <String, Object?>{'theme': 'fresh'},
-        retryCount: 0,
-      );
-
-      final response = await GeneratedSyncGateway(client).push(
-        homeId: homeId,
-        lastPulledCursor: 'cursor-1',
-        operations: <PendingClientOperation>[operation],
-      );
-
-      expect(response.results.single.kind, PushResultKind.authorizationFailure);
-      expect(response.results.single.safeMessage, 'Membership was revoked.');
-    },
-  );
-
-  for (final method in <String>['bootstrap', 'pull']) {
+  for (final statusCode in <int>[403, 404]) {
     test(
-      '$method HTTP 403 is authorization, not expired authentication',
+      'HTTP $statusCode blocks each pushed operation as authorization failure',
       () async {
         final client = generated.ProvidentiaApiClient(
           baseUri: Uri.parse('https://api.example.test'),
@@ -365,33 +576,85 @@ void main() {
             return http.Response(
               jsonEncode(<String, Object?>{
                 'type': 'about:blank',
-                'title': 'Forbidden',
-                'status': 403,
-                'detail': 'Home membership no longer permits synchronization.',
-                'requestId': 'request-403',
+                'title': statusCode == 403 ? 'Forbidden' : 'Not Found',
+                'status': statusCode,
+                'detail': 'Home access is unavailable.',
+                'requestId': 'request-3',
               }),
-              403,
+              statusCode,
             );
           }),
         );
-        final gateway = GeneratedSyncGateway(client);
+        final operation = PendingClientOperation(
+          operationId: operationId,
+          deviceId: deviceId,
+          homeId: homeId,
+          entityType: 'home-preference',
+          entityId: '0198a0b1-c2d3-7e4f-b456-789abcdef012',
+          operationType: 'put',
+          clientTimestamp: DateTime.utc(2026, 7, 30, 11),
+          payloadSchemaVersion: 1,
+          payload: const <String, Object?>{'theme': 'fresh'},
+          retryCount: 0,
+        );
 
-        final request = method == 'bootstrap'
-            ? gateway.bootstrap(homeId: homeId)
-            : gateway.pull(homeId: homeId, afterCursor: 'cursor-1');
+        final response = await GeneratedSyncGateway(client).push(
+          homeId: homeId,
+          lastPulledCursor: 'cursor-1',
+          operations: <PendingClientOperation>[operation],
+        );
 
-        await expectLater(
-          request,
-          throwsA(
-            isA<AuthorizationSyncException>().having(
-              (error) => error.safeMessage,
-              'safe message',
-              contains('membership'),
-            ),
-          ),
+        expect(
+          response.results.single.kind,
+          PushResultKind.authorizationFailure,
+        );
+        expect(
+          response.results.single.safeMessage,
+          'Home access is unavailable.',
         );
       },
     );
+  }
+
+  for (final method in <String>['bootstrap', 'pull']) {
+    for (final statusCode in <int>[403, 404]) {
+      test(
+        '$method HTTP $statusCode is authorization, not authentication',
+        () async {
+          final client = generated.ProvidentiaApiClient(
+            baseUri: Uri.parse('https://api.example.test'),
+            httpClient: MockClient((_) async {
+              return http.Response(
+                jsonEncode(<String, Object?>{
+                  'type': 'about:blank',
+                  'title': statusCode == 403 ? 'Forbidden' : 'Not Found',
+                  'status': statusCode,
+                  'detail': 'Home membership is unavailable.',
+                  'requestId': 'request-$statusCode',
+                }),
+                statusCode,
+              );
+            }),
+          );
+          final gateway = GeneratedSyncGateway(client);
+
+          final request = method == 'bootstrap'
+              ? gateway.bootstrap(homeId: homeId)
+              : gateway.pull(homeId: homeId, afterCursor: 'cursor-1');
+
+          await expectLater(
+            request,
+            throwsA(
+              isA<AuthorizationSyncException>().having(
+                (error) => error.safeMessage,
+                'safe message',
+                contains('membership'),
+              ),
+            ),
+          );
+        },
+      );
+    }
   }
 
   test('pull maps the exact HTTP 410 problem to resync required', () async {

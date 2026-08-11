@@ -22,8 +22,13 @@ abstract interface class InventoryRepository {
 abstract interface class InventoryProductCreationRepository
     implements InventoryRepository {
   bool get supportsPrivateHomeProductCreation;
+  bool get supportsCatalogHomeProductCreation;
 
   Future<InventoryProductCreationResult> createPrivateHomeProduct(
     PrivateHomeProductDraft draft,
+  );
+
+  Future<InventoryProductCreationResult> createCatalogHomeProduct(
+    CatalogHomeProductDraft draft,
   );
 }

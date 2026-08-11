@@ -1,5 +1,110 @@
 import 'package:providentia/features/purchasing/domain/purchase_models.dart';
 
+final class PurchaseMatchRanker {
+  const PurchaseMatchRanker();
+
+  List<RankedPurchaseMatchCandidate> rank({
+    required PurchaseReceiptLineCapture line,
+    required Iterable<PurchaseMatchCandidate> candidates,
+  }) {
+    final raw = _normalizeMatchText(line.rawDescription);
+    final originalPack = _normalizeMatchText(line.originalPackText ?? '');
+    final ranked = <RankedPurchaseMatchCandidate>[];
+    for (final candidate in candidates) {
+      if (candidate.homeId != line.homeId) {
+        throw StateError('Cross-home purchase matching is not permitted.');
+      }
+      final names = <String>{
+        _normalizeMatchText(candidate.name),
+        for (final alias in candidate.aliases) _normalizeMatchText(alias),
+        if (candidate.brand.trim().isNotEmpty)
+          _normalizeMatchText('${candidate.brand} ${candidate.name}'),
+        if (candidate.brand.trim().isNotEmpty)
+          _normalizeMatchText('${candidate.name} ${candidate.brand}'),
+      }..remove('');
+      final pack = _normalizeMatchText(candidate.packSize);
+      final packAliases = <String>{
+        pack,
+        for (final alias in candidate.aliases) _normalizeMatchText(alias),
+      }..remove('');
+      final combined = <String>{
+        for (final name in names) _normalizeMatchText('$name $pack'),
+        for (final name in names) _normalizeMatchText('$pack $name'),
+      };
+      final descriptionExact = names.contains(raw);
+      final packExact =
+          originalPack.isNotEmpty && packAliases.contains(originalPack);
+      late final PurchaseMatchBasis basis;
+      late final int score;
+      if (combined.contains(raw) || (descriptionExact && packExact)) {
+        basis = PurchaseMatchBasis.exactDescriptionAndPack;
+        score = 1000;
+      } else if (descriptionExact) {
+        basis = PurchaseMatchBasis.exactDescriptionOrAlias;
+        score = 900;
+      } else if (packExact) {
+        basis = PurchaseMatchBasis.exactPack;
+        score = 800;
+      } else if (names.any(
+        (name) => raw.contains(name) || name.contains(raw),
+      )) {
+        basis = PurchaseMatchBasis.partialDescription;
+        score = 600;
+      } else {
+        final rawTokens = raw.split(' ').where((token) => token.length > 1);
+        final metadata = _normalizeMatchText(
+          <String>[
+            candidate.name,
+            candidate.brand,
+            candidate.category,
+            candidate.packSize,
+            ...candidate.aliases,
+          ].join(' '),
+        );
+        final overlap = rawTokens
+            .where((token) => metadata.split(' ').contains(token))
+            .toSet()
+            .length;
+        if (overlap > 0) {
+          basis = PurchaseMatchBasis.metadataOverlap;
+          score = 400 + overlap;
+        } else {
+          basis = PurchaseMatchBasis.itemMasterFallback;
+          score = 0;
+        }
+      }
+      final homeSelectionBias = switch (candidate.kind) {
+        PurchaseMatchCandidateKind.selectedCatalogPack => 2,
+        PurchaseMatchCandidateKind.privateHomeProduct => 1,
+        PurchaseMatchCandidateKind.unselectedPublishedPack => 0,
+      };
+      ranked.add(
+        RankedPurchaseMatchCandidate(
+          candidate: candidate,
+          basis: basis,
+          score: score + homeSelectionBias,
+        ),
+      );
+    }
+    ranked.sort((left, right) {
+      final score = right.score.compareTo(left.score);
+      if (score != 0) return score;
+      final name = left.candidate.name.compareTo(right.candidate.name);
+      if (name != 0) return name;
+      final pack = left.candidate.packSize.compareTo(right.candidate.packSize);
+      return pack != 0 ? pack : left.candidate.id.compareTo(right.candidate.id);
+    });
+    return List<RankedPurchaseMatchCandidate>.unmodifiable(ranked);
+  }
+}
+
+String _normalizeMatchText(String value) => value
+    .trim()
+    .toLowerCase()
+    .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+    .trim()
+    .replaceAll(RegExp(r'\s+'), ' ');
+
 final class PurchaseHistoryGrouper {
   const PurchaseHistoryGrouper();
 

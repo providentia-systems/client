@@ -248,6 +248,7 @@ final class AiExtractionRequest {
     required this.schemaVersion,
     required this.promptVersion,
     required this.timeout,
+    this.targetId,
     this.maxOutputTokens = 4096,
     this.storeProviderResponse = false,
   });
@@ -261,6 +262,10 @@ final class AiExtractionRequest {
   final String schemaVersion;
   final String promptVersion;
   final Duration timeout;
+
+  /// Optional ordinary domain resource bound to this extraction. Stock-photo
+  /// workflows bind this to the already-open count session.
+  final String? targetId;
   final int maxOutputTokens;
   final bool storeProviderResponse;
 }

@@ -1,10 +1,28 @@
+import 'dart:async';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:providentia/features/ai_integration/domain/ai_models.dart';
 import 'package:providentia/features/ai_integration/domain/server_ai_models.dart';
+import 'package:providentia/features/ai_integration/infrastructure/receipt_page_media_editor.dart';
 import 'package:providentia/features/ai_integration/presentation/server_ai_workspace_controller.dart';
 
 typedef AiSingleImagePicker =
     Future<AiMediaAsset?> Function(AiExtractionKind kind);
+typedef AiMultipleImagePicker =
+    Future<List<AiMediaAsset>> Function(AiExtractionKind kind);
+typedef AiReceiptPdfPicker = Future<List<AiMediaAsset>> Function();
+typedef AiLocalImageReader = Future<Uint8List> Function(AiMediaAsset asset);
+typedef AiReceiptPageTransformer =
+    Future<AiMediaAsset> Function({
+      required AiMediaAsset asset,
+      required ReceiptPageTransform transform,
+      NormalizedRegion? crop,
+    });
+typedef AiLocalImageDiscarder =
+    Future<void> Function(Iterable<AiMediaAsset> assets);
+typedef AiPreparedImageReader =
+    Future<Uint8List> Function(PreparedAiMedia media);
 
 /// Permission-gated server-proxy AI surface. Candidate decisions are recorded
 /// on the AI extraction only; this page never mutates inventory or purchases.
@@ -12,12 +30,24 @@ final class ServerAiWorkspacePage extends StatefulWidget {
   const ServerAiWorkspacePage({
     required this.controller,
     required this.pickSingleImage,
+    this.pickMultipleImages,
+    this.pickReceiptPdf,
+    this.readLocalImage,
+    this.transformReceiptPage,
+    this.discardLocalImages,
+    this.readPreparedImage,
     this.onReviewHandoff,
     super.key,
   });
 
   final ServerAiWorkspaceController controller;
   final AiSingleImagePicker pickSingleImage;
+  final AiMultipleImagePicker? pickMultipleImages;
+  final AiReceiptPdfPicker? pickReceiptPdf;
+  final AiLocalImageReader? readLocalImage;
+  final AiReceiptPageTransformer? transformReceiptPage;
+  final AiLocalImageDiscarder? discardLocalImages;
+  final AiPreparedImageReader? readPreparedImage;
   final ValueChanged<AiReviewHandoff>? onReviewHandoff;
 
   @override
@@ -26,14 +56,36 @@ final class ServerAiWorkspacePage extends StatefulWidget {
 
 final class _ServerAiWorkspacePageState extends State<ServerAiWorkspacePage> {
   String? _selectedProfileId;
+  List<AiMediaAsset> _receiptDraftPages = <AiMediaAsset>[];
+  List<Uint8List?> _receiptDraftPreviews = <Uint8List?>[];
+  bool _editingReceiptPage = false;
 
   @override
   void initState() {
     super.initState();
+    widget.controller.addListener(_handleControllerAccess);
     if (widget.controller.status == ServerAiWorkspaceStatus.idle) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) widget.controller.load();
       });
+    }
+  }
+
+  @override
+  void didUpdateWidget(ServerAiWorkspacePage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_handleControllerAccess);
+      widget.controller.addListener(_handleControllerAccess);
+      unawaited(_clearReceiptDraft());
+    }
+  }
+
+  void _handleControllerAccess() {
+    if ((!widget.controller.capabilities.mayRead ||
+            !widget.controller.capabilities.mayUse) &&
+        _receiptDraftPages.isNotEmpty) {
+      unawaited(_clearReceiptDraft());
     }
   }
 
@@ -207,12 +259,12 @@ final class _ServerAiWorkspacePageState extends State<ServerAiWorkspacePage> {
         ],
         const Divider(height: 32),
         Text(
-          'Extract one image',
+          'Extract receipt pages or a stock image',
           style: Theme.of(context).textTheme.titleLarge,
         ),
         const SizedBox(height: 8),
         const Text(
-          'Providentia re-encodes the selected image, removes embedded metadata, and binds your confirmation to the exact prepared digest.',
+          'Receipt pages stay ordered and local while you preview, rotate, or crop them. Providentia then re-encodes every selected image, removes embedded metadata, and binds your confirmation to every exact prepared digest.',
         ),
         const SizedBox(height: 12),
         Wrap(
@@ -222,11 +274,18 @@ final class _ServerAiWorkspacePageState extends State<ServerAiWorkspacePage> {
             FilledButton.icon(
               key: const Key('ai-pick-receipt'),
               onPressed: _canExtract(selected)
-                  ? () => _pickAndPrepare(selected!, AiExtractionKind.receipt)
+                  ? () => _pickReceiptPages(selected!)
                   : null,
               icon: const Icon(Icons.receipt_long_outlined),
               label: const Text('Choose receipt'),
             ),
+            if (widget.pickReceiptPdf != null)
+              OutlinedButton.icon(
+                key: const Key('ai-pick-receipt-pdf'),
+                onPressed: _canExtract(selected) ? _pickReceiptPdf : null,
+                icon: const Icon(Icons.picture_as_pdf_outlined),
+                label: const Text('Choose receipt PDF'),
+              ),
             FilledButton.tonalIcon(
               key: const Key('ai-pick-stock'),
               onPressed: _canExtract(selected)
@@ -238,6 +297,10 @@ final class _ServerAiWorkspacePageState extends State<ServerAiWorkspacePage> {
             ),
           ],
         ),
+        if (_receiptDraftPages.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 16),
+          _receiptDraftCard(selected!),
+        ],
         if (controller.status == ServerAiWorkspaceStatus.preparing ||
             controller.status ==
                 ServerAiWorkspaceStatus.processing) ...<Widget>[
@@ -246,7 +309,11 @@ final class _ServerAiWorkspacePageState extends State<ServerAiWorkspacePage> {
         ],
         if (controller.prepared != null) ...<Widget>[
           const SizedBox(height: 16),
-          _ConsentCard(controller: controller),
+          _ConsentCard(
+            key: ValueKey<String>(controller.prepared!.id),
+            controller: controller,
+            readPreparedImage: widget.readPreparedImage,
+          ),
         ],
         if (controller.status ==
             ServerAiWorkspaceStatus.quarantined) ...<Widget>[
@@ -299,6 +366,280 @@ final class _ServerAiWorkspacePageState extends State<ServerAiWorkspacePage> {
     await widget.controller.prepareOne(provider: provider, asset: asset);
   }
 
+  Future<void> _pickReceiptPages(AiProviderProfile provider) async {
+    final multiPicker = widget.pickMultipleImages;
+    if (multiPicker == null) {
+      await _pickAndPrepare(provider, AiExtractionKind.receipt);
+      return;
+    }
+    final selected = await multiPicker(AiExtractionKind.receipt);
+    await _stageReceiptPages(selected);
+  }
+
+  Future<void> _pickReceiptPdf() async {
+    final picker = widget.pickReceiptPdf;
+    if (picker == null) return;
+    final selected = await picker();
+    if (!mounted || selected.isEmpty) return;
+    await _stageReceiptPages(selected);
+  }
+
+  Future<void> _stageReceiptPages(List<AiMediaAsset> selected) async {
+    if (!mounted || selected.isEmpty) return;
+    if (selected.length > 8 ||
+        selected.any(
+          (asset) =>
+              asset.homeId != widget.controller.capabilities.homeId ||
+              asset.purpose != AiExtractionKind.receipt ||
+              !const <String>{
+                'image/jpeg',
+                'image/png',
+                'image/webp',
+              }.contains(asset.mimeType),
+        )) {
+      await _discardLocalReceiptPages(selected);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Choose between 1 and 8 receipt pages from the active home.',
+          ),
+        ),
+      );
+      return;
+    }
+    await _clearReceiptDraft();
+    if (!mounted) {
+      await _discardLocalReceiptPages(selected);
+      return;
+    }
+    final ordered = <AiMediaAsset>[
+      for (var index = 0; index < selected.length; index++)
+        _withPageIndex(selected[index], index),
+    ];
+    setState(() {
+      _receiptDraftPages = ordered;
+      _receiptDraftPreviews = List<Uint8List?>.filled(ordered.length, null);
+    });
+    await _loadReceiptDraftPreviews(ordered);
+  }
+
+  AiMediaAsset _withPageIndex(AiMediaAsset asset, int pageIndex) =>
+      AiMediaAsset(
+        id: asset.id,
+        homeId: asset.homeId,
+        localReference: asset.localReference,
+        purpose: asset.purpose,
+        mimeType: asset.mimeType,
+        byteLength: asset.byteLength,
+        createdAt: asset.createdAt,
+        pageIndex: pageIndex,
+        width: asset.width,
+        height: asset.height,
+      );
+
+  Future<void> _loadReceiptDraftPreviews(List<AiMediaAsset> pages) async {
+    final reader = widget.readLocalImage;
+    if (reader == null) return;
+    for (var index = 0; index < pages.length; index++) {
+      try {
+        final bytes = await reader(pages[index]);
+        if (!mounted ||
+            index >= _receiptDraftPages.length ||
+            _receiptDraftPages[index].id != pages[index].id) {
+          return;
+        }
+        setState(() => _receiptDraftPreviews[index] = bytes);
+      } catch (_) {
+        // A missing local page remains visibly unavailable and cannot be sent.
+      }
+    }
+  }
+
+  Widget _receiptDraftCard(AiProviderProfile provider) {
+    final allPreviewed =
+        _receiptDraftPreviews.length == _receiptDraftPages.length &&
+        _receiptDraftPreviews.every((bytes) => bytes?.isNotEmpty ?? false);
+    return Card(
+      key: const Key('ai-receipt-page-draft'),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              '${_receiptDraftPages.length} ordered receipt page${_receiptDraftPages.length == 1 ? '' : 's'}',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Check the order and make local edits before preparing the exact outbound images.',
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 250,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: _receiptDraftPages.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 12),
+                itemBuilder: (context, index) => SizedBox(
+                  width: 190,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      Text('Page ${index + 1}'),
+                      const SizedBox(height: 4),
+                      Expanded(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            border: Border.all(
+                              color: Theme.of(context).colorScheme.outline,
+                            ),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: _receiptDraftPreviews[index] != null
+                              ? Image.memory(
+                                  _receiptDraftPreviews[index]!,
+                                  key: Key('ai-receipt-local-preview-$index'),
+                                  fit: BoxFit.contain,
+                                )
+                              : const Center(
+                                  child: Text('Local preview unavailable'),
+                                ),
+                        ),
+                      ),
+                      Wrap(
+                        spacing: 4,
+                        children: <Widget>[
+                          IconButton(
+                            key: Key('ai-receipt-rotate-$index'),
+                            tooltip: 'Rotate page ${index + 1} clockwise 90°',
+                            onPressed:
+                                !_editingReceiptPage &&
+                                    widget.transformReceiptPage != null
+                                ? () => _transformReceiptDraftPage(
+                                    index,
+                                    ReceiptPageTransform.rotateClockwise90,
+                                  )
+                                : null,
+                            icon: const Icon(Icons.rotate_90_degrees_cw),
+                          ),
+                          IconButton(
+                            key: Key('ai-receipt-crop-$index'),
+                            tooltip: 'Crop 5% margins from page ${index + 1}',
+                            onPressed:
+                                !_editingReceiptPage &&
+                                    widget.transformReceiptPage != null
+                                ? () => _transformReceiptDraftPage(
+                                    index,
+                                    ReceiptPageTransform.crop,
+                                  )
+                                : null,
+                            icon: const Icon(Icons.crop),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            FilledButton.icon(
+              key: const Key('ai-prepare-receipt-pages'),
+              onPressed:
+                  allPreviewed &&
+                      !_editingReceiptPage &&
+                      !widget.controller.isBusy
+                  ? () => _prepareReceiptDraft(provider)
+                  : null,
+              icon: const Icon(Icons.verified_user_outlined),
+              label: const Text('Prepare pages for consent'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _transformReceiptDraftPage(
+    int index,
+    ReceiptPageTransform transform,
+  ) async {
+    final editor = widget.transformReceiptPage;
+    if (editor == null || index >= _receiptDraftPages.length) return;
+    setState(() => _editingReceiptPage = true);
+    try {
+      final current = _receiptDraftPages[index];
+      final replacement = await editor(
+        asset: current,
+        transform: transform,
+        crop: transform == ReceiptPageTransform.crop
+            ? NormalizedRegion(
+                pageIndex: index,
+                x: 0.05,
+                y: 0.05,
+                width: 0.9,
+                height: 0.9,
+              )
+            : null,
+      );
+      final reader = widget.readLocalImage;
+      final preview = reader == null ? null : await reader(replacement);
+      if (!mounted ||
+          index >= _receiptDraftPages.length ||
+          _receiptDraftPages[index].id != current.id) {
+        await _discardLocalReceiptPages(<AiMediaAsset>[replacement]);
+        return;
+      }
+      setState(() {
+        _receiptDraftPages[index] = _withPageIndex(replacement, index);
+        _receiptDraftPreviews[index] = preview;
+      });
+    } catch (_) {
+      await _clearReceiptDraft();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('That page could not be edited safely.'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _editingReceiptPage = false);
+    }
+  }
+
+  Future<void> _prepareReceiptDraft(AiProviderProfile provider) async {
+    final pages = List<AiMediaAsset>.of(_receiptDraftPages);
+    await widget.controller.prepareReceiptPages(
+      provider: provider,
+      assets: pages,
+    );
+    await _clearReceiptDraft(pagesToDiscard: pages);
+  }
+
+  Future<void> _clearReceiptDraft({
+    Iterable<AiMediaAsset>? pagesToDiscard,
+  }) async {
+    final pages = List<AiMediaAsset>.of(pagesToDiscard ?? _receiptDraftPages);
+    _receiptDraftPages = <AiMediaAsset>[];
+    _receiptDraftPreviews = <Uint8List?>[];
+    if (mounted) setState(() {});
+    await _discardLocalReceiptPages(pages);
+  }
+
+  Future<void> _discardLocalReceiptPages(Iterable<AiMediaAsset> pages) async {
+    final discard = widget.discardLocalImages;
+    if (discard == null || pages.isEmpty) return;
+    try {
+      await discard(pages);
+    } catch (_) {
+      // The production route independently clears its entire transient source
+      // registry on preparation, revocation, replacement, and disposal.
+    }
+  }
+
   void _handoff() {
     final handoff = widget.controller.buildReviewHandoff();
     if (handoff == null) return;
@@ -349,6 +690,19 @@ final class _ServerAiWorkspacePageState extends State<ServerAiWorkspacePage> {
       draft: draft.draft,
       credential: draft.secret.isEmpty ? null : draft.secret,
     );
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_handleControllerAccess);
+    final pages = List<AiMediaAsset>.of(_receiptDraftPages);
+    _receiptDraftPages = <AiMediaAsset>[];
+    _receiptDraftPreviews = <Uint8List?>[];
+    final discard = widget.discardLocalImages;
+    if (discard != null && pages.isNotEmpty) {
+      unawaited(discard(pages));
+    }
+    super.dispose();
   }
 }
 
@@ -511,6 +865,16 @@ final class _PrivacyBoundaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final directExtraction = switch (settings
+        .mediaHandling
+        .directExtractionUpload) {
+      AiDirectExtractionUpload.transientNotPersisted =>
+        'Not stored on Providentia servers: direct extraction uploads are transient and are discarded after request processing.',
+    };
+    final privateMedia = switch (settings.mediaHandling.privateMediaStorage) {
+      AiPrivateMediaStorage.explicitEncryptedOptIn =>
+        'Optional private-media storage is separate, encrypted, and requires an explicit transient or retained choice.',
+    };
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -523,8 +887,15 @@ final class _PrivacyBoundaryCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             const Text(
-              'Human review is mandatory. Prepared media is sent through the secure server proxy; candidates never change inventory or purchases automatically.',
+              'Human review is mandatory. Cloud processing sends the image through the secure server proxy to the selected provider, so it leaves this device. Candidates never change inventory or purchases automatically.',
             ),
+            const SizedBox(height: 8),
+            Text(
+              directExtraction,
+              key: const Key('ai-direct-extraction-media-disclosure'),
+            ),
+            const SizedBox(height: 4),
+            Text(privateMedia, key: const Key('ai-private-media-disclosure')),
             const SizedBox(height: 8),
             Text(
               'Settings revision ${settings.revision} · credential encryption ${settings.credentialEncryptionAvailable ? 'available' : 'unavailable'}',
@@ -536,16 +907,88 @@ final class _PrivacyBoundaryCard extends StatelessWidget {
   }
 }
 
-final class _ConsentCard extends StatelessWidget {
-  const _ConsentCard({required this.controller});
+final class _ConsentCard extends StatefulWidget {
+  const _ConsentCard({
+    required this.controller,
+    required this.readPreparedImage,
+    super.key,
+  });
 
   final ServerAiWorkspaceController controller;
+  final AiPreparedImageReader? readPreparedImage;
+
+  @override
+  State<_ConsentCard> createState() => _ConsentCardState();
+}
+
+final class _ConsentCardState extends State<_ConsentCard> {
+  List<Uint8List>? _previewBytes;
+  bool _previewUnavailable = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPreview();
+  }
+
+  @override
+  void didUpdateWidget(_ConsentCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_preparedReferences(oldWidget.controller.prepared) !=
+            _preparedReferences(widget.controller.prepared) ||
+        oldWidget.readPreparedImage != widget.readPreparedImage) {
+      _loadPreview();
+    }
+  }
+
+  String? _preparedReferences(PreparedMediaBatch? batch) =>
+      batch?.media.map((media) => media.ephemeralReference).join('|');
+
+  Future<void> _loadPreview() async {
+    _previewBytes = null;
+    _previewUnavailable = false;
+    final reader = widget.readPreparedImage;
+    final batch = widget.controller.prepared;
+    if (reader == null || batch == null || batch.media.isEmpty) {
+      if (mounted) setState(() => _previewUnavailable = true);
+      return;
+    }
+    try {
+      final bytes = <Uint8List>[];
+      for (final media in batch.media) {
+        final page = await reader(media);
+        if (page.isEmpty) throw StateError('Prepared preview is empty.');
+        bytes.add(page);
+      }
+      if (!mounted ||
+          _preparedReferences(widget.controller.prepared) !=
+              _preparedReferences(batch)) {
+        return;
+      }
+      setState(() {
+        _previewBytes = bytes;
+        _previewUnavailable = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _previewUnavailable = true);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final controller = widget.controller;
     final prepared = controller.prepared!;
     final provider = controller.selectedProvider!;
-    final digest = prepared.media.single.sha256;
+    final previewPages = _previewBytes;
+    final pageCount = prepared.media.length;
+    final directExtraction = switch (controller
+        .workspace!
+        .settings
+        .mediaHandling
+        .directExtractionUpload) {
+      AiDirectExtractionUpload.transientNotPersisted =>
+        'This direct extraction upload is not added to Providentia media storage. It is sent through Providentia to your selected provider, so it leaves this device.',
+    };
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -558,32 +1001,133 @@ final class _ConsentCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'Provider: ${provider.displayName} (${provider.model})\nPrepared digest: ${digest.substring(0, 12)}…',
+              'Provider: ${provider.displayName} (${provider.model})\n'
+              '$pageCount prepared image${pageCount == 1 ? '' : 's'} in the displayed order',
             ),
-            CheckboxListTile(
-              key: const Key('ai-transmission-consent'),
-              contentPadding: EdgeInsets.zero,
-              controlAffinity: ListTileControlAffinity.leading,
-              value: controller.transmissionConfirmed,
-              title: const Text(
-                'Send this exact sanitized image through the server proxy',
+            const SizedBox(height: 4),
+            for (var index = 0; index < prepared.media.length; index++)
+              Text(
+                'Page ${index + 1} digest: ${prepared.media[index].sha256.substring(0, 12)}…',
+                key: Key('ai-prepared-digest-$index'),
               ),
-              onChanged: (value) => value ?? false
-                  ? controller.confirmTransmission()
-                  : controller.revokeTransmission(),
+            const SizedBox(height: 8),
+            Text(
+              directExtraction,
+              key: const Key('ai-transmission-media-disclosure'),
             ),
-            FilledButton.icon(
-              key: const Key('ai-send-extraction'),
-              onPressed: controller.transmissionConfirmed && !controller.isBusy
-                  ? controller.extract
-                  : null,
-              icon: const Icon(Icons.auto_awesome_outlined),
-              label: const Text('Extract for review'),
-            ),
+            const SizedBox(height: 12),
+            if (previewPages != null && pageCount == 1)
+              Semantics(
+                label: 'Sanitized image preview selected for AI transmission',
+                image: true,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 280),
+                    child: Image.memory(
+                      previewPages.single,
+                      key: const Key('ai-sanitized-preview'),
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, _, _) => const Text(
+                        'The sanitized preview cannot be displayed. Choose the image again before sending.',
+                        key: Key('ai-sanitized-preview-unavailable'),
+                      ),
+                    ),
+                  ),
+                ),
+              )
+            else if (previewPages != null)
+              SizedBox(
+                height: 280,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: previewPages.length,
+                  separatorBuilder: (_, _) => const SizedBox(width: 12),
+                  itemBuilder: (context, index) => Semantics(
+                    label:
+                        'Sanitized receipt image ${index + 1} of $pageCount selected for AI transmission',
+                    image: true,
+                    child: Column(
+                      children: <Widget>[
+                        Text('Page ${index + 1}'),
+                        const SizedBox(height: 4),
+                        Expanded(
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: Image.memory(
+                              previewPages[index],
+                              key: index == 0
+                                  ? const Key('ai-sanitized-preview')
+                                  : Key('ai-sanitized-preview-$index'),
+                              width: 210,
+                              fit: BoxFit.contain,
+                              errorBuilder: (_, _, _) => const Text(
+                                'The sanitized preview cannot be displayed. Choose the image again before sending.',
+                                key: Key('ai-sanitized-preview-unavailable'),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              )
+            else if (_previewUnavailable)
+              const Text(
+                'The sanitized preview is unavailable. Choose the image again before sending.',
+                key: Key('ai-sanitized-preview-unavailable'),
+              )
+            else
+              const LinearProgressIndicator(
+                key: Key('ai-sanitized-preview-loading'),
+              ),
+            if (controller.review == null) ...<Widget>[
+              CheckboxListTile(
+                key: const Key('ai-transmission-consent'),
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                value: controller.transmissionConfirmed,
+                title: Text(
+                  pageCount == 1
+                      ? 'Send this exact sanitized image through the server proxy'
+                      : 'Send these exact ordered sanitized images through the server proxy',
+                ),
+                onChanged: previewPages == null
+                    ? null
+                    : (value) => value ?? false
+                          ? controller.confirmTransmission()
+                          : controller.revokeTransmission(),
+              ),
+              FilledButton.icon(
+                key: const Key('ai-send-extraction'),
+                onPressed:
+                    previewPages != null &&
+                        controller.transmissionConfirmed &&
+                        !controller.isBusy
+                    ? controller.extract
+                    : null,
+                icon: const Icon(Icons.auto_awesome_outlined),
+                label: const Text('Extract for review'),
+              ),
+            ] else
+              const Padding(
+                padding: EdgeInsets.only(top: 12),
+                child: Text(
+                  'This sanitized local preview remains visible only while you review the candidates.',
+                  key: Key('ai-review-preview-retention'),
+                ),
+              ),
           ],
         ),
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _previewBytes = null;
+    super.dispose();
   }
 }
 

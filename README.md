@@ -10,7 +10,7 @@ architecture tests, and a full CI build matrix.
 Phases 5–8 add household inventory, count sessions, purchase history, shopping
 lists, AI review policies, catalog moderation models, explainable suggestions,
 price intelligence, reporting, and evaluation. The client now pins the
-backend's API `1.12.0` contract and generates 156 callable
+backend's API `1.13.2` contract and generates 158 callable
 operations from the reviewed bytes. Email-only login-link onboarding,
 cross-device browser approval, persistent web/native sessions, current-user
 bootstrap, multiple homes, recipient invitations, home governance, signed-in
@@ -26,11 +26,13 @@ production-composed from Account & access with exact active-home permission
 gates, account-only privacy actions, route-owned controller lifecycles, and a
 dual-navigator session/permission revocation boundary.
 Household AI is likewise production-composed from Account & access behind the
-active home's exact `ai.read` permission. Its route re-encodes one selected
-image, owns and clears all transient bytes, binds every operation to exact
-`ai.read`/`ai.use`/`ai.manage` capabilities, and produces only a reviewed
-handoff. Accepted candidates still require an ordinary, explicitly confirmed
-purchasing or inventory command; the AI surface never mutates household data.
+active home's exact `ai.read` permission. Receipt intake re-encodes one to eight
+ordered photos or locally rasterized PDF pages, while stock counting accepts
+one to eight ordered photos. Each route owns and clears all transient bytes,
+binds every operation to exact `ai.read`/`ai.use`/`ai.manage` capabilities, and
+produces only a reviewed handoff. Accepted candidates still require an ordinary,
+explicitly confirmed purchasing or inventory command; the AI surface never
+mutates household data.
 Most household inventory workspaces still use an explicit local projection and
 are not by themselves an end-to-end test of every backend resource. See
 [docs/phases5-8-contract-release-plan.md](docs/phases5-8-contract-release-plan.md)

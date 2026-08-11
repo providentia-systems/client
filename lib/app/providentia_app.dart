@@ -8,10 +8,13 @@ import 'package:providentia/core/synchronization/sync_models.dart';
 import 'package:providentia/features/homes/domain/home_models.dart';
 import 'package:providentia/features/inventory/presentation/inventory_controller.dart';
 import 'package:providentia/features/inventory/presentation/inventory_workspace.dart';
+import 'package:providentia/features/purchasing/domain/purchase_models.dart';
 import 'package:providentia/features/purchasing/presentation/purchasing_controller.dart';
 import 'package:providentia/features/purchasing/presentation/purchasing_workspace.dart';
 import 'package:providentia/features/shopping/presentation/shopping_controller.dart';
 import 'package:providentia/features/shopping/presentation/shopping_workspace.dart';
+import 'package:providentia/features/sync_conflicts/presentation/sync_conflict_controller.dart';
+import 'package:providentia/features/sync_conflicts/presentation/sync_conflict_page.dart';
 
 /// Presentation capabilities derived from the active home policy returned by
 /// the backend. Unknown or absent permissions remain denied.
@@ -69,6 +72,8 @@ class ProvidentiaApp extends StatefulWidget {
     this.onChangeHome,
     this.onSignOut,
     this.accountPageBuilder,
+    this.syncConflictController,
+    this.onCountReconciliation,
     this.onDispose,
     super.key,
   });
@@ -80,6 +85,8 @@ class ProvidentiaApp extends StatefulWidget {
   final Future<void> Function()? onChangeHome;
   final Future<void> Function()? onSignOut;
   final WidgetBuilder? accountPageBuilder;
+  final SyncConflictController? syncConflictController;
+  final SyncCountReconciliationHandler? onCountReconciliation;
   final VoidCallback? onDispose;
 
   @override
@@ -119,6 +126,7 @@ class _ProvidentiaAppState extends State<ProvidentiaApp> {
   @override
   void dispose() {
     widget.features?.dispose();
+    widget.syncConflictController?.dispose();
     widget.controller.dispose();
     widget.onDispose?.call();
     super.dispose();
@@ -142,6 +150,8 @@ class _ProvidentiaAppState extends State<ProvidentiaApp> {
             onChangeHome: widget.onChangeHome,
             onSignOut: widget.onSignOut,
             accountPageBuilder: widget.accountPageBuilder,
+            syncConflictController: widget.syncConflictController,
+            onCountReconciliation: widget.onCountReconciliation,
           );
         },
       ),
@@ -157,6 +167,8 @@ class _AdaptiveShell extends StatelessWidget {
     required this.onChangeHome,
     required this.onSignOut,
     required this.accountPageBuilder,
+    required this.syncConflictController,
+    required this.onCountReconciliation,
   });
 
   final AppController controller;
@@ -165,6 +177,8 @@ class _AdaptiveShell extends StatelessWidget {
   final Future<void> Function()? onChangeHome;
   final Future<void> Function()? onSignOut;
   final WidgetBuilder? accountPageBuilder;
+  final SyncConflictController? syncConflictController;
+  final SyncCountReconciliationHandler? onCountReconciliation;
 
   static const double phoneBreakpoint = 700;
   static const double desktopBreakpoint = 1100;
@@ -178,6 +192,8 @@ class _AdaptiveShell extends StatelessWidget {
           controller: controller,
           features: features,
           access: access,
+          syncConflictController: syncConflictController,
+          onCountReconciliation: onCountReconciliation,
         );
 
         if (width < phoneBreakpoint) {
@@ -321,11 +337,15 @@ class _ContentViewport extends StatelessWidget {
     required this.controller,
     required this.features,
     required this.access,
+    required this.syncConflictController,
+    required this.onCountReconciliation,
   });
 
   final AppController controller;
   final HouseholdFeatures? features;
   final HouseholdWorkspaceAccess access;
+  final SyncConflictController? syncConflictController;
+  final SyncCountReconciliationHandler? onCountReconciliation;
 
   @override
   Widget build(BuildContext context) {
@@ -335,6 +355,8 @@ class _ContentViewport extends StatelessWidget {
         controller: controller,
         features: features,
         access: access,
+        syncConflictController: syncConflictController,
+        onCountReconciliation: onCountReconciliation,
       ),
       AppSection.stock =>
         features == null
@@ -342,7 +364,10 @@ class _ContentViewport extends StatelessWidget {
             : !access.inventoryRead
             ? const _AccessDeniedWorkspace(title: 'Stock')
             : access.inventoryWrite
-            ? InventoryWorkspace(controller: features!.inventory)
+            ? InventoryWorkspace(
+                controller: features!.inventory,
+                stockPhotoController: features!.stockPhotoCount,
+              )
             : _ReadOnlyInventoryWorkspace(controller: features!.inventory),
       AppSection.purchases =>
         features == null
@@ -379,11 +404,15 @@ class _HomeWorkspace extends StatelessWidget {
     required this.controller,
     required this.features,
     required this.access,
+    required this.syncConflictController,
+    required this.onCountReconciliation,
   });
 
   final AppController controller;
   final HouseholdFeatures? features;
   final HouseholdWorkspaceAccess access;
+  final SyncConflictController? syncConflictController;
+  final SyncCountReconciliationHandler? onCountReconciliation;
 
   @override
   Widget build(BuildContext context) {
@@ -422,6 +451,21 @@ class _HomeWorkspace extends StatelessWidget {
                     _SyncStatusCard(
                       summary: controller.syncSummary,
                       onRetry: controller.refresh,
+                      onReviewConflicts: syncConflictController == null
+                          ? null
+                          : () {
+                              unawaited(
+                                Navigator.of(context).push<void>(
+                                  MaterialPageRoute<void>(
+                                    builder: (_) => SyncConflictPage(
+                                      controller: syncConflictController!,
+                                      onCountReconciliation:
+                                          onCountReconciliation,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
                     ),
                     const SizedBox(height: 20),
                     _QuickActions(
@@ -556,10 +600,15 @@ class _BrandBar extends StatelessWidget {
 }
 
 class _SyncStatusCard extends StatelessWidget {
-  const _SyncStatusCard({required this.summary, required this.onRetry});
+  const _SyncStatusCard({
+    required this.summary,
+    required this.onRetry,
+    required this.onReviewConflicts,
+  });
 
   final SyncSummary summary;
   final Future<void> Function() onRetry;
+  final VoidCallback? onReviewConflicts;
 
   @override
   Widget build(BuildContext context) {
@@ -672,6 +721,13 @@ class _SyncStatusCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
+              if (conflict && onReviewConflicts != null)
+                IconButton(
+                  key: const Key('review-sync-conflicts'),
+                  tooltip: 'Review synchronization conflicts',
+                  onPressed: onReviewConflicts,
+                  icon: const Icon(Icons.fact_check_outlined),
+                ),
               if (!summary.isSynchronizing)
                 IconButton(
                   key: const Key('manual-sync'),
@@ -699,12 +755,17 @@ class _OverviewGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     final inventory = access.inventoryRead ? features?.inventory.state : null;
     final purchasing = access.purchasesRead ? features?.purchasing.state : null;
+    final catalogPackCount = inventory?.items
+        .map((item) => item.packId)
+        .whereType<String>()
+        .toSet()
+        .length;
     final cards = <_OverviewData>[
       _OverviewData(
         icon: Icons.inventory_2_outlined,
         value: inventory == null || inventory.loading
             ? '—'
-            : '${inventory.items.length}',
+            : '$catalogPackCount',
         label: 'Item master',
       ),
       _OverviewData(
@@ -718,7 +779,7 @@ class _OverviewGrid extends StatelessWidget {
         icon: Icons.shopping_bag_outlined,
         value: purchasing == null || purchasing.loading
             ? '—'
-            : '${purchasing.lines.where((line) => line.lineTotal != null).length}',
+            : '${purchasing.lines.where((line) => line.source == PurchaseSource.recentReceipt && line.lineTotal != null).length}',
         label: 'Recent purchases',
       ),
     ];

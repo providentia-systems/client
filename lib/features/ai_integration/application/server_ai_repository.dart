@@ -50,7 +50,6 @@ final class AiReviewHandoffBuilder {
         .where(
           (candidate) => candidate.status == AiCandidateReviewStatus.accepted,
         )
-        .map((candidate) => candidate.position)
         .toList(growable: false);
     if (accepted.isEmpty) {
       throw const AiServerException(AiServerFailureKind.validation);
@@ -59,7 +58,7 @@ final class AiReviewHandoffBuilder {
       homeId: review.homeId,
       extractionId: review.extractionId,
       kind: review.kind,
-      acceptedPositions: accepted,
+      acceptedCandidates: accepted,
     );
   }
 }

@@ -14,6 +14,14 @@ final class ShoppingListLine {
     required this.quantity,
     required this.origin,
     required this.createdAt,
+    this.suggestionId,
+    this.homeProductId,
+    this.selectedPackId,
+    @Deprecated(
+      'Legacy field retained until the Drift shopping projection is migrated. '
+      'New suggestion lines must use suggestionId, homeProductId, and '
+      'selectedPackId.',
+    )
     this.productPackId,
     this.checked = false,
     this.explanation,
@@ -22,6 +30,21 @@ final class ShoppingListLine {
     _requireText(homeId, 'homeId');
     _requireText(name, 'name');
     _requireNonNegative(quantity, 'quantity');
+    for (final (value, label) in <(String?, String)>[
+      (suggestionId, 'suggestionId'),
+      (homeProductId, 'homeProductId'),
+      (selectedPackId, 'selectedPackId'),
+      (productPackId, 'productPackId'),
+    ]) {
+      if (value != null) _requireText(value, label);
+    }
+    if (suggestionId != null &&
+        (origin != ShoppingLineOrigin.suggestion || homeProductId == null)) {
+      throw ArgumentError(
+        'A server suggestion line requires suggestion origin and a distinct '
+        'home-product identity.',
+      );
+    }
   }
 
   final String id;
@@ -30,6 +53,16 @@ final class ShoppingListLine {
   final double quantity;
   final ShoppingLineOrigin origin;
   final DateTime createdAt;
+  final String? suggestionId;
+  final String? homeProductId;
+  final String? selectedPackId;
+
+  /// Legacy local suggestion identity. It was historically populated with a
+  /// home-product ID despite its name, so it must not be used by new code.
+  @Deprecated(
+    'Use suggestionId, homeProductId, and selectedPackId. This remains only '
+    'as the narrow migration hook for the existing Drift projection.',
+  )
   final String? productPackId;
   final bool checked;
   final String? explanation;
@@ -42,6 +75,9 @@ final class ShoppingListLine {
       quantity: quantity ?? this.quantity,
       origin: origin,
       createdAt: createdAt,
+      suggestionId: suggestionId,
+      homeProductId: homeProductId,
+      selectedPackId: selectedPackId,
       productPackId: productPackId,
       checked: checked ?? this.checked,
       explanation: explanation,

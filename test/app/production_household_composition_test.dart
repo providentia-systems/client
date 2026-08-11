@@ -1,12 +1,23 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:drift/native.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:providentia/app/production_bootstrap_app.dart';
 import 'package:providentia/core/database/app_database.dart';
+import 'package:providentia/core/database/client_local_record_types.dart';
 import 'package:providentia/features/ai_integration/application/ai_ports.dart';
 import 'package:providentia/features/ai_integration/domain/ai_models.dart';
+import 'package:providentia/features/ai_integration/domain/server_ai_models.dart';
 import 'package:providentia/features/ai_integration/infrastructure/sanitizing_image_media_preparer.dart';
+import 'package:providentia/features/homes/infrastructure/home_data_revocation.dart';
+import 'package:providentia/features/shopping/application/shopping_interaction_capabilities.dart';
+import 'package:providentia_api_client/providentia_api_client.dart';
 
 void main() {
   test(
@@ -39,6 +50,135 @@ void main() {
     },
   );
 
+  testWidgets(
+    'production receipt AI 404 purges protected data and routes once',
+    (tester) async {
+      final database = AppDatabase(NativeDatabase.memory());
+      addTearDown(database.close);
+      final now = DateTime.utc(2026, 8, 11, 16);
+      await database
+          .into(database.localRecords)
+          .insert(
+            LocalRecordsCompanion.insert(
+              homeId: _homeId,
+              entityType: ClientLocalRecordTypes.strictLocalAiConfiguration,
+              entityId: 'private-local-ai-config',
+              payload: jsonEncode(<String, Object?>{'private': true}),
+              updatedAt: now,
+            ),
+          );
+      var transportRequests = 0;
+      final api = ProvidentiaApiClient(
+        baseUri: Uri.parse('https://api.example.test'),
+        httpClient: MockClient((_) async {
+          transportRequests++;
+          return http.Response(
+            jsonEncode(<String, Object?>{
+              'type': 'about:blank',
+              'title': 'Not Found',
+              'status': 404,
+              'detail': 'The requested resource was not found.',
+              'requestId': 'request-ai-revoked-home',
+            }),
+            404,
+            headers: const <String, String>{
+              'content-type': 'application/problem+json',
+            },
+          );
+        }),
+      );
+      addTearDown(api.close);
+      final revocationGate = HomeSyncRevocationGate();
+      var purgeCalls = 0;
+      var routeCalls = 0;
+      var resumeRefreshes = 0;
+      final resumeGate = ProductionResumeSyncGate(
+        refresh: () async => resumeRefreshes++,
+      )..markReady();
+      addTearDown(resumeGate.dispose);
+      final boundary = ProductionHomeRevocationBoundary(
+        purge: (homeId) async {
+          purgeCalls++;
+          await revocationGate.revokeAndWait(homeId);
+          await RevokedHomeDataPurger(database).purge(homeId);
+          return true;
+        },
+      );
+      final revoked = Completer<void>();
+      var authorizationCallbacks = 0;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ProductionServerAiRoute(
+            api: api,
+            homeId: _homeId,
+            capabilities: AiHomeCapabilities.fromPermissions(
+              homeId: _homeId,
+              permissions: const <String>{'ai.read', 'ai.use'},
+            ),
+            protectedRouteRegistry: ProductionProtectedRouteRegistry(),
+            onAuthorizationLost: () async {
+              authorizationCallbacks++;
+              await boundary.revokePurgeAndRoute(
+                homeId: _homeId,
+                resumeSyncGate: resumeGate,
+                routeAway: () async => routeCalls++,
+              );
+              if (!revoked.isCompleted) revoked.complete();
+            },
+          ),
+        ),
+      );
+      await tester.pump();
+      await revoked.future;
+      await tester.pumpAndSettle();
+
+      expect(transportRequests, greaterThanOrEqualTo(1));
+      expect(authorizationCallbacks, 1);
+      expect(purgeCalls, 1);
+      expect(routeCalls, 1);
+      expect(
+        await (database.select(
+          database.localRecords,
+        )..where((row) => row.homeId.equals(_homeId))).get(),
+        isEmpty,
+      );
+      resumeGate.resume();
+      await resumeGate.settle();
+      expect(resumeRefreshes, 0);
+      expect(find.textContaining('Access to this household'), findsOneWidget);
+    },
+  );
+
+  test('production AI routes share the single revocation boundary', () {
+    final source = File(
+      'lib/app/production_bootstrap_app.dart',
+    ).readAsStringSync();
+    expect(
+      RegExp(
+        r'onAuthorizationDenied:\s*_handleHomeAuthorizationLost',
+      ).hasMatch(source),
+      isTrue,
+    );
+    expect(
+      RegExp(
+        r'onAuthorizationLost:\s*_handleHomeAuthorizationLost',
+      ).hasMatch(source),
+      isTrue,
+    );
+    expect(source, contains('ReceiptPageMediaEditor(sources: _sources)'));
+    expect(source, contains('ReceiptPdfRasterizer(sources: _sources)'));
+    expect(source, contains('pickMultipleImages: _pickMultipleImages'));
+    expect(source, contains('pickReceiptPdf: _pickReceiptPdf'));
+    expect(
+      RegExp(
+        r'_receiptPdfRasterizer\s*\.choose\(\s*homeId:\s*widget\.homeId',
+      ).hasMatch(source),
+      isTrue,
+    );
+    expect(source, contains('limit: 8'));
+  });
+
   test('production household composition rejects a non-UUID device', () async {
     final database = AppDatabase(NativeDatabase.memory());
     addTearDown(database.close);
@@ -51,6 +191,31 @@ void main() {
       ),
       throwsArgumentError,
     );
+  });
+
+  test('production online suggestions are composed without unsafe writes', () {
+    const capabilities =
+        ShoppingInteractionCapabilities.onlineEvidenceSuggestions;
+    expect(capabilities.onlineSuggestionsComposed, isTrue);
+    expect(capabilities.canEditExistingQuantities, isFalse);
+    expect(capabilities.canRecordSuggestionFeedback, isFalse);
+
+    final source = File(
+      'lib/app/production_bootstrap_app.dart',
+    ).readAsStringSync();
+    expect(source, contains('GeneratedOnlineShoppingSuggestionRepository'));
+    expect(source, contains('DriftShoppingSuggestionCache'));
+    expect(
+      source,
+      contains('ShoppingInteractionCapabilities.onlineEvidenceSuggestions'),
+    );
+  });
+
+  test('production purchasing composes the ordinary product creator', () {
+    final source = File(
+      'lib/app/production_bootstrap_app.dart',
+    ).readAsStringSync();
+    expect(source, contains('productCreationRepository: household'));
   });
 
   test('production AI extraction identifiers are distinct RFC 4122 UUIDv4', () {

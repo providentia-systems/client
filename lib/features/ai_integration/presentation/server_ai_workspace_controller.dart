@@ -135,7 +135,7 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
       _workspace = loaded;
       _status = ServerAiWorkspaceStatus.ready;
     } on AiServerException catch (error) {
-      _failIfCurrent(epoch, homeId, error.safeMessage);
+      await _handleServerExceptionIfCurrent(epoch, homeId, error);
     } catch (_) {
       _failIfCurrent(epoch, homeId, 'Household AI could not be loaded safely.');
     }
@@ -160,7 +160,7 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
       if (!_stillAuthorized(epoch, homeId, manage: true)) return;
       await _reloadAfterManagement(epoch, homeId);
     } on AiServerException catch (error) {
-      _failIfCurrent(epoch, homeId, error.safeMessage);
+      await _handleServerExceptionIfCurrent(epoch, homeId, error);
     } catch (_) {
       _failIfCurrent(epoch, homeId, 'AI settings could not be saved safely.');
     }
@@ -193,7 +193,7 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
       if (!_stillAuthorized(epoch, homeId, manage: true)) return;
       await _reloadAfterManagement(epoch, homeId);
     } on AiServerException catch (error) {
-      _failIfCurrent(epoch, homeId, error.safeMessage);
+      await _handleServerExceptionIfCurrent(epoch, homeId, error);
     } catch (_) {
       _failIfCurrent(epoch, homeId, 'The provider could not be saved safely.');
     }
@@ -226,7 +226,7 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
       if (!_stillAuthorized(epoch, homeId, manage: true)) return;
       await _reloadAfterManagement(epoch, homeId);
     } on AiServerException catch (error) {
-      _failIfCurrent(epoch, homeId, error.safeMessage);
+      await _handleServerExceptionIfCurrent(epoch, homeId, error);
     } catch (_) {
       _failIfCurrent(epoch, homeId, 'The AI policy could not be saved safely.');
     }
@@ -236,16 +236,53 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
   Future<void> prepareOne({
     required AiProviderProfile provider,
     required AiMediaAsset asset,
+  }) => _prepareSelection(
+    provider: provider,
+    purpose: asset.purpose,
+    assets: <AiMediaAsset>[asset],
+  );
+
+  Future<void> prepareReceiptPages({
+    required AiProviderProfile provider,
+    required List<AiMediaAsset> assets,
+  }) => _prepareSelection(
+    provider: provider,
+    purpose: AiExtractionKind.receipt,
+    assets: List<AiMediaAsset>.of(assets),
+  );
+
+  Future<void> _prepareSelection({
+    required AiProviderProfile provider,
+    required AiExtractionKind purpose,
+    required List<AiMediaAsset> assets,
   }) async {
     if (!_requireUse()) return;
     final current = _workspace?.profile(provider.id);
     if (current == null ||
         current.revision != provider.revision ||
         provider.homeId != _capabilities.homeId ||
-        asset.homeId != _capabilities.homeId ||
-        asset.purpose != AiExtractionKind.receipt &&
-            asset.purpose != AiExtractionKind.stockPhoto) {
+        assets.any(
+          (asset) =>
+              asset.homeId != _capabilities.homeId || asset.purpose != purpose,
+        ) ||
+        purpose != AiExtractionKind.receipt &&
+            purpose != AiExtractionKind.stockPhoto) {
       _setFailure('Refresh the provider and choose media for the active home.');
+      return;
+    }
+    if ((purpose == AiExtractionKind.receipt &&
+            (assets.isEmpty || assets.length > 8)) ||
+        (purpose == AiExtractionKind.stockPhoto && assets.length != 1)) {
+      _setFailure(
+        purpose == AiExtractionKind.receipt
+            ? 'Select between 1 and 8 receipt images.'
+            : 'Select one stock image.',
+      );
+      return;
+    }
+    if (assets.length > 1 &&
+        !current.capabilities.contains(AiCapability.multiImage)) {
+      _setFailure('This provider cannot safely process multiple images.');
       return;
     }
     final epoch = _accessEpoch;
@@ -256,22 +293,31 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
     _clearExtractionState();
     _notify();
     try {
-      final prepared = await PrepareAiMedia(_media).execute(
-        homeId: homeId,
-        purpose: asset.purpose,
-        assets: <AiMediaAsset>[asset],
-      );
+      final prepared = await PrepareAiMedia(
+        _media,
+      ).execute(homeId: homeId, purpose: purpose, assets: assets);
       if (!_stillAuthorized(epoch, homeId, use: true)) {
         await _media.discard(prepared);
         return;
       }
-      if (prepared.media.length != 1 ||
+      final orderIsStable =
+          prepared.media.length == assets.length &&
+          (assets.length == 1 ||
+              Iterable<int>.generate(assets.length).every(
+                (index) =>
+                    prepared.media[index].sourceMediaId == assets[index].id &&
+                    prepared.media[index].pageIndex ==
+                        (assets[index].pageIndex ?? index),
+              ));
+      if (!orderIsStable ||
           prepared.homeId != homeId ||
-          prepared.purpose != asset.purpose) {
+          prepared.purpose != purpose) {
         await _media.discard(prepared);
-        throw const AiPolicyViolation(
+        throw AiPolicyViolation(
           code: 'unsafe_prepared_media',
-          safeMessage: 'The selected image could not be prepared safely.',
+          safeMessage: assets.length == 1
+              ? 'The selected image could not be prepared safely.'
+              : 'The selected images could not be prepared safely.',
         );
       }
       _selectedProvider = current;
@@ -283,7 +329,9 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
       _failIfCurrent(
         epoch,
         homeId,
-        'The selected image could not be prepared safely.',
+        assets.length == 1
+            ? 'The selected image could not be prepared safely.'
+            : 'The selected images could not be prepared safely.',
       );
     }
     _notify();
@@ -382,10 +430,12 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
         if (!_stillAuthorized(epoch, homeId, use: true)) return;
         await _handleStockResult(result, epoch: epoch, homeId: homeId);
       }
+    } on AiGatewayAuthorizationDeniedException catch (error) {
+      await _denyAccessIfCurrent(epoch, homeId, error.safeMessage);
     } on AiPolicyViolation catch (error) {
       _failIfCurrent(epoch, homeId, error.safeMessage);
     } on AiServerException catch (error) {
-      _failIfCurrent(epoch, homeId, error.safeMessage);
+      await _handleServerExceptionIfCurrent(epoch, homeId, error);
     } catch (_) {
       _failIfCurrent(
         epoch,
@@ -393,9 +443,11 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
         'AI extraction could not be completed safely.',
       );
     } finally {
-      await _discardPrepared();
-      _selectedProvider = null;
       _consent = null;
+      if (_status != ServerAiWorkspaceStatus.reviewRequired) {
+        await _discardPrepared();
+        _selectedProvider = null;
+      }
     }
     _notify();
   }
@@ -496,7 +548,7 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
       _review = updated;
       _status = ServerAiWorkspaceStatus.reviewRequired;
     } on AiServerException catch (error) {
-      _failIfCurrent(epoch, homeId, error.safeMessage);
+      await _handleServerExceptionIfCurrent(epoch, homeId, error);
     } catch (_) {
       _failIfCurrent(
         epoch,
@@ -598,7 +650,8 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
     bool use = false,
     bool manage = false,
   }) {
-    return epoch == _accessEpoch &&
+    return !_disposed &&
+        epoch == _accessEpoch &&
         homeId == _capabilities.homeId &&
         (!read || _capabilities.mayRead) &&
         (!use || (_capabilities.mayRead && _capabilities.mayUse)) &&
@@ -607,6 +660,34 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
 
   void _failIfCurrent(int epoch, String homeId, String message) {
     if (_stillAuthorized(epoch, homeId)) _setFailure(message);
+  }
+
+  Future<void> _handleServerExceptionIfCurrent(
+    int epoch,
+    String homeId,
+    AiServerException error,
+  ) async {
+    if (error.kind == AiServerFailureKind.authorizationDenied) {
+      await _denyAccessIfCurrent(epoch, homeId, error.safeMessage);
+      return;
+    }
+    _failIfCurrent(epoch, homeId, error.safeMessage);
+  }
+
+  Future<void> _denyAccessIfCurrent(
+    int epoch,
+    String homeId,
+    String safeMessage,
+  ) async {
+    if (!_stillAuthorized(epoch, homeId)) return;
+    _accessEpoch++;
+    final discard = _discardPrepared();
+    _clearExtractionState();
+    _workspace = null;
+    _status = ServerAiWorkspaceStatus.accessDenied;
+    _safeMessage = safeMessage;
+    _notify();
+    await discard;
   }
 
   void _setAccessDenied() {
@@ -649,7 +730,11 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
-    unawaited(_discardPrepared());
+    _accessEpoch++;
+    _workspace = null;
+    final discard = _discardPrepared();
+    _clearExtractionState();
+    unawaited(discard);
     super.dispose();
   }
 }

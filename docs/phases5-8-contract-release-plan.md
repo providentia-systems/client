@@ -3,8 +3,8 @@
 ## Decision
 
 The Flutter client must not invent transport operations that are absent from
-the backend-owned OpenAPI artifact. This release pins API `1.12.0`, SHA-256
-`30604d238f9c29f9d6b09dbf1819c84a475cb93e94728a8b2888f9b65a865a44`,
+the backend-owned OpenAPI artifact. This release pins API `1.13.2`, SHA-256
+`1b6b7f09240ace0ba6b7e7279259687569dfbacb112ea7dbd4094fe27ccd0108`,
 from the companion backend release. The generic synchronization
 allowlist remains limited to `home-preference` and `private-note`.
 
@@ -18,6 +18,11 @@ composition. Live backend, provider, cross-device, and supported-platform
 acceptance remain separate release gates. No domain may be sent as a made-up
 entity type through the generic protocol-v1 synchronization endpoint;
 generated operations alone do not make a workflow reachable.
+
+The generated operation-status lookup is now connected to coordinator
+response-loss recovery. Known immutable results are applied once; unknown
+operations exact-retry with the same IDs; unavailable or malformed status is
+deferred safely; and HTTP 403/404 is a purge-class authorization outcome.
 
 This is a fail-closed compatibility rule, not a reason to put HTTP calls in
 widgets or to hand-edit the generated Dart client.
@@ -71,6 +76,15 @@ non-storage option where supported, apply quotas and timeouts, avoid logging
 media or extracted text, and return structured proposals rather than domain
 mutations.
 
+The production client currently composes ordered one-to-eight-page receipt
+intake with local rotate/crop and ordinary draft/match/explicit commit, plus
+one-to-eight-image stock counting through ordinary count commands. Stock may
+use a verified direct-local native route when explicitly selected; that route
+fails closed when unavailable or invalid, and server-proxy use requires an
+explicit switch. Receipt direct-local extraction is not composed; an Ollama
+receipt profile may instead be server-proxied. Neither workflow mutates a
+balance from an AI proposal.
+
 ## Phase 7 typed resources
 
 | Capability | Required contract behavior |
@@ -87,6 +101,11 @@ The proposal DTO must exclude home/user identity, price, quantity, store,
 receipt number, raw receipt description, private aliases/notes, media
 references, and AI metadata by construction.
 
+Direct per-item product-identity contribution and role-scoped moderation do
+not complete the general proposal workflow. Receipt/stock matching does not
+yet create a sanitized catalog proposal or publish a global alias; those remain
+Phase 7 implementation work.
+
 ## Phase 8 typed resources
 
 | Capability | Required contract behavior |
@@ -98,6 +117,11 @@ references, and AI metadata by construction.
 | Price observations | Same-home, currency and normalized-unit safe comparisons with count/date coverage |
 | Reports | Home-scoped balance, movement, purchases, variance, price, unresolved, suggestion, and evaluation datasets |
 | Backtesting | Rolling-origin evaluation with coverage and no future leakage |
+
+Verified suggestion reads, explanations, offline cache, and explicit Add to
+list are production-composed. Suggestion feedback, edits to existing list-line
+quantity, and authoritative cross-device suggestion provenance remain deferred
+until their retry-safe ordinary-command boundary is adopted.
 
 ## Required authorization tests
 

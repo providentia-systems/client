@@ -36,6 +36,12 @@ abstract interface class PurchaseCaptureRepository
     required String homeProductId,
   });
 
+  Future<PurchaseMutationResult> markReceiptLineUnresolved({
+    required String homeId,
+    required String receiptId,
+    required String lineId,
+  });
+
   Future<PurchaseMutationResult> commitReceipt({
     required String homeId,
     required String receiptId,

@@ -86,6 +86,38 @@ void main() {
     },
   );
 
+  test(
+    'receipt gallery preserves order, page identity, and 1-8 bound',
+    () async {
+      final registry = RegisteredMediaSourceReader();
+      final service = MediaAcquisitionService(
+        registry: registry,
+        imagePicker: _FakeImagePicker(
+          images: <XFile>[_file('first.jpg', 32), _file('second.jpg', 36)],
+        ),
+      );
+
+      final pages = await service.choosePhotos(
+        homeId: 'home-1',
+        purpose: AiExtractionKind.receipt,
+        limit: 8,
+      );
+
+      expect(pages.map((page) => page.pageIndex), <int?>[0, 1]);
+      expect(pages.map((page) => page.byteLength), <int>[32, 36]);
+      expect(pages[0].id, endsWith('-page-0'));
+      expect(pages[1].id, endsWith('-page-1'));
+      await expectLater(
+        service.choosePhotos(
+          homeId: 'home-1',
+          purpose: AiExtractionKind.receipt,
+          limit: 9,
+        ),
+        throwsA(isA<MediaAcquisitionException>()),
+      );
+    },
+  );
+
   test('source byte limits fail closed before registration', () async {
     Future<void> expectRejected(int length) async {
       final registry = RegisteredMediaSourceReader();

@@ -1,11 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:providentia/features/inventory/application/stock_photo_count_controller.dart';
 import 'package:providentia/features/inventory/domain/inventory_models.dart';
 import 'package:providentia/features/inventory/presentation/inventory_controller.dart';
+import 'package:providentia/features/inventory/presentation/stock_photo_count_panel.dart';
 
 class InventoryWorkspace extends StatefulWidget {
-  const InventoryWorkspace({required this.controller, super.key});
+  const InventoryWorkspace({
+    required this.controller,
+    this.stockPhotoController,
+    super.key,
+  });
 
   final InventoryController controller;
+  final StockPhotoCountController? stockPhotoController;
 
   @override
   State<InventoryWorkspace> createState() => _InventoryWorkspaceState();
@@ -114,6 +121,13 @@ class _InventoryWorkspaceState extends State<InventoryWorkspace> {
                   ),
                   const SizedBox(height: 12),
                   _CountSessionBar(controller: widget.controller),
+                  if (state.activeSession != null &&
+                      widget.stockPhotoController != null) ...<Widget>[
+                    const SizedBox(height: 12),
+                    StockPhotoCountPanel(
+                      controller: widget.stockPhotoController!,
+                    ),
+                  ],
                   if (state.safeError != null)
                     Padding(
                       padding: const EdgeInsets.only(top: 12),
@@ -295,21 +309,39 @@ class _InventoryRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Legacy/local projections with an observed balance predate the explicit
+    // isHomeProduct flag, but a counted balance is necessarily home-scoped.
+    final belongsToHome = item.isHomeProduct || item.isCounted;
     return Card(
       child: ListTile(
-        onTap: () => _editQuantity(context),
+        onTap: belongsToHome ? () => _editQuantity(context) : null,
         title: Text(item.canonicalName),
-        subtitle: Text(
-          '${item.packSize} · ${item.brand.isEmpty ? item.category : item.brand}',
-        ),
-        trailing: Text(
-          item.currentQuantity == null
-              ? 'Not counted'
-              : '${item.currentQuantity!.toStringAsFixed(_decimals(item.currentQuantity!))} ${item.unit}',
-        ),
+        subtitle: Text(_metadata),
+        trailing: belongsToHome
+            ? Text(
+                item.currentQuantity == null
+                    ? 'Not counted'
+                    : '${item.currentQuantity!.toStringAsFixed(_decimals(item.currentQuantity!))} ${item.unit}',
+              )
+            : OutlinedButton(
+                key: Key('inventory-add-catalog-${item.packId ?? item.id}'),
+                onPressed:
+                    controller.canAddCatalogProduct &&
+                        !controller.state.productCreationBusy
+                    ? () => controller.addCatalogProduct(item)
+                    : null,
+                child: const Text('Add to home'),
+              ),
       ),
     );
   }
+
+  String get _metadata => <String>[
+    item.packSize,
+    if (item.brand.isNotEmpty) item.brand,
+    item.category,
+    if (item.aliases.isNotEmpty) 'Aliases: ${item.aliases.join(', ')}',
+  ].join(' · ');
 
   Future<void> _editQuantity(BuildContext context) async {
     final result = await showDialog<(double, String)>(

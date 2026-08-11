@@ -1,8 +1,8 @@
 # Local backend and client testing
 
-This is the supported developer handoff for the API `1.12.0` client, pinned to
+This is the supported developer handoff for the API `1.13.2` client, pinned to
 SHA-256
-`30604d238f9c29f9d6b09dbf1819c84a475cb93e94728a8b2888f9b65a865a44`. It tests
+`1b6b7f09240ace0ba6b7e7279259687569dfbacb112ea7dbd4094fe27ccd0108`. It tests
 the production-shaped login-link flow, session restoration, homes,
 invitations, roles, and account administration against one local Providentia
 backend. The backend's canonical
@@ -135,7 +135,7 @@ node --test tool/*.test.mjs
 ```
 
 The client contract must remain byte-for-byte aligned with the reviewed
-backend API `1.12.0` artifact. Do not hand-edit generated Dart.
+backend API `1.13.2` artifact. Do not hand-edit generated Dart.
 
 ## 3. Run the client
 
@@ -255,7 +255,7 @@ cleared even if remote cleanup cannot be completed.
 
 Login-link onboarding, session/device management, current-user bootstrap,
 multiple homes, invitations, home governance, editable home settings, and
-platform-administrator controls are composed against API `1.12.0`. Household
+platform-administrator controls are composed against API `1.13.2`. Household
 inventory, purchase, and shopping-list screens still include local Drift
 projections; those screens alone are not proof of cross-device convergence for
 every backend resource. Catalog consent/contribution, platform-role moderation,

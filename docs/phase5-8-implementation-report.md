@@ -1,33 +1,17 @@
 # Phase 5–8 implementation report
 
-> Historical snapshot: API `1.3.0` below is the contract used for this phase
-> report, not the current client pin. See [Contracts](contracts.md) and
-> [Local development](local-development.md) for the current API and composed
-> client/backend boundary.
+Status: client implementation and testing readiness against API `1.13.2`,
+SHA-256
+`1b6b7f09240ace0ba6b7e7279259687569dfbacb112ea7dbd4094fe27ccd0108`.
+This report does not claim live deployment or production acceptance.
 
-## Scope and decision
+## Authoritative reconciliation
 
-This change implements the client-owned domain, application, presentation, and
-local-projection work for Phases 5 through 8. It reconciles the authoritative
-handover from source commit
-`b01b5ef14783b4ad1c1bfc0be7ba0dba32629af8`.
-
-The pinned backend contract remains API `1.3.0`. It has no typed inventory,
-purchasing, shopping, AI, administration, or reporting resources. Those
-features therefore remain behind typed client ports. Household feature records
-are stored only in the local Drift projection and are deliberately excluded
-from the generic synchronization outbox. Online-only capabilities fail closed.
-The exact backend release work is recorded in
-[phases5-8-contract-release-plan.md](phases5-8-contract-release-plan.md).
-
-## Authoritative migration reconciliation
-
-`tool/baseline_reconciliation.mjs` validates the handover without logging
-private rows. It fails closed on count or aggregate differences and emits a
-machine-readable report.
+The fail-closed baseline tooling preserves the handover evidence without
+logging private rows:
 
 | Evidence | Reconciled value |
-|---|---:|
+| --- | ---: |
 | Item-master product-and-pack rows | 292 |
 | Current-stock rows | 60 |
 | Current counted units/packs | 159 |
@@ -39,115 +23,116 @@ machine-readable report.
 | Unresolved current-stock descriptions | 8 |
 | Recent receipt groups / spend | 4 / N$1,078.38 |
 
-The importer:
+The importer is transactionally idempotent, preserves raw descriptions and
+unresolved rows, and never forces an ambiguous catalog match.
 
-- is transactionally idempotent;
-- preserves raw purchase descriptions and the monthly/rule source material;
-- links stock only on an unambiguous exact normalized product-and-pack match;
-- retains non-matches as home-private items instead of silently merging them;
-- preserves the eight explicitly unresolved descriptions;
-- writes no unsupported synchronization operation.
+## Phase 5 — household feature parity
 
-The handover has only 25 unambiguous current-stock product-and-pack matches.
-The remaining 35 stock rows stay explicit rather than being forced onto the
-item master. Twelve of the 16 recent lines also lack an unambiguous canonical
-link.
+Delivered in the production client composition:
 
-## Phase 5 — existing feature parity
+- responsive inventory, purchasing, and shopping workspaces;
+- typed protocol-v2 household mutations committed atomically with optimistic
+  Drift projections and a durable outbox;
+- complete paged item-master refresh and last-verified offline cache, including
+  all 292 handover catalog packs plus 28 distinct private opening products;
+- authoritative opening-stock identity projection with 32 linked catalog
+  rows, all 60 counted rows / 159 units, and no duplicate private identity for
+  the nine reviewed blank-pack-to-`Pack size pending` links;
+- canonical name, approved alias, brand, category, and pack search across
+  counted products and unselected published packs;
+- ordinary creation of private home products and selection of published packs;
+- reasoned adjustments, count-session open/line/close/cancel, duplicate count
+  review, and variance-only close movements;
+- recent receipt groups, raw descriptions, recent spend, monthly history, and
+  an ordinary receipt draft/review/commit workflow;
+- manual shopping lines plus production-composed, verified online suggestion
+  feeds, explanations, last-verified offline suggestion cache, and explicit
+  Add to list with an add-time quantity choice.
 
-Delivered:
-
-- responsive dashboard counts, quick actions, stock-attention rows, and four
-  primary application areas;
-- counted-stock and complete item-master views;
-- canonical name, alias, brand, pack, and category search and filtering;
-- reasoned manual adjustments with optimistic quantity checks;
-- open/closed/cancelled count sessions and transactional close-to-movement
-  application;
-- receipt-derived groups, explicit inferred legacy grouping, recent spend, and
-  monthly history summaries;
-- manual lists, suggested-line representation, check-off, quantity changes,
-  progress, explanation, and feedback ports;
-- exact baseline reconciliation and local import adapter.
-
-Stock balance remains a derived projection. Count completion and the resulting
-append-only variance movements commit in one local transaction.
+Suggestion feedback, edits to the quantity of an existing list line, and
+authoritative cross-device suggestion provenance remain deferred. The UI must
+not imply that those actions synchronized. A suggestion never mutates stock.
 
 ## Phase 6 — receipt and stock-photo intelligence
 
 Delivered:
 
-- immutable provider profiles, capability declarations, privacy modes, route
-  policy, and consent bound to a prepared-media hash;
-- cloud proxy-only OpenAI policy with non-storage capability requirements;
-- strict-local OpenAI-compatible/Ollama policy with private-endpoint and
-  cloud-model rejection;
-- write-only credential provisioning and vault ports; controllers never retain
-  provider secrets;
-- bounded media metadata, preparation/discard contracts, and exact-key
-  versioned receipt/stock JSON schemas;
-- strict semantic decoding, classification quarantine, ambiguity/confidence
-  handling, and proposal-only extraction;
-- receipt and stock-photo review controllers and responsive review pages;
-- explicit approval/close commands with durable idempotency outcomes;
-- medical/unrelated rejection and no-automatic-mutation behavior.
+- revisioned provider/profile settings, write-only credentials, typed provider
+  policy, and explicit server-proxy or strict-local privacy disclosure;
+- ordered one-to-eight-page receipt intake with local preview, 90-degree
+  rotation, bounded crop, metadata-stripping re-encoding, aggregate transport
+  validation, and consent bound to every ordered digest;
+- receipt schema validation, quarantine/refusal handling, legitimate duplicate
+  line preservation, per-candidate human review, and a second confirmation
+  before ordinary receipt draft/line commands;
+- complete offline receipt matching against selected catalog products,
+  unselected published packs, and private products, with canonical/brand/
+  category/pack/approved-alias ranking and visible match reasons;
+- explicit choices to approve an existing home product, add a published pack
+  and approve it, create a private product and approve it, or persist a
+  revisioned unresolved decision that survives reload and can later be
+  reapproved;
+- an explicit ordinary receipt commit after every line is approved or
+  intentionally unresolved. Only approved lines create purchase effects;
+  unresolved raw lines remain retained without prices or stock movements;
+- production Inventory stock-photo counting that opens an ordinary session
+  first, accepts one to eight sanitized photos, deduplicates exact media and
+  cross-image candidates, searches the full item master, requires a concrete
+  quantity, and writes only ordinary outbox-backed count lines;
+- explicit count close and movement-free cancel, with access-loss and disposal
+  cleanup of ephemeral media.
 
-No direct cloud key or cloud adapter is present in Flutter. The future backend
-proxy owns cloud credentials, quotas, timeouts, non-storage flags, and
-non-logging guarantees. Native strict-local media and credential adapters also
-remain explicit infrastructure work; web is not allowed to masquerade as a
-secure credential vault.
+The stock workflow uses a verified direct-local Ollama or compatible route when
+the user selects one on a supported native platform. A selected local route
+that is unavailable or invalid fails closed; using the disclosed server proxy
+requires an explicit route switch. Direct-local receipt extraction is not
+production-composed. An Ollama receipt profile may be server-proxied; that is
+not a local-device privacy claim.
 
-## Phase 7 — global catalog administration
+## Phase 7 — catalog administration boundary
 
-Delivered:
+Role-scoped catalog consent, direct per-item product-identity contribution,
+moderation reads/actions, icon metadata, and revision-bound merge/reversal
+surfaces exist behind their independent permissions. They do not grant private
+home access and still require live backend acceptance.
 
-- home-private product and sanitized global-proposal models;
-- allowlisted transmission preview and explicit per-item consent;
-- curator/reviewer queue models and capability checks;
-- duplicate, alias, barcode, pack, category, and icon workbench states;
-- sanitized catalog audit events;
-- revision-bound merge preview, merge, and reversal commands;
-- reason validation, stale revision rejection, idempotency digest checks,
-  concurrent-request coalescing, and retry-safe failure behavior.
+Automatic proposal creation from receipt/stock matching, a general sanitized
+catalog-proposal handoff for an unknown private item, and global alias
+publication are **not implemented**. Receipt text and private aliases remain
+home-private. The purchasing UI explicitly directs a user to the separate
+future catalog contribution workflow instead of fabricating an unsupported
+write.
 
-Proposal construction excludes home/user identity, price, quantity, store,
-receipt identity, raw receipt description, private aliases/notes, media
-references, and AI metadata. Catalog permissions never imply home-data access.
+## Phase 8 — suggestions and reporting boundary
 
-## Phase 8 — intelligence and reporting
+Deterministic demand/stock calculations, evidence explanations, price and
+movement reporting models, and home-scoped generated report adapters are
+present. Production composes verified suggestion reads and explanations but
+keeps feedback and existing-line quantity edits disabled until an idempotent,
+provenance-preserving cross-device command is adopted. The fixed prototype
+`quantity <= 2` rule remains baseline evidence only, never production
+intelligence.
 
-Delivered:
+## Synchronization and recovery
 
-- append-only movements and deterministic movement-based balance projection;
-- reliable count-to-count consumption estimation with inconsistent-interval
-  exclusion and honest insufficient-evidence results;
-- demand, safety-stock, and lead-time suggestions with evidence explanations;
-- deterministic pack waste/cost optimization;
-- same-home price observations, normalization, statistics, and store ranking;
-- suggestion confidence, accept/edit/dismiss/snooze feedback, and feedback
-  summaries;
-- rolling-origin MAE, bias, overbuy, and missed-demand backtesting;
-- home-scoped balance, movement, purchase, consumption, count-variance, private
-  price, unresolved, feedback, and evaluation reports;
-- immediate report clearing on home switch and cross-home response rejection.
+Phase 4 foundations used by these workflows include the per-home outbox,
+closed command schemas, revisions, cursors, tombstones, bootstrap replacement,
+retry, conflicts, app-resume synchronization, revoked-home purge, and
+privacy-safe aggregate metrics. Operation-status response-loss recovery applies
+known immutable results once, exact-retries unknown operations with the same
+IDs, defers unavailable or malformed status safely, and treats HTTP 403/404 as
+authorization loss.
 
-No fixed `quantity <= 2` rule is promoted as intelligence. Without reliable
-count intervals or a user-configured minimum, the client explains that it has
-insufficient evidence and suggests nothing.
+## Verification and release gates
 
-## Test and quality evidence
+Focused suites cover baseline parity, all-page caching, offline search,
+optimistic creation, lost-response retry, cross-home denial, count
+cancellation, receipt/stock media lifecycle, duplicate protection, no automatic
+mutation, explicit commit/close, and shopping suggestion boundaries.
 
-The change adds 14 focused test files with 80 declared tests across the new
-feature and Drift-adapter slices:
-
-- 36 inventory, purchasing, and shopping tests plus two local-adapter tests;
-- 22 AI policy, schema, orchestration, privacy, and widget tests;
-- 22 catalog, administration, and reporting tests;
-- baseline reconciliation and repository architecture checks.
-
-Before pull-request review, CI must still run the repository-wide pinned
-formatter, analyzer, Flutter suite with coverage floor, generated-contract
-check, Drift schema checks, goldens, and six-platform build matrix. A green
-client CI proves the client implementation; it does not remove the backend
-contract release blockers above.
+Repository tests are not operator evidence. Paired live backend/client CI,
+two-device persistence, configured provider tests with synthetic media,
+physical-device capture, backup/restore, monitoring/load/failure rehearsal,
+signed artifacts, and independent platform acceptance remain required. Until
+those immutable artifacts and results are recorded, the project is
+testing-ready rather than production-accepted.

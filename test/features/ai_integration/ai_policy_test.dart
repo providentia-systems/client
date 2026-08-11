@@ -53,6 +53,27 @@ void main() {
     );
   });
 
+  test('IPv6 ULA is eligible but link-local remains rejected', () {
+    expect(
+      () => policy.validateProfile(
+        localProvider().copyWith(endpoint: Uri.parse('https://[fd12:3456::9]')),
+      ),
+      returnsNormally,
+    );
+    expect(
+      () => policy.validateProfile(
+        localProvider().copyWith(endpoint: Uri.parse('http://[fe80::1]')),
+      ),
+      throwsA(
+        isA<AiPolicyViolation>().having(
+          (error) => error.code,
+          'code',
+          'unsafe_local_endpoint',
+        ),
+      ),
+    );
+  });
+
   test('cloud extraction fails closed when the backend contract is absent', () {
     final provider = serverProvider(
       availability: AiProviderAvailability.missingBackendContract,

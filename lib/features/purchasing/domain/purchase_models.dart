@@ -4,7 +4,12 @@ enum PurchaseDatePrecision { exactDay, monthOnly }
 
 enum PurchaseReceiptStatus { draft, committed }
 
-enum PurchaseLineApprovalStatus { unreviewed, approved }
+enum PurchaseLineApprovalStatus {
+  unreviewed,
+  approved,
+  approvedCatalog,
+  unresolved,
+}
 
 /// `pending` is deliberately conservative: child commands may be acknowledged
 /// while the optimistic parent receipt revision still awaits a receipt-level
@@ -83,23 +88,82 @@ final class Money implements Comparable<Money> {
 ///
 /// Receipt text and match decisions deliberately remain outside the shared
 /// catalog models.
+enum PurchaseMatchCandidateKind {
+  selectedCatalogPack,
+  unselectedPublishedPack,
+  privateHomeProduct,
+}
+
+enum PurchaseMatchBasis {
+  exactDescriptionAndPack,
+  exactDescriptionOrAlias,
+  exactPack,
+  partialDescription,
+  metadataOverlap,
+  itemMasterFallback,
+}
+
 final class PurchaseMatchCandidate {
   PurchaseMatchCandidate({
     required this.id,
     required this.homeId,
     required this.name,
     required this.packSize,
-  }) {
+    this.kind = PurchaseMatchCandidateKind.selectedCatalogPack,
+    String? homeProductId,
+    this.productId,
+    this.packId,
+    this.brand = '',
+    this.category = 'Uncategorized',
+    List<String> aliases = const <String>[],
+  }) : homeProductId =
+           homeProductId ??
+           (kind == PurchaseMatchCandidateKind.unselectedPublishedPack
+               ? null
+               : id),
+       aliases = List<String>.unmodifiable(aliases) {
     _requireText(id, 'id');
     _requireText(homeId, 'homeId');
     _requireText(name, 'name');
     _requireText(packSize, 'packSize');
+    if (kind == PurchaseMatchCandidateKind.unselectedPublishedPack &&
+        (productId == null || packId == null || this.homeProductId != null)) {
+      throw ArgumentError(
+        'An unselected published pack requires product and pack identities.',
+      );
+    }
+    if (kind != PurchaseMatchCandidateKind.unselectedPublishedPack &&
+        this.homeProductId == null) {
+      throw ArgumentError('A selected match requires a home product identity.');
+    }
   }
 
   final String id;
   final String homeId;
   final String name;
   final String packSize;
+  final PurchaseMatchCandidateKind kind;
+  final String? homeProductId;
+  final String? productId;
+  final String? packId;
+  final String brand;
+  final String category;
+  final List<String> aliases;
+
+  bool get requiresHomeSelection =>
+      kind == PurchaseMatchCandidateKind.unselectedPublishedPack;
+}
+
+final class RankedPurchaseMatchCandidate {
+  const RankedPurchaseMatchCandidate({
+    required this.candidate,
+    required this.basis,
+    required this.score,
+  });
+
+  final PurchaseMatchCandidate candidate;
+  final PurchaseMatchBasis basis;
+  final int score;
 }
 
 final class PurchaseReceiptLineCapture {
@@ -125,10 +189,17 @@ final class PurchaseReceiptLineCapture {
     if (revision < 1) {
       throw ArgumentError.value(revision, 'revision', 'must be positive');
     }
-    if (approvalStatus == PurchaseLineApprovalStatus.approved &&
+    if ((approvalStatus == PurchaseLineApprovalStatus.approved ||
+            approvalStatus == PurchaseLineApprovalStatus.approvedCatalog) &&
         homeProductId == null) {
       throw ArgumentError(
         'An approved purchase line requires a home product match.',
+      );
+    }
+    if (approvalStatus == PurchaseLineApprovalStatus.unresolved &&
+        homeProductId != null) {
+      throw ArgumentError(
+        'An unresolved purchase line cannot retain a home product match.',
       );
     }
   }
@@ -146,7 +217,12 @@ final class PurchaseReceiptLineCapture {
   final PurchaseLineApprovalStatus approvalStatus;
   final PurchaseSynchronizationState synchronizationState;
 
-  bool get approved => approvalStatus == PurchaseLineApprovalStatus.approved;
+  bool get approved =>
+      approvalStatus == PurchaseLineApprovalStatus.approved ||
+      approvalStatus == PurchaseLineApprovalStatus.approvedCatalog;
+  bool get unresolved =>
+      approvalStatus == PurchaseLineApprovalStatus.unresolved;
+  bool get reviewTerminal => approved || unresolved;
 }
 
 final class PurchaseReceiptCapture {
@@ -191,7 +267,7 @@ final class PurchaseReceiptCapture {
   final List<PurchaseReceiptLineCapture> lines;
 
   bool get reviewComplete =>
-      lines.isNotEmpty && lines.every((line) => line.approved);
+      lines.isNotEmpty && lines.every((line) => line.reviewTerminal);
   bool get commitAwaitingConfirmation =>
       status == PurchaseReceiptStatus.committed &&
       synchronizationState == PurchaseSynchronizationState.pending;

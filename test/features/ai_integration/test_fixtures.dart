@@ -320,6 +320,7 @@ final class FakeGateway implements AiProviderGateway {
     this.receiptHandler,
     this.stockHandler,
     this.gatewayReadiness = const AiGatewayReadiness.ready(),
+    this.readinessError,
   });
 
   @override
@@ -327,6 +328,7 @@ final class FakeGateway implements AiProviderGateway {
   final ReceiptGatewayHandler? receiptHandler;
   final StockGatewayHandler? stockHandler;
   final AiGatewayReadiness gatewayReadiness;
+  final Object? readinessError;
   final List<AiExtractionRequest> requests = <AiExtractionRequest>[];
 
   @override
@@ -346,8 +348,10 @@ final class FakeGateway implements AiProviderGateway {
   }
 
   @override
-  Future<AiGatewayReadiness> readiness(AiProviderProfile profile) async =>
-      gatewayReadiness;
+  Future<AiGatewayReadiness> readiness(AiProviderProfile profile) async {
+    if (readinessError case final error?) throw error;
+    return gatewayReadiness;
+  }
 }
 
 final class FakeGatewayResolver implements AiGatewayResolver {

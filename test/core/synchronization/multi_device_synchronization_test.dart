@@ -178,6 +178,22 @@ final class _InMemorySyncServer implements SyncRemoteGateway {
   int _sequence = 0;
 
   @override
+  Future<OperationStatusResponse> operationStatuses({
+    required String homeId,
+    required String deviceId,
+    required List<String> operationIds,
+  }) async => OperationStatusResponse(
+    operations: operationIds
+        .map(
+          (operationId) => OperationStatusItem(
+            operationId: operationId,
+            result: _operationResults[operationId],
+          ),
+        )
+        .toList(growable: false),
+  );
+
+  @override
   Future<PullPage> bootstrap({required String homeId}) async {
     return PullPage(
       protocolVersion: 1,

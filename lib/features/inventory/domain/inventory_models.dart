@@ -37,6 +37,53 @@ final class PrivateHomeProductDraft {
   final String? originalPackText;
 }
 
+final class CatalogHomeProductDraft {
+  CatalogHomeProductDraft({
+    required this.homeId,
+    required this.productId,
+    required this.packId,
+    required this.canonicalName,
+    required this.packSize,
+    required this.category,
+    this.brand = '',
+    List<String> aliases = const <String>[],
+  }) : aliases = List<String>.unmodifiable(aliases) {
+    _requireText(homeId, 'homeId');
+    _requireText(productId, 'productId');
+    _requireText(packId, 'packId');
+    _requireText(canonicalName, 'canonicalName');
+    _requireText(packSize, 'packSize');
+    _requireText(category, 'category');
+  }
+
+  factory CatalogHomeProductDraft.fromItem(InventoryItem item) {
+    final productId = item.productId;
+    final packId = item.packId;
+    if (item.isHomeProduct || productId == null || packId == null) {
+      throw ArgumentError('Choose an unselected catalog pack.');
+    }
+    return CatalogHomeProductDraft(
+      homeId: item.homeId,
+      productId: productId,
+      packId: packId,
+      canonicalName: item.canonicalName,
+      packSize: item.packSize,
+      category: item.category,
+      brand: item.brand,
+      aliases: item.aliases,
+    );
+  }
+
+  final String homeId;
+  final String productId;
+  final String packId;
+  final String canonicalName;
+  final String packSize;
+  final String category;
+  final String brand;
+  final List<String> aliases;
+}
+
 final class InventoryProductCreationResult {
   const InventoryProductCreationResult({
     required this.homeProductId,
@@ -82,6 +129,8 @@ final class InventoryItem {
     List<String> aliases = const <String>[],
     this.currentQuantity,
     this.isHomeProduct = false,
+    this.productId,
+    this.packId,
   }) : aliases = List<String>.unmodifiable(aliases) {
     _requireText(id, 'id');
     _requireText(homeId, 'homeId');
@@ -102,6 +151,8 @@ final class InventoryItem {
   final List<String> aliases;
   final double? currentQuantity;
   final bool isHomeProduct;
+  final String? productId;
+  final String? packId;
 
   bool get isCounted => currentQuantity != null;
 
@@ -122,6 +173,8 @@ final class InventoryItem {
           ? null
           : (currentQuantity ?? this.currentQuantity),
       isHomeProduct: isHomeProduct,
+      productId: productId,
+      packId: packId,
     );
   }
 }

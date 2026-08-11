@@ -205,6 +205,25 @@ void main() {
       );
       expect(find.byKey(const Key('purchase-line-line-a')), findsOneWidget);
 
+      await tester.tap(
+        find.byKey(const Key('purchase-leave-unresolved-line-a')),
+      );
+      await tester.pumpAndSettle();
+      expect(repository.unresolvedCalls, 1);
+      expect(
+        find.byKey(const Key('purchase-unresolved-state-line-a')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('purchase-review-required')), findsNothing);
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.byKey(const Key('purchase-commit-receipt')),
+            )
+            .onPressed,
+        isNotNull,
+      );
+
       final approveButton = find.byKey(
         const Key('purchase-approve-line-line-a'),
       );
@@ -219,7 +238,7 @@ void main() {
 
       expect(repository.approvalCalls, 1);
       expect(
-        find.textContaining('Approved: Flour · revision 2'),
+        find.textContaining('Approved: Flour · revision 3'),
         findsOneWidget,
       );
       expect(find.byKey(const Key('purchase-review-required')), findsNothing);
@@ -376,7 +395,7 @@ void main() {
       expect(repository.commitCalls, 0);
       expect(
         controller.state.captureError,
-        'Every receipt line must be explicitly matched and approved.',
+        'Every receipt line must be approved or intentionally left unresolved.',
       );
 
       expect(
@@ -407,6 +426,80 @@ void main() {
       await repository.close();
     },
   );
+
+  test(
+    'durable unresolved decision completes review and permits ordinary commit',
+    () async {
+      final repository = _CaptureRepository();
+      final controller = PurchasingController(
+        repository: repository,
+        homeId: 'home-a',
+        mayWrite: true,
+      );
+      controller.start();
+      repository.emitInitial();
+      await Future<void>.delayed(Duration.zero);
+      await controller.createDraft(
+        purchaseDate: DateTime.utc(2026, 8, 11),
+        currency: 'NAD',
+      );
+      await Future<void>.delayed(Duration.zero);
+      await controller.addLine(
+        rawDescription: 'Unclear till text',
+        quantity: 1,
+        lineTotal: Money(minorUnits: 875, currency: 'NAD'),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(await controller.leaveLineUnresolved('line-a'), isTrue);
+      await Future<void>.delayed(Duration.zero);
+      expect(repository.unresolvedCalls, 1);
+      expect(controller.state.capture?.lines.single.unresolved, isTrue);
+      expect(controller.state.capture?.reviewComplete, isTrue);
+      expect(await controller.commitDraft(), isTrue);
+      expect(repository.commitCalls, 1);
+
+      controller.dispose();
+      await repository.close();
+    },
+  );
+
+  test('read-only viewer cannot persist an unresolved decision', () async {
+    final repository = _CaptureRepository();
+    await repository.createReceiptDraft(
+      PurchaseReceiptDraftRequest(
+        homeId: 'home-a',
+        purchaseDate: DateTime.utc(2026, 8, 11),
+        currency: 'NAD',
+      ),
+    );
+    await repository.addReceiptLine(
+      PurchaseReceiptLineRequest(
+        homeId: 'home-a',
+        receiptId: 'receipt-a',
+        rawDescription: 'Viewer cannot decide',
+        quantity: 1,
+        lineTotal: Money(minorUnits: 100, currency: 'NAD'),
+      ),
+    );
+    final controller = PurchasingController(
+      repository: repository,
+      homeId: 'home-a',
+    );
+    controller.start();
+    repository.emitInitial();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(await controller.leaveLineUnresolved('line-a'), isFalse);
+    expect(repository.unresolvedCalls, 0);
+    expect(
+      controller.state.captureError,
+      'Purchase capture is unavailable for this read-only home.',
+    );
+
+    controller.dispose();
+    await repository.close();
+  });
 
   test(
     'read-only controller rejects capture without invoking repository',
@@ -479,6 +572,7 @@ final class _CaptureRepository implements PurchaseCaptureRepository {
   PurchaseReceiptLineRequest? lastLineRequest;
   int createCalls = 0;
   int approvalCalls = 0;
+  int unresolvedCalls = 0;
   int commitCalls = 0;
 
   void emitInitial() {
@@ -590,7 +684,7 @@ final class _CaptureRepository implements PurchaseCaptureRepository {
       purchaseDate: current.purchaseDate,
       currency: current.currency,
       notes: current.notes,
-      revision: 3,
+      revision: current.revision + 1,
       status: PurchaseReceiptStatus.draft,
       synchronizationState: PurchaseSynchronizationState.pending,
       lines: <PurchaseReceiptLineCapture>[
@@ -602,7 +696,7 @@ final class _CaptureRepository implements PurchaseCaptureRepository {
           quantity: line.quantity,
           lineTotal: line.lineTotal,
           homeProductId: homeProductId,
-          revision: 2,
+          revision: line.revision + 1,
           approvalStatus: PurchaseLineApprovalStatus.approved,
           synchronizationState: PurchaseSynchronizationState.pending,
         ),
@@ -611,7 +705,54 @@ final class _CaptureRepository implements PurchaseCaptureRepository {
     _captures.add(_current);
     return PurchaseMutationResult(
       entityId: lineId,
-      revision: 2,
+      revision: line.revision + 1,
+      disposition: PurchaseMutationDisposition.queued,
+    );
+  }
+
+  @override
+  Future<PurchaseMutationResult> markReceiptLineUnresolved({
+    required String homeId,
+    required String receiptId,
+    required String lineId,
+  }) async {
+    unresolvedCalls++;
+    final current = _current!;
+    final line = current.lines.single;
+    if (line.unresolved) {
+      return PurchaseMutationResult(
+        entityId: lineId,
+        revision: line.revision,
+        disposition: PurchaseMutationDisposition.alreadyQueued,
+      );
+    }
+    _current = PurchaseReceiptCapture(
+      id: current.id,
+      homeId: homeId,
+      purchaseDate: current.purchaseDate,
+      currency: current.currency,
+      notes: current.notes,
+      revision: current.revision + 1,
+      status: PurchaseReceiptStatus.draft,
+      synchronizationState: PurchaseSynchronizationState.pending,
+      lines: <PurchaseReceiptLineCapture>[
+        PurchaseReceiptLineCapture(
+          id: lineId,
+          homeId: homeId,
+          receiptId: receiptId,
+          rawDescription: line.rawDescription,
+          quantity: line.quantity,
+          lineTotal: line.lineTotal,
+          revision: line.revision + 1,
+          approvalStatus: PurchaseLineApprovalStatus.unresolved,
+          synchronizationState: PurchaseSynchronizationState.pending,
+        ),
+      ],
+    );
+    _captures.add(_current);
+    return PurchaseMutationResult(
+      entityId: lineId,
+      revision: line.revision + 1,
       disposition: PurchaseMutationDisposition.queued,
     );
   }

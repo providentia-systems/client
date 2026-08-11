@@ -20,10 +20,12 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
     'inventory.count-session.create': 'inventory-count-session',
     'inventory.count-line.upsert': 'inventory-count-line',
     'inventory.count-session.close': 'inventory-count-session',
+    'inventory.count-session.cancel': 'inventory-count-session',
     'purchasing.store.create': 'purchasing-store',
     'purchasing.receipt.create': 'purchasing-receipt',
     'purchasing.receipt-line.create': 'purchasing-receipt-line',
     'purchasing.receipt-line.approve': 'purchasing-receipt-line',
+    'purchasing.receipt-line.unresolve': 'purchasing-receipt-line',
     'purchasing.receipt.commit': 'purchasing-receipt',
     'shopping.list.create': 'shopping-list',
     'shopping.list-line.create': 'shopping-list-line',
@@ -33,8 +35,10 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
   static const Set<String> _commandsRequiringRevision = <String>{
     'inventory.count-line.upsert',
     'inventory.count-session.close',
+    'inventory.count-session.cancel',
     'purchasing.receipt-line.create',
     'purchasing.receipt-line.approve',
+    'purchasing.receipt-line.unresolve',
     'purchasing.receipt.commit',
     'shopping.list-line.create',
     'shopping.list-line.checked',
@@ -133,7 +137,7 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
       if (error.statusCode == 401) {
         throw AuthenticationSyncException(_safeProblem(error));
       }
-      if (error.statusCode == 403) {
+      if (error.statusCode == 403 || error.statusCode == 404) {
         throw AuthorizationSyncException(_safeProblem(error));
       }
       throw RetryableSyncException(_safeProblem(error));
@@ -262,7 +266,7 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
       if (error.statusCode == 401) {
         throw AuthenticationSyncException(_safeProblem(error));
       }
-      if (error.statusCode == 403) {
+      if (error.statusCode == 403 || error.statusCode == 404) {
         return PushResponse(
           results: operations
               .map(
@@ -287,6 +291,138 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
               )
               .toList(growable: false),
         );
+      }
+      throw RetryableSyncException(_safeProblem(error));
+    }
+  }
+
+  @override
+  Future<OperationStatusResponse> operationStatuses({
+    required String homeId,
+    required String deviceId,
+    required List<String> operationIds,
+  }) async {
+    if (!_uuid.hasMatch(homeId) || !_uuid.hasMatch(deviceId)) {
+      throw const FormatException(
+        'Operation status home and device IDs must be UUIDs.',
+      );
+    }
+    if (operationIds.isEmpty || operationIds.length > 100) {
+      throw const FormatException(
+        'Operation status requires between one and 100 operation IDs.',
+      );
+    }
+    final expectedOperationIds = operationIds.toSet();
+    if (expectedOperationIds.length != operationIds.length ||
+        expectedOperationIds.any(
+          (operationId) => !_uuid.hasMatch(operationId),
+        )) {
+      throw const FormatException('Operation status IDs must be unique UUIDs.');
+    }
+
+    try {
+      final body = (await _client.getSynchronizationOperationStatuses(
+        homeId: homeId,
+        body: <String, Object?>{
+          'deviceId': deviceId,
+          'operationIds': operationIds,
+        },
+      )).requireObject();
+      _requireExactKeys(
+        body,
+        required: const <String>{'protocolVersion', 'operations'},
+        allowed: const <String>{'protocolVersion', 'operations'},
+        context: 'operation status response',
+      );
+      if (body['protocolVersion'] != 2) {
+        throw const FormatException(
+          'Operation status response must use sync protocol version two.',
+        );
+      }
+      final rawOperations = body['operations'];
+      if (rawOperations is! List<Object?>) {
+        throw const FormatException(
+          'Operation status response operations must be an array.',
+        );
+      }
+
+      final byOperationId = <String, OperationStatusItem>{};
+      for (final rawItem in rawOperations) {
+        if (rawItem is! Map<String, Object?>) {
+          throw const FormatException(
+            'Every operation status item must be an object.',
+          );
+        }
+        _requireExactKeys(
+          rawItem,
+          required: const <String>{'operationId', 'known'},
+          allowed: const <String>{'operationId', 'known', 'result'},
+          context: 'operation status item',
+        );
+        final operationId = _requiredStatusString(rawItem, 'operationId');
+        if (!expectedOperationIds.contains(operationId)) {
+          throw FormatException(
+            'Operation status returned unknown operation $operationId.',
+          );
+        }
+        if (byOperationId.containsKey(operationId)) {
+          throw FormatException(
+            'Operation status returned operation $operationId twice.',
+          );
+        }
+        final known = rawItem['known'];
+        if (known is! bool) {
+          throw const FormatException(
+            'Operation status known flag must be a boolean.',
+          );
+        }
+        if (!known) {
+          if (rawItem.containsKey('result')) {
+            throw const FormatException(
+              'An unknown operation status cannot contain a result.',
+            );
+          }
+          byOperationId[operationId] = OperationStatusItem(
+            operationId: operationId,
+          );
+          continue;
+        }
+        final rawResult = rawItem['result'];
+        if (rawResult is! Map<String, Object?>) {
+          throw const FormatException(
+            'A known operation status must contain an object result.',
+          );
+        }
+        final result = _statusPushResult(rawResult);
+        if (result.operationId != operationId) {
+          throw const FormatException(
+            'Operation status item and result identities must match.',
+          );
+        }
+        byOperationId[operationId] = OperationStatusItem(
+          operationId: operationId,
+          result: result,
+        );
+      }
+      if (byOperationId.length != expectedOperationIds.length) {
+        final missing = expectedOperationIds.difference(
+          byOperationId.keys.toSet(),
+        );
+        throw FormatException(
+          'Operation status omitted requested operations: ${missing.join(', ')}.',
+        );
+      }
+      return OperationStatusResponse(
+        operations: operationIds
+            .map((operationId) => byOperationId[operationId]!)
+            .toList(growable: false),
+      );
+    } on generated.ProvidentiaApiException catch (error) {
+      if (error.statusCode == 401) {
+        throw AuthenticationSyncException(_safeProblem(error));
+      }
+      if (error.statusCode == 403 || error.statusCode == 404) {
+        throw AuthorizationSyncException(_safeProblem(error));
       }
       throw RetryableSyncException(_safeProblem(error));
     }
@@ -342,7 +478,7 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
       if (error.statusCode == 401) {
         throw AuthenticationSyncException(_safeProblem(error));
       }
-      if (error.statusCode == 403) {
+      if (error.statusCode == 403 || error.statusCode == 404) {
         throw AuthorizationSyncException(_safeProblem(error));
       }
       if (error.statusCode == 410 &&
@@ -370,6 +506,86 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
       changeCursor: result.changeCursor,
       safeMessage: result.detail,
       remotePayload: result.representation ?? result.conflict,
+    );
+  }
+
+  PushOperationResult _statusPushResult(Map<String, Object?> json) {
+    _requireExactKeys(
+      json,
+      required: const <String>{'operationId', 'status'},
+      allowed: const <String>{
+        'operationId',
+        'status',
+        'entityType',
+        'commandType',
+        'entityId',
+        'revision',
+        'changeCursor',
+        'representation',
+        'conflict',
+        'detail',
+        'code',
+        'result',
+      },
+      context: 'operation status result',
+    );
+    final operationId = _requiredStatusString(json, 'operationId');
+    if (!_uuid.hasMatch(operationId)) {
+      throw const FormatException(
+        'Operation status result operation ID must be a UUID.',
+      );
+    }
+    final status = _requiredStatusString(json, 'status');
+    for (final key in const <String>[
+      'entityType',
+      'commandType',
+      'entityId',
+      'changeCursor',
+      'detail',
+      'code',
+    ]) {
+      final value = json[key];
+      if (value != null && value is! String) {
+        throw FormatException('Operation status result $key must be a string.');
+      }
+    }
+    final entityId = json['entityId'];
+    if (entityId != null && !_uuid.hasMatch(entityId as String)) {
+      throw const FormatException(
+        'Operation status result entity ID must be a UUID.',
+      );
+    }
+    final revision = json['revision'];
+    if (revision != null && revision is! int) {
+      throw const FormatException(
+        'Operation status result revision must be an integer.',
+      );
+    }
+    final representation = _optionalStatusObject(json, 'representation');
+    final conflict = _optionalStatusObject(json, 'conflict');
+    final commandResult = _optionalStatusObject(json, 'result');
+    final nestedRevision = commandResult?['revision'];
+    if (nestedRevision != null && nestedRevision is! int) {
+      throw const FormatException(
+        'Operation status command result revision must be an integer.',
+      );
+    }
+    return PushOperationResult(
+      operationId: operationId,
+      kind: switch (status) {
+        'accepted' => PushResultKind.acknowledged,
+        'conflict' => PushResultKind.conflict,
+        'validation_error' => PushResultKind.validationError,
+        'authorization_failure' => PushResultKind.authorizationFailure,
+        'retryable_failure' => PushResultKind.retryableFailure,
+        _ => throw FormatException(
+          'Unknown synchronization result status $status.',
+        ),
+      },
+      acceptedRevision: (revision as int?) ?? (nestedRevision as int?),
+      changeCursor: json['changeCursor'] as String?,
+      safeMessage: json['detail'] as String?,
+      remotePayload: representation ?? conflict ?? commandResult,
     );
   }
 
@@ -450,6 +666,46 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
       throw FormatException(
         'Expected bootstrap "$key" to be an RFC 3339 date-time.',
       );
+    }
+    return value;
+  }
+
+  void _requireExactKeys(
+    Map<String, Object?> json, {
+    required Set<String> required,
+    required Set<String> allowed,
+    required String context,
+  }) {
+    final missing = required.difference(json.keys.toSet());
+    final unexpected = json.keys.toSet().difference(allowed);
+    if (missing.isNotEmpty || unexpected.isNotEmpty) {
+      throw FormatException(
+        'Invalid $context fields. Missing: ${missing.join(', ')}; '
+        'unexpected: ${unexpected.join(', ')}.',
+      );
+    }
+  }
+
+  String _requiredStatusString(Map<String, Object?> json, String key) {
+    final value = json[key];
+    if (value is! String || value.isEmpty) {
+      throw FormatException(
+        'Operation status $key must be a non-empty string.',
+      );
+    }
+    return value;
+  }
+
+  Map<String, Object?>? _optionalStatusObject(
+    Map<String, Object?> json,
+    String key,
+  ) {
+    final value = json[key];
+    if (value == null) {
+      return null;
+    }
+    if (value is! Map<String, Object?>) {
+      throw FormatException('Operation status result $key must be an object.');
     }
     return value;
   }

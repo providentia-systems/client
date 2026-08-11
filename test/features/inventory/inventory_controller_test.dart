@@ -143,6 +143,58 @@ void main() {
     },
   );
 
+  testWidgets('an uncounted catalog pack can be added to the active home', (
+    tester,
+  ) async {
+    final repository = _CreationInventoryRepository();
+    final controller = InventoryController(
+      repository: repository,
+      homeId: 'home-a',
+    );
+    await tester.pumpWidget(
+      _TestApp(child: InventoryWorkspace(controller: controller)),
+    );
+    repository.items.add(<InventoryItem>[
+      InventoryItem(
+        id: 'pack-a',
+        homeId: 'home-a',
+        productId: 'product-a',
+        packId: 'pack-a',
+        canonicalName: 'Long-grain rice',
+        packSize: '2 kg',
+        category: 'Grains',
+        brand: 'Harvest Foods',
+        aliases: const <String>['Rice long grain'],
+      ),
+    ]);
+    repository.session.add(null);
+    await tester.pump();
+    await tester.tap(find.text('Item master'));
+    await tester.pump();
+
+    expect(
+      find.text('2 kg · Harvest Foods · Grains · Aliases: Rice long grain'),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byKey(const Key('inventory-add-catalog-pack-a')));
+    await tester.pump();
+
+    expect(repository.catalogDrafts, hasLength(1));
+    expect(repository.catalogDrafts.single.homeId, 'home-a');
+    expect(repository.catalogDrafts.single.productId, 'product-a');
+    expect(repository.catalogDrafts.single.packId, 'pack-a');
+    expect(
+      find.text(
+        'The catalog product is added locally and queued; server confirmation is pending.',
+      ),
+      findsOneWidget,
+    );
+
+    controller.dispose();
+    await repository.close();
+  });
+
   test(
     'failed creation never reports a successful or queued outcome',
     () async {
@@ -233,9 +285,14 @@ class _InventoryRepository implements InventoryRepository {
 final class _CreationInventoryRepository extends _InventoryRepository
     implements InventoryProductCreationRepository {
   final List<PrivateHomeProductDraft> drafts = <PrivateHomeProductDraft>[];
+  final List<CatalogHomeProductDraft> catalogDrafts =
+      <CatalogHomeProductDraft>[];
 
   @override
   bool get supportsPrivateHomeProductCreation => true;
+
+  @override
+  bool get supportsCatalogHomeProductCreation => true;
 
   @override
   Future<InventoryProductCreationResult> createPrivateHomeProduct(
@@ -248,6 +305,18 @@ final class _CreationInventoryRepository extends _InventoryRepository
       disposition: InventoryProductCreationDisposition.queued,
     );
   }
+
+  @override
+  Future<InventoryProductCreationResult> createCatalogHomeProduct(
+    CatalogHomeProductDraft draft,
+  ) async {
+    catalogDrafts.add(draft);
+    return const InventoryProductCreationResult(
+      homeProductId: 'catalog-product-a',
+      revision: 1,
+      disposition: InventoryProductCreationDisposition.queued,
+    );
+  }
 }
 
 final class _FailingCreationInventoryRepository extends _InventoryRepository
@@ -256,11 +325,23 @@ final class _FailingCreationInventoryRepository extends _InventoryRepository
   bool get supportsPrivateHomeProductCreation => true;
 
   @override
+  bool get supportsCatalogHomeProductCreation => true;
+
+  @override
   Future<InventoryProductCreationResult> createPrivateHomeProduct(
     PrivateHomeProductDraft draft,
   ) {
     throw const InventoryProductCreationException(
       'The private product could not be queued.',
+    );
+  }
+
+  @override
+  Future<InventoryProductCreationResult> createCatalogHomeProduct(
+    CatalogHomeProductDraft draft,
+  ) {
+    throw const InventoryProductCreationException(
+      'The catalog product could not be queued.',
     );
   }
 }

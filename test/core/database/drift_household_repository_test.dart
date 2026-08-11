@@ -5,7 +5,11 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:providentia/core/database/app_database.dart';
 import 'package:providentia/core/database/drift_household_repository.dart';
+import 'package:providentia/core/database/drift_local_sync_repository.dart';
+import 'package:providentia/core/synchronization/sync_models.dart';
+import 'package:providentia/features/homes/infrastructure/home_data_revocation.dart';
 import 'package:providentia/features/inventory/domain/inventory_models.dart';
+import 'package:providentia/features/inventory/domain/inventory_services.dart';
 import 'package:providentia/features/purchasing/domain/purchase_models.dart';
 import 'package:providentia/features/shopping/domain/shopping_models.dart';
 
@@ -45,8 +49,8 @@ void main() {
       expect(report.recentPurchaseRows, 16);
       expect(report.historicalPurchaseRows, 452);
       expect(report.monthlyPurchaseRows, 261);
-      expect(report.exactStockMatches, 25);
-      expect(report.unresolvedStockRows, 35);
+      expect(report.exactStockMatches, 32);
+      expect(report.unresolvedStockRows, 28);
       expect(report.unresolvedRecentPurchaseRows, 12);
       expect(replay.alreadyImported, isTrue);
 
@@ -54,8 +58,109 @@ void main() {
       final purchases = await repository
           .watchPurchaseLines(homeId: 'home-1')
           .first;
-      expect(items, hasLength(327));
+      expect(items, hasLength(320));
+      expect(items.where((item) => item.isCounted), hasLength(60));
+      expect(
+        items.fold<double>(
+          0,
+          (total, item) => total + (item.currentQuantity ?? 0),
+        ),
+        159,
+      );
+      expect(
+        items.where((item) => item.id.startsWith('baseline-stock-')),
+        hasLength(28),
+      );
+      expect(
+        items
+            .singleWhere(
+              (item) =>
+                  item.id ==
+                  'review-ground-coffee-jacobs-barista-classic-pack-size-pending-279',
+            )
+            .currentQuantity,
+        2,
+      );
+      expect(items.where((item) => item.id == 'baseline-stock-26'), isEmpty);
       expect(purchases, hasLength(468));
+      expect(await database.select(database.clientOperations).get(), isEmpty);
+    },
+  );
+
+  test(
+    'production projection keeps 292 catalog packs and 28 distinct private opening products',
+    () async {
+      final catalogItems = List<InventoryItem>.generate(292, (index) {
+        final packId = _fixtureUuid(1, index + 1);
+        return InventoryItem(
+          id: packId,
+          homeId: _homeId,
+          canonicalName: 'Catalog product $index',
+          packSize: '${index + 1} units',
+          category: 'Baseline',
+          productId: _fixtureUuid(2, index + 1),
+          packId: packId,
+        );
+      });
+      await repository.replaceCatalogItemMaster(
+        homeId: _homeId,
+        items: catalogItems,
+      );
+
+      for (var index = 0; index < 60; index++) {
+        final linked = index < 32;
+        final homeProductId = _fixtureUuid(3, index + 1);
+        await _seedProjection(
+          database,
+          homeId: _homeId,
+          entityType: 'inventory-home-product',
+          entityId: homeProductId,
+          revision: 1,
+          payload: <String, Object?>{
+            'productId': linked ? catalogItems[index].productId : null,
+            'packId': linked ? catalogItems[index].packId : null,
+            'privateName': linked ? null : 'Private opening product $index',
+            'originalPackText': linked ? null : 'Source pack $index',
+            'status': 'active',
+          },
+        );
+        await _seedProjection(
+          database,
+          homeId: _homeId,
+          entityType: 'inventory-balance',
+          entityId: homeProductId,
+          revision: 1,
+          payload: <String, Object?>{
+            'homeProductId': homeProductId,
+            'quantity': index == 59 ? '41' : '2',
+          },
+        );
+      }
+
+      await repository.replaceCatalogItemMaster(
+        homeId: _homeId,
+        items: catalogItems,
+      );
+      final items = await repository.watchItems(homeId: _homeId).first;
+
+      expect(items, hasLength(320));
+      expect(
+        items.map((item) => item.packId).whereType<String>().toSet(),
+        hasLength(292),
+      );
+      expect(items.where((item) => item.isCounted), hasLength(60));
+      expect(
+        items.fold<double>(
+          0,
+          (total, item) => total + (item.currentQuantity ?? 0),
+        ),
+        159,
+      );
+      expect(
+        items.where((item) => item.isHomeProduct && item.packId == null),
+        hasLength(28),
+      );
+      expect(items.map((item) => item.canonicalName).toSet(), hasLength(320));
       expect(await database.select(database.clientOperations).get(), isEmpty);
     },
   );
@@ -252,7 +357,9 @@ void main() {
       expect(purchases.single.storeName, 'Central Market');
       expect(purchases.single.lineTotal?.minorUnits, 1234);
       expect(shopping.id, _listId);
-      expect(shopping.lines.single.productPackId, _productId);
+      expect(shopping.lines.single.homeProductId, _productId);
+      // ignore: deprecated_member_use_from_same_package
+      expect(shopping.lines.single.productPackId, isNull);
     },
   );
 
@@ -437,6 +544,166 @@ void main() {
   );
 
   test(
+    'catalog item-master selection queues one typed home-product command',
+    () async {
+      var idIndex = 0;
+      var syncTriggers = 0;
+      final generatedIds = <String>[_createdProductId, _operationId1];
+      repository = DriftHouseholdRepository(
+        database,
+        clock: () => now,
+        deviceId: _deviceId,
+        idGenerator: () => generatedIds[idIndex++],
+        onMutationCommitted: () async {
+          syncTriggers++;
+        },
+      );
+      final catalogItem = InventoryItem(
+        id: _productId,
+        homeId: _homeId,
+        productId: _otherProductId,
+        packId: _productId,
+        canonicalName: 'Long-grain rice',
+        packSize: '2 kg',
+        category: 'Grains',
+        brand: 'Harvest',
+        aliases: const <String>['Rice long grain'],
+      );
+      await repository.replaceCatalogItemMaster(
+        homeId: _homeId,
+        items: <InventoryItem>[catalogItem],
+      );
+      expect(
+        (await repository.watchItems(homeId: _homeId).first).single.id,
+        _productId,
+      );
+
+      final result = await repository.createCatalogHomeProduct(
+        CatalogHomeProductDraft.fromItem(catalogItem),
+      );
+
+      expect(result.homeProductId, _createdProductId);
+      final operation = await database
+          .select(database.clientOperations)
+          .getSingle();
+      expect(operation.operationType, 'inventory.home-product.create');
+      expect(operation.entityId, _createdProductId);
+      expect(operation.baseRevision, isNull);
+      expect(jsonDecode(operation.payload), <String, Object?>{
+        'productId': _otherProductId,
+        'packId': _productId,
+        'privateName': null,
+        'originalPackText': null,
+      });
+      final selected = await repository.watchItems(homeId: _homeId).first;
+      expect(selected, hasLength(1));
+      expect(selected.single.id, _createdProductId);
+      expect(selected.single.productId, _otherProductId);
+      expect(selected.single.packId, _productId);
+      expect(selected.single.canonicalName, 'Long-grain rice');
+      expect(selected.single.aliases, <String>['Rice long grain']);
+      expect(selected.single.isHomeProduct, isTrue);
+      expect(syncTriggers, 1);
+    },
+  );
+
+  test(
+    'verified item-master cache remains searchable offline and purges by home',
+    () async {
+      final item = InventoryItem(
+        id: _productId,
+        homeId: _homeId,
+        productId: _otherProductId,
+        packId: _productId,
+        canonicalName: 'Long-grain rice',
+        packSize: '2 kg bag',
+        category: 'Grains',
+        brand: 'Harvest Foods',
+        aliases: const <String>['Rice long grain'],
+      );
+      await repository.replaceCatalogItemMaster(
+        homeId: _homeId,
+        items: <InventoryItem>[item],
+      );
+
+      // A new repository instance has no network dependency and reads the
+      // last complete home-scoped snapshot from Drift.
+      repository = DriftHouseholdRepository(database, clock: () => now);
+      final cached = await repository.watchItems(homeId: _homeId).first;
+      expect(cached, hasLength(1));
+      const search = InventoryItemSearch();
+      for (final query in <String>[
+        'long grain',
+        'rice long grain',
+        'harvest foods',
+        'grains',
+        '2 kg bag',
+      ]) {
+        expect(
+          search.filter(
+            cached,
+            InventorySearchCriteria(
+              query: query,
+              view: InventoryView.itemMaster,
+            ),
+          ),
+          hasLength(1),
+        );
+      }
+      expect(await repository.watchItems(homeId: _otherHomeId).first, isEmpty);
+      await expectLater(
+        repository.replaceCatalogItemMaster(
+          homeId: _homeId,
+          items: <InventoryItem>[
+            InventoryItem(
+              id: _createdProductId,
+              homeId: _otherHomeId,
+              productId: _otherProductId,
+              packId: _createdProductId,
+              canonicalName: 'Foreign product',
+              packSize: '1 unit',
+              category: 'Private',
+            ),
+          ],
+        ),
+        throwsFormatException,
+      );
+      expect(await repository.watchItems(homeId: _homeId).first, hasLength(1));
+
+      await RevokedHomeDataPurger(database).purge(_homeId);
+      expect(await repository.watchItems(homeId: _homeId).first, isEmpty);
+    },
+  );
+
+  test(
+    'catalog selection rejects an uncached or foreign guessed pack',
+    () async {
+      repository = DriftHouseholdRepository(
+        database,
+        clock: () => now,
+        deviceId: _deviceId,
+        idGenerator: () => _operationId1,
+      );
+
+      await expectLater(
+        repository.createCatalogHomeProduct(
+          CatalogHomeProductDraft(
+            homeId: _homeId,
+            productId: _otherProductId,
+            packId: _productId,
+            canonicalName: 'Guessed product',
+            packSize: '1 unit',
+            category: 'Unknown',
+          ),
+        ),
+        throwsA(isA<InventoryProductCreationException>()),
+      );
+      expect(await database.select(database.localRecords).get(), isEmpty);
+      expect(await database.select(database.clientOperations).get(), isEmpty);
+    },
+  );
+
+  test(
     'synchronized mutation rejects guessed cross-home objects atomically',
     () async {
       repository = DriftHouseholdRepository(
@@ -598,6 +865,154 @@ void main() {
                 ..where((row) => row.entityType.equals('inventory-balance')))
               .getSingle();
       expect(jsonDecode(balance.payload), containsPair('quantity', '8'));
+    },
+  );
+
+  test(
+    'cancelling a synchronized count queues the revision-bound v2 command',
+    () async {
+      var idIndex = 0;
+      var syncTriggers = 0;
+      final operationIds = <String>[_operationId2, _operationId1];
+      repository = DriftHouseholdRepository(
+        database,
+        clock: () => now,
+        deviceId: _deviceId,
+        idGenerator: () => operationIds[idIndex++],
+        onMutationCommitted: () async {
+          syncTriggers++;
+        },
+      );
+      final open = StockCountSession(
+        id: _sessionId,
+        homeId: _homeId,
+        locationId: 'primary',
+        startedAt: now,
+      );
+
+      await repository.saveCountSession(open);
+      await repository.saveCountSession(open.cancel());
+
+      final operations =
+          await (database.select(database.clientOperations)
+                ..orderBy(<OrderingTerm Function(ClientOperations)>[
+                  (row) => OrderingTerm.asc(row.clientTimestamp),
+                ]))
+              .get();
+      expect(operations.map((operation) => operation.operationType), <String>[
+        'inventory.count-session.create',
+        'inventory.count-session.cancel',
+      ]);
+      expect(operations.map((operation) => operation.baseRevision), <int?>[
+        null,
+        1,
+      ]);
+      expect(jsonDecode(operations.last.payload), isEmpty);
+      final session =
+          await (database.select(database.localRecords)..where(
+                (row) =>
+                    row.homeId.equals(_homeId) &
+                    row.entityType.equals('inventory-count-session') &
+                    row.entityId.equals(_sessionId),
+              ))
+              .getSingle();
+      expect(session.revision, 2);
+      expect(jsonDecode(session.payload), containsPair('status', 'cancelled'));
+      expect(
+        await repository.watchActiveCountSession(homeId: _homeId).first,
+        isNull,
+      );
+      expect(
+        await (database.select(database.localRecords)
+              ..where((row) => row.entityType.equals('phase5.stock-movement')))
+            .get(),
+        isEmpty,
+      );
+      expect(syncTriggers, 2);
+    },
+  );
+
+  test(
+    'photo count queues an ordinary line and changes balance only on one close',
+    () async {
+      var idIndex = 0;
+      final operationIds = <String>[
+        _operationId4,
+        _operationId3,
+        _operationId2,
+      ];
+      repository = DriftHouseholdRepository(
+        database,
+        clock: () => now,
+        deviceId: _deviceId,
+        idGenerator: () => operationIds[idIndex++],
+      );
+      await _seedProjection(
+        database,
+        homeId: _homeId,
+        entityType: 'inventory-home-product',
+        entityId: _productId,
+        revision: 1,
+        payload: const <String, Object?>{
+          'privateName': 'Flour',
+          'originalPackText': '2 kg',
+          'status': 'active',
+        },
+      );
+      final open = StockCountSession(
+        id: _sessionId,
+        homeId: _homeId,
+        locationId: 'primary',
+        startedAt: now,
+      );
+      await repository.saveCountSession(open);
+      final counted = open
+          .attachPhoto(
+            StockPhotoReference(
+              id: 'proposal-1',
+              localReference: 'ephemeral://review',
+              addedAt: now,
+            ),
+          )
+          .recordLine(
+            StockCountLine(
+              id: _countLineId,
+              itemId: _productId,
+              status: CountLineStatus.confirmed,
+              source: CountSource.photo,
+              observedQuantity: 6,
+              photoId: 'proposal-1',
+            ),
+          );
+      await repository.saveCountSession(counted);
+
+      var operations = await database.select(database.clientOperations).get();
+      expect(operations, hasLength(2));
+      final linePayload = jsonDecode(operations.last.payload);
+      expect(linePayload, containsPair('source', 'photo'));
+      expect(
+        await (database.select(
+          database.localRecords,
+        )..where((row) => row.entityType.equals('inventory-balance'))).get(),
+        isEmpty,
+      );
+
+      final closed = counted.close(now.add(const Duration(minutes: 2)));
+      await repository.saveCountSession(closed);
+      operations = await database.select(database.clientOperations).get();
+      expect(
+        operations.where(
+          (operation) =>
+              operation.operationType == 'inventory.count-session.close',
+        ),
+        hasLength(1),
+      );
+      final balance =
+          await (database.select(database.localRecords)
+                ..where((row) => row.entityType.equals('inventory-balance')))
+              .getSingle();
+      expect(jsonDecode(balance.payload), containsPair('quantity', '6'));
+      await expectLater(repository.saveCountSession(closed), throwsStateError);
     },
   );
 
@@ -827,6 +1242,308 @@ void main() {
     },
   );
 
+  test(
+    'unresolved decision survives reload, exact retry, and commit without local effects',
+    () async {
+      var idIndex = 0;
+      final generatedIds = <String>[_operationId1];
+      repository = DriftHouseholdRepository(
+        database,
+        clock: () => now,
+        deviceId: _deviceId,
+        idGenerator: () => generatedIds[idIndex++],
+      );
+      await _seedDraftReceiptAndLine(database);
+
+      final unresolved = await repository.markReceiptLineUnresolved(
+        homeId: _homeId,
+        receiptId: _receiptId,
+        lineId: _receiptLineId,
+      );
+      var reloadedIdCalls = 0;
+      final reloaded = DriftHouseholdRepository(
+        database,
+        clock: () => now.add(const Duration(minutes: 1)),
+        deviceId: _deviceId,
+        idGenerator: () {
+          reloadedIdCalls++;
+          return _operationId2;
+        },
+      );
+      final retry = await reloaded.markReceiptLineUnresolved(
+        homeId: _homeId,
+        receiptId: _receiptId,
+        lineId: _receiptLineId,
+      );
+
+      expect(unresolved.revision, 2);
+      expect(retry.revision, 2);
+      expect(retry.disposition, PurchaseMutationDisposition.alreadyQueued);
+      expect(reloadedIdCalls, 0);
+      var operations = await database.select(database.clientOperations).get();
+      expect(operations, hasLength(1));
+      expect(operations.single.operationId, _operationId1);
+      expect(
+        operations.single.operationType,
+        'purchasing.receipt-line.unresolve',
+      );
+      expect(operations.single.baseRevision, 1);
+      expect(jsonDecode(operations.single.payload), <String, Object?>{
+        'receiptId': _receiptId,
+      });
+
+      final capture = await reloaded
+          .watchActiveReceiptCapture(homeId: _homeId)
+          .first;
+      expect(capture?.reviewComplete, isTrue);
+      expect(capture?.lines.single.unresolved, isTrue);
+      expect(capture?.lines.single.rawDescription, 'Unreadable till line');
+      expect(capture?.lines.single.originalPackText, '500 g?');
+      expect(capture?.lines.single.lineTotal?.minorUnits, 875);
+      expect(capture?.lines.single.homeProductId, isNull);
+
+      final committed = await reloaded.commitReceipt(
+        homeId: _homeId,
+        receiptId: _receiptId,
+      );
+      expect(committed.revision, 4);
+      operations = await database.select(database.clientOperations).get();
+      expect(operations.map((operation) => operation.operationType), <String>[
+        'purchasing.receipt-line.unresolve',
+        'purchasing.receipt.commit',
+      ]);
+      expect(operations.map((operation) => operation.baseRevision), <int?>[
+        1,
+        3,
+      ]);
+      expect(idIndex, generatedIds.length);
+      expect(reloadedIdCalls, 1);
+      final effectRecords =
+          await (database.select(database.localRecords)..where(
+                (row) => row.entityType.isIn(const <String>[
+                  'phase5.stock-movement',
+                  'phase8.price-observation',
+                  'inventory-movement',
+                  'purchasing-price-observation',
+                ]),
+              ))
+              .get();
+      expect(effectRecords, isEmpty);
+    },
+  );
+
+  test(
+    'unresolved decision can later be approved without losing raw data',
+    () async {
+      var idIndex = 0;
+      final generatedIds = <String>[_operationId1, _operationId2];
+      repository = DriftHouseholdRepository(
+        database,
+        clock: () => now,
+        deviceId: _deviceId,
+        idGenerator: () => generatedIds[idIndex++],
+      );
+      await _seedDraftReceiptAndLine(database);
+      await _seedProjection(
+        database,
+        homeId: _homeId,
+        entityType: 'inventory-home-product',
+        entityId: _productId,
+        revision: 1,
+        payload: const <String, Object?>{
+          'privateName': 'Reviewed pantry item',
+          'originalPackText': '500 g',
+          'status': 'active',
+        },
+      );
+
+      await repository.markReceiptLineUnresolved(
+        homeId: _homeId,
+        receiptId: _receiptId,
+        lineId: _receiptLineId,
+      );
+      final approved = await repository.approveReceiptLine(
+        homeId: _homeId,
+        receiptId: _receiptId,
+        lineId: _receiptLineId,
+        homeProductId: _productId,
+      );
+
+      expect(approved.revision, 3);
+      final capture = await repository
+          .watchActiveReceiptCapture(homeId: _homeId)
+          .first;
+      expect(capture?.lines.single.approved, isTrue);
+      expect(capture?.lines.single.rawDescription, 'Unreadable till line');
+      expect(capture?.lines.single.originalPackText, '500 g?');
+      expect(capture?.lines.single.homeProductId, _productId);
+      final operations = await database.select(database.clientOperations).get();
+      expect(operations.map((operation) => operation.operationType), <String>[
+        'purchasing.receipt-line.unresolve',
+        'purchasing.receipt-line.approve',
+      ]);
+      expect(operations.map((operation) => operation.baseRevision), <int?>[
+        1,
+        2,
+      ]);
+    },
+  );
+
+  test(
+    'foreign-home unresolved mutation is atomic and authoritative second-device projection is readable',
+    () async {
+      repository = DriftHouseholdRepository(
+        database,
+        clock: () => now,
+        deviceId: _deviceId,
+        idGenerator: () => _operationId1,
+      );
+      await _seedDraftReceiptAndLine(database, homeId: _otherHomeId);
+
+      await expectLater(
+        repository.markReceiptLineUnresolved(
+          homeId: _homeId,
+          receiptId: _receiptId,
+          lineId: _receiptLineId,
+        ),
+        throwsA(isA<PurchaseCaptureException>()),
+      );
+      expect(await database.select(database.clientOperations).get(), isEmpty);
+
+      await DriftLocalSyncRepository(database).applyPullPage(
+        homeId: _homeId,
+        page: PullPage(
+          protocolVersion: 1,
+          fromCursor: null,
+          pageCursor: 'cursor-unresolved',
+          highWaterCursor: 'cursor-unresolved',
+          hasMore: false,
+          requestId: 'second-device-pull',
+          changes: <RemoteChange>[
+            RemoteChange(
+              cursor: 'cursor-receipt',
+              homeId: _homeId,
+              entityType: 'purchasing-receipt',
+              entityId: _receiptId,
+              kind: RemoteChangeKind.upsert,
+              revision: 3,
+              serverTimestamp: now,
+              payload: _draftReceiptPayload(),
+            ),
+            RemoteChange(
+              cursor: 'cursor-unresolved',
+              homeId: _homeId,
+              entityType: 'purchasing-receipt-line',
+              entityId: _receiptLineId,
+              kind: RemoteChangeKind.upsert,
+              revision: 2,
+              serverTimestamp: now,
+              payload: <String, Object?>{
+                ..._draftLinePayload(),
+                'homeProductId': null,
+                'approvalStatus': 'unresolved',
+              },
+            ),
+          ],
+        ),
+      );
+
+      final secondDevice = await repository
+          .watchActiveReceiptCapture(homeId: _homeId)
+          .first;
+      expect(secondDevice?.lines.single.unresolved, isTrue);
+      expect(
+        secondDevice?.lines.single.synchronizationState,
+        PurchaseSynchronizationState.synchronized,
+      );
+      expect(secondDevice?.reviewComplete, isTrue);
+    },
+  );
+
+  test(
+    'approved-catalog is terminal and can be deliberately unresolved then reapproved',
+    () async {
+      var idIndex = 0;
+      final operationIds = <String>[
+        _operationId1,
+        _operationId2,
+        _operationId3,
+      ];
+      repository = DriftHouseholdRepository(
+        database,
+        clock: () => now,
+        deviceId: _deviceId,
+        idGenerator: () => operationIds[idIndex++],
+      );
+      await _seedProjection(
+        database,
+        homeId: _homeId,
+        entityType: 'inventory-home-product',
+        entityId: _productId,
+        revision: 1,
+        payload: const <String, Object?>{
+          'privateName': 'Catalog milk',
+          'status': 'active',
+        },
+      );
+      await _seedProjection(
+        database,
+        homeId: _homeId,
+        entityType: 'purchasing-receipt',
+        entityId: _receiptId,
+        revision: 2,
+        payload: _draftReceiptPayload(),
+      );
+      await _seedProjection(
+        database,
+        homeId: _homeId,
+        entityType: 'purchasing-receipt-line',
+        entityId: _receiptLineId,
+        revision: 1,
+        payload: <String, Object?>{
+          ..._draftLinePayload(),
+          'homeProductId': _productId,
+          'approvalStatus': 'approved-catalog',
+        },
+      );
+
+      final catalogCapture = await repository
+          .watchActiveReceiptCapture(homeId: _homeId)
+          .first;
+      expect(
+        catalogCapture?.lines.single.approvalStatus,
+        PurchaseLineApprovalStatus.approvedCatalog,
+      );
+      expect(catalogCapture?.lines.single.approved, isTrue);
+      expect(catalogCapture?.reviewComplete, isTrue);
+
+      await repository.markReceiptLineUnresolved(
+        homeId: _homeId,
+        receiptId: _receiptId,
+        lineId: _receiptLineId,
+      );
+      await repository.approveReceiptLine(
+        homeId: _homeId,
+        receiptId: _receiptId,
+        lineId: _receiptLineId,
+        homeProductId: _productId,
+      );
+      await repository.commitReceipt(homeId: _homeId, receiptId: _receiptId);
+
+      final operations = await database.select(database.clientOperations).get();
+      expect(operations.map((operation) => operation.operationType), <String>[
+        'purchasing.receipt-line.unresolve',
+        'purchasing.receipt-line.approve',
+        'purchasing.receipt.commit',
+      ]);
+      expect(operations.map((operation) => operation.baseRevision), <int?>[
+        1,
+        2,
+        4,
+      ]);
+    },
+  );
+
   test('shopping writes only published create and checked semantics', () async {
     var idIndex = 0;
     final operationIds = <String>[_operationId1, _operationId2, _operationId3];
@@ -851,7 +1568,7 @@ void main() {
         quantity: 2,
         origin: ShoppingLineOrigin.manual,
         createdAt: now,
-        productPackId: _productId,
+        homeProductId: _productId,
       ),
     );
     await repository.saveList(withLine);
@@ -881,6 +1598,78 @@ void main() {
     expect(payload['quantityToBuy'], '2');
     expect(payload['checked'], isTrue);
   });
+
+  test(
+    'suggestion add keeps three identities while queuing ordinary v2 line create',
+    () async {
+      var idIndex = 0;
+      final operationIds = <String>[_operationId1, _operationId2];
+      repository = DriftHouseholdRepository(
+        database,
+        clock: () => now,
+        deviceId: _deviceId,
+        idGenerator: () => operationIds[idIndex++],
+      );
+      final empty = ShoppingList(
+        id: _listId,
+        homeId: _homeId,
+        name: 'Shopping list',
+        createdAt: now,
+      );
+      await repository.saveList(empty);
+      await repository.saveList(
+        empty.add(
+          ShoppingListLine(
+            id: _shoppingLineId,
+            homeId: _homeId,
+            name: 'Flour',
+            quantity: 2,
+            origin: ShoppingLineOrigin.suggestion,
+            createdAt: now,
+            suggestionId: _suggestionId,
+            homeProductId: _productId,
+            selectedPackId: _selectedPackId,
+          ),
+        ),
+      );
+
+      final projected = await repository.watchActiveList(homeId: _homeId).first;
+      final line = projected.lines.single;
+      expect(line.suggestionId, _suggestionId);
+      expect(line.homeProductId, _productId);
+      expect(line.selectedPackId, _selectedPackId);
+      // ignore: deprecated_member_use_from_same_package
+      expect(line.productPackId, isNull);
+
+      final operations = await database.select(database.clientOperations).get();
+      expect(operations, hasLength(2));
+      final createLine = operations.singleWhere(
+        (operation) => operation.operationType == 'shopping.list-line.create',
+      );
+      expect(jsonDecode(createLine.payload), <String, Object?>{
+        'listId': _listId,
+        'homeProductId': _productId,
+        'description': 'Flour',
+        'quantity': '2',
+      });
+      expect(
+        operations.any(
+          (operation) => operation.operationType.contains('feedback'),
+        ),
+        isFalse,
+      );
+      final link =
+          await (database.select(database.localRecords)..where(
+                (row) =>
+                    row.entityType.equals('shopping-suggestion-line-link-v1'),
+              ))
+              .getSingle();
+      expect(
+        jsonDecode(link.payload),
+        containsPair('suggestionId', _suggestionId),
+      );
+    },
+  );
 }
 
 const _homeId = '0198a0b1-c2d3-7e4f-8123-456789abcdef';
@@ -896,10 +1685,60 @@ const _receiptId = '0198a0b1-c2d3-7e4f-b789-abcdef012345';
 const _receiptLineId = '0198a0b1-c2d3-7e4f-8789-abcdef012346';
 const _listId = '0198a0b1-c2d3-7e4f-8567-89abcdef0123';
 const _shoppingLineId = '0198a0b1-c2d3-7e4f-9567-89abcdef0123';
+const _suggestionId = '0198a0b1-c2d3-7e4f-a567-89abcdef0124';
+const _selectedPackId = '0198a0b1-c2d3-7e4f-b567-89abcdef0125';
 const _operationId1 = '0198a0b1-c2d3-7e4f-9234-56789abcdef0';
 const _operationId2 = '0198a0b1-c2d3-7e4f-9234-56789abcdef1';
 const _operationId3 = '0198a0b1-c2d3-7e4f-9234-56789abcdef2';
 const _operationId4 = '0198a0b1-c2d3-7e4f-9234-56789abcdef3';
+
+String _fixtureUuid(int namespace, int index) =>
+    '0198a0b1-c2d3-7e4f-8${namespace.toRadixString(16).padLeft(3, '0')}-'
+    '${index.toRadixString(16).padLeft(12, '0')}';
+
+Map<String, Object?> _draftReceiptPayload() => <String, Object?>{
+  'storeId': null,
+  'purchaseDate': '2026-08-11',
+  'currency': 'NAD',
+  'totalAmount': '8.75',
+  'status': 'draft',
+  'source': 'manual',
+  'sourceReference': 'private-receipt-photo',
+  'notes': 'Retain raw unresolved evidence',
+};
+
+Map<String, Object?> _draftLinePayload() => <String, Object?>{
+  'receiptId': _receiptId,
+  'rawDescription': 'Unreadable till line',
+  'quantity': '1',
+  'originalPackText': '500 g?',
+  'unitPrice': '8.75',
+  'lineTotal': '8.75',
+  'homeProductId': null,
+  'approvalStatus': 'unreviewed',
+};
+
+Future<void> _seedDraftReceiptAndLine(
+  AppDatabase database, {
+  String homeId = _homeId,
+}) async {
+  await _seedProjection(
+    database,
+    homeId: homeId,
+    entityType: 'purchasing-receipt',
+    entityId: _receiptId,
+    revision: 2,
+    payload: _draftReceiptPayload(),
+  );
+  await _seedProjection(
+    database,
+    homeId: homeId,
+    entityType: 'purchasing-receipt-line',
+    entityId: _receiptLineId,
+    revision: 1,
+    payload: _draftLinePayload(),
+  );
+}
 
 Future<void> _seedProjection(
   AppDatabase database, {
@@ -929,29 +1768,56 @@ Future<void> _seedProjection(
 }
 
 (String, String) _baselineFixture() {
-  final itemMaster = List<Map<String, Object?>>.generate(
-    292,
-    (index) => <String, Object?>{
-      'id': 'item-$index',
+  const reviewedLinks = <int, String>{
+    26: 'review-ground-coffee-jacobs-barista-classic-pack-size-pending-279',
+    30: 'review-tomato-sauce-all-gold-pack-size-pending-282',
+    31: 'review-tomato-sauce-pack-size-pending-283',
+    32: 'review-sweet-chilli-sauce-pack-size-pending-284',
+    46: 'review-oxi-laundry-stain-remover-pack-size-pending-287',
+    50: 'review-thin-bleach-pack-size-pending-288',
+    55: 'review-insecticide-repellent-tabard-pack-size-pending-289',
+    56: 'review-air-freshener-pack-size-pending-290',
+    59: 'review-steel-wool-scrubbies-pack-size-pending-292',
+  };
+  final reviewedStockNumbers = reviewedLinks.keys.toList(growable: false);
+  final itemMaster = List<Map<String, Object?>>.generate(292, (index) {
+    final reviewedIndex = index - 23;
+    final reviewedStockNumber =
+        reviewedIndex >= 0 && reviewedIndex < reviewedStockNumbers.length
+        ? reviewedStockNumbers[reviewedIndex]
+        : null;
+    return <String, Object?>{
+      'id': reviewedStockNumber == null
+          ? 'item-$index'
+          : reviewedLinks[reviewedStockNumber]!,
       'category': 'Category ${index % 12}',
-      'product': 'Product $index',
-      'packSize': '1 unit',
+      'product': reviewedStockNumber == null
+          ? 'Product $index'
+          : 'Reviewed product $reviewedStockNumber',
+      'packSize': reviewedStockNumber == null ? '1 unit' : 'Pack size pending',
       'unit': 'units',
-      'brand': '',
-    },
-  );
-  final currentStock = List<Map<String, Object?>>.generate(
-    60,
-    (index) => <String, Object?>{
-      'id': 'stock-$index',
+      'brand': reviewedStockNumber == null
+          ? ''
+          : 'Reviewed brand $reviewedStockNumber',
+    };
+  });
+  final currentStock = List<Map<String, Object?>>.generate(60, (index) {
+    final stockNumber = index + 1;
+    final reviewed = reviewedLinks.containsKey(stockNumber);
+    return <String, Object?>{
+      'id': 'stock-$stockNumber',
       'category': 'Category ${index % 12}',
-      'product': index < 25 ? 'Product $index' : 'Unmatched $index',
-      'packSize': '1 unit',
+      'product': stockNumber <= 23
+          ? 'Product $index'
+          : reviewed
+          ? 'Reviewed product $stockNumber'
+          : 'Private product $stockNumber',
+      'packSize': reviewed ? '' : '1 unit',
       'quantity': index == 59 ? 41 : 2,
       'unit': 'units',
-      'brand': '',
-    },
-  );
+      'brand': reviewed ? 'Reviewed brand $stockNumber' : '',
+    };
+  });
   final purchases = List<Map<String, Object?>>.generate(
     16,
     (index) => <String, Object?>{

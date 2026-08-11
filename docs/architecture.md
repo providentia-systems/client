@@ -55,12 +55,23 @@ result classifications, atomic page-and-cursor application, and explicit sync
 outcomes for presentation.
 
 Phase 5–8 inventory, purchasing, shopping, intelligence, catalog, and reporting
-models and workspaces now exist. In the current production composition, the
-visible household inventory, purchase, and list workflows are still backed
-primarily by local Drift projections. Identity, session, authorized-home
-selection, health checks, and the narrow synchronization gateway are connected
-to the backend. A visible workspace is therefore not, by itself, evidence of
-end-to-end server integration.
+models and workspaces now exist. Production household mutations write an
+optimistic home-scoped Drift projection and closed protocol-v2 command in one
+transaction, then synchronize through the generated gateway. The complete
+paged item master and verified shopping suggestions retain last-verified
+offline caches. Startup, manual refresh, foreground mutation, and coalesced app
+resume drive synchronization; revoked homes are purged rather than resumed.
+
+Receipt and stock AI remain proposal-only until ordinary purchasing or count
+commands. Stock can prefer a verified native strict-local route; receipt
+direct-local extraction is not composed. Shopping feedback, existing-line
+quantity edit, cross-device suggestion provenance, general sanitized catalog
+proposal creation, and global alias publication remain deferred. Operation-
+status response-loss recovery now applies known immutable results once,
+exact-retries unknown operations with their existing IDs, defers unavailable or
+malformed status safely, and treats HTTP 403/404 as authorization loss. A
+composed workspace and simulated convergence still do not prove live deployment
+acceptance.
 
 ## Runtime configuration
 

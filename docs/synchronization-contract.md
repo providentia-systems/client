@@ -1,87 +1,85 @@
 # Backend synchronization contract
 
-## Ownership
+## Ownership and scope
 
-The Mezzio/Laminas repository owns this OpenAPI contract. Flutter pins the
+The Mezzio/Laminas repository owns the OpenAPI contract. Flutter pins the
 published bytes, generates transport types, and adapts them to
 `SyncRemoteGateway`. Widgets and feature presentation never import the
 generated package.
 
-## Push
+Every request is scoped by the route `homeId`, authenticated user, registered
+device, and current membership. Changing an identifier never grants access to
+another household.
+
+## Push protocols
 
 `POST /api/v1/homes/{homeId}/sync/push`
 
-The route `homeId` is an integrity and resource-selection value. The server
-still derives the authenticated user, membership, role, and allowed active
-home; changing the route cannot grant access.
+The client chooses one closed protocol for each batch:
 
-The request envelope contains:
+- protocol v1 carries generic allowlisted entities only (`home-preference` and
+  `private-note`);
+- protocol v2 carries the typed inventory, purchasing, and shopping commands
+  declared by the pinned contract.
 
-- `protocolVersion`: integer `1`;
-- `batchId`: client-generated idempotency identifier;
-- `deviceId`: registered device identifier;
-- optional `lastPulledCursor`;
-- `operations`.
+The two protocols may not be mixed in one batch. Protocol-v2 operations are
+validated for UUID identity, projection type, payload schema, and the base
+revision required by each command. The command set includes count creation,
+line upsert, close, and movement-free cancellation; receipt creation, line
+review, and commit; plus shopping-list creation, lines, and checked state.
 
-Each operation contains the durable client operation ID, entity type and ID,
-operation type, nullable base revision for create/append operations, client
-timestamp, payload schema version, and typed JSON payload. It does not repeat
-`homeId`; the route owns that scope.
+The envelope contains a deterministic batch idempotency key, registered device
+ID, optional last-pulled cursor, and durable operations. Every operation has a
+stable operation ID. Repeating an accepted operation ID must return its stored
+result without applying the domain action twice. A lost cancellation response
+is therefore safe to retry: the server publishes one `cancelled` revision and
+creates no inventory movement.
 
-Every operation receives one result with status:
+Each result is classified as accepted, conflict, validation failure,
+authorization failure, or retryable failure. Later dependency-ordered
+commands are not submitted after an earlier command is rejected or deferred.
 
-- `accepted`;
-- `conflict`;
-- `validation_error`;
-- `authorization_failure`;
-- `retryable_failure`.
-
-Results use `revision`, `changeCursor`, and `representation` where applicable.
-Repeating a previously accepted operation ID must return its stable result
-without applying the domain mutation twice.
-
-## Pull
-
-`GET /api/v1/homes/{homeId}/sync/pull`
-
-The request supplies the opaque current cursor and bounded page size. The
-response includes protocol version, source cursor, request ID, changes, page
-cursor, high-water cursor, and `hasMore`.
-
-Each change has an opaque ordered cursor, entity identity, revision, server
-timestamp, and operation `upsert` or `delete`. An upsert has a
-`representation`; a delete has a `tombstone`.
-
-Flutter advances the cursor only in the same local transaction that commits
-the full page. It never sorts, synthesizes, or compares opaque cursor text.
-HTTP 410 with problem type ending in `sync_resync_required` triggers one
-authorized bootstrap. The replacement snapshot, captured cursor, and replay of
-unacknowledged local intent commit atomically. A second 410 in the same run
-fails safely instead of looping.
-
-## Initial bootstrap
+## Bootstrap and pull
 
 `GET /api/v1/homes/{homeId}/sync/bootstrap`
 
-A fresh installation has no local cursor, so it first requests an authorized,
-consistent snapshot. Flutter commits all snapshot records and the returned
-`snapshotCursor` in one transaction, then starts ordinary pull requests from
-that cursor. The client does not invent a zero cursor. For compatibility
-diagnostics, if an initial pull is ever issued without a cursor, the repository
-accepts the backend's encoded genesis `fromCursor` only while the local cursor
-is absent; every later page must echo the committed cursor exactly.
+A fresh installation pages through one frozen snapshot. The client requires a
+stable high-water cursor, advancing page cursors, no duplicate entity records,
+and a snapshot cursor only on the final page. It then atomically replaces the
+authorized home projection while replaying pending local intent.
 
-## Authentication and failures
+`GET /api/v1/homes/{homeId}/sync/pull`
 
-- HTTP 401/token expiry attempts one secure credential refresh. If refresh
-  fails, local intent remains retryable and the app shows sign-in-required.
-- HTTP 403/revoked membership never triggers credential refresh. Push maps it
-  to `authorization_failure` and `blocked_authorization`; bootstrap/pull return
-  an explicit authorization outcome and “access changed” presentation state.
-- Conflict and validation results are not eligible for blind manual retry.
-- Timeouts, 429, and classified 5xx responses remain in the durable outbox
-  with exponential backoff and bounded jitter.
-- Access and refresh tokens are never persisted in Drift.
-- Browser requests use the backend's credentialed cookie session and CSRF
-  contract. Native requests obtain their session through interactive sign-in;
-  no bearer token or home identifier is injected at build time.
+Incremental pull returns an ordered page of upserts or tombstones, the echoed
+source cursor, page cursor, frozen high-water cursor, and `hasMore`. Flutter
+commits the page and cursor in one Drift transaction. It treats cursor strings
+as opaque and never sorts, compares, or synthesizes them.
+
+HTTP 410 with `sync_resync_required` permits one authorized re-bootstrap in a
+run. A second compaction response, a changed page boundary, or a cursor that
+does not advance fails safely instead of looping.
+
+## Local state and retries
+
+Drift stores projections, durable operations, per-home cursors, conflicts, and
+safe status metadata. Access and refresh credentials, provider secrets, and
+private media bytes are never stored there.
+
+Mutations commit locally before foreground synchronization. The coordinator
+runs on start, resume, home switch, manual refresh, and committed foreground
+mutations. Interrupted operations return to retry state with exponential
+backoff. Authentication expiry permits one secure recovery attempt; revoked
+membership is an authorization failure and does not trigger credential
+refresh.
+
+Conflict and validation results are terminal until corrected. Timeouts, 429,
+classified 5xx responses, and lost responses remain retryable. Operational
+metrics contain counts and classifications, never payloads or household data.
+
+## Count-session terminal behavior
+
+Closing a count explicitly applies approved variance through normal inventory
+commands. Cancelling is different: it requires the current open-session
+revision, changes the status to `cancelled`, removes it from the active-count
+view, and never applies observations or creates movements. Both terminal states
+converge through the ordinary change feed.

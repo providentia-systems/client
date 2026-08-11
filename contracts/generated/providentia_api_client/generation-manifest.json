@@ -1,10 +1,10 @@
 {
   "generator": "tool/generate_api_client.mjs",
-  "generatorVersion": 4,
+  "generatorVersion": 5,
   "contract": "../../providentia-v1.json",
-  "contractVersion": "1.12.0",
-  "contractSha256": "30604d238f9c29f9d6b09dbf1819c84a475cb93e94728a8b2888f9b65a865a44",
-  "operationCount": 156,
+  "contractVersion": "1.13.2",
+  "contractSha256": "1b6b7f09240ace0ba6b7e7279259687569dfbacb112ea7dbd4094fe27ccd0108",
+  "operationCount": 158,
   "generatedFiles": [
     "pubspec.yaml",
     "lib/providentia_api_client.dart"

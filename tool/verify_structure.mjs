@@ -182,7 +182,10 @@ const generatedClientAdapters = new Set([
   'lib/features/homes/infrastructure/api11_home_transport.dart',
   'lib/features/household_sync/infrastructure/api17_callback_household_gateway.dart',
   'lib/features/identity/infrastructure/api11_identity_transport.dart',
+  'lib/features/inventory/infrastructure/generated_home_item_master_source.dart',
+  'lib/features/inventory/infrastructure/item_master_refreshing_synchronization.dart',
   'lib/features/reporting/infrastructure/generated_household_report_repository.dart',
+  'lib/features/shopping/infrastructure/generated_online_shopping_suggestion_repository.dart',
 ]);
 const synchronizationPolicyFiles = new Set([
   'lib/core/synchronization/sync_models.dart',

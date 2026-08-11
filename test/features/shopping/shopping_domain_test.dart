@@ -30,6 +30,26 @@ void main() {
         throwsStateError,
       );
     });
+
+    test('server suggestion identities remain distinct', () {
+      final line = ShoppingListLine(
+        id: 'line',
+        homeId: 'home-a',
+        name: 'Oats',
+        quantity: 2,
+        origin: ShoppingLineOrigin.suggestion,
+        createdAt: DateTime.utc(2026),
+        suggestionId: 'suggestion-id',
+        homeProductId: 'home-product-id',
+        selectedPackId: 'pack-id',
+      );
+
+      expect(line.suggestionId, 'suggestion-id');
+      expect(line.homeProductId, 'home-product-id');
+      expect(line.selectedPackId, 'pack-id');
+      // ignore: deprecated_member_use_from_same_package
+      expect(line.productPackId, isNull);
+    });
   });
 
   group('ReliableConsumptionEstimator', () {
