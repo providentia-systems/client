@@ -18,21 +18,32 @@ enum CatalogQueueKind {
   icon,
 }
 
-enum CatalogReviewStatus { pending, inReview, approved, rejected }
+enum CatalogQueueSource {
+  governanceProposal,
+  consentContribution,
+  conflict,
+  icon,
+  merge,
+}
+
+enum CatalogReviewStatus { pending, inReview, conflict, approved, rejected }
 
 enum CatalogReviewDecisionKind { recommend, approve, reject }
 
 enum CatalogMergePlanKind { merge, reversal }
 
 final class CatalogQueueItem {
-  const CatalogQueueItem({
+  CatalogQueueItem({
     required this.id,
     required this.kind,
     required this.title,
     required this.summary,
     required this.status,
     required this.revision,
-  });
+    this.source = CatalogQueueSource.governanceProposal,
+    List<String> relatedCatalogIds = const <String>[],
+    this.iconTargetType,
+  }) : relatedCatalogIds = List<String>.unmodifiable(relatedCatalogIds);
 
   final String id;
   final CatalogQueueKind kind;
@@ -40,6 +51,13 @@ final class CatalogQueueItem {
   final String summary;
   final CatalogReviewStatus status;
   final int revision;
+  final CatalogQueueSource source;
+
+  /// Sanitized global catalog identifiers needed for a revision-bound action.
+  /// Household, user, consent-receipt, and private record identifiers are never
+  /// copied here.
+  final List<String> relatedCatalogIds;
+  final CatalogIconTargetType? iconTargetType;
 }
 
 final class CatalogModerationProposal {
@@ -80,6 +98,95 @@ final class CatalogReviewDecision {
   final CatalogReviewDecisionKind decision;
   final String reason;
   final int expectedRevision;
+}
+
+final class CatalogModerationDecisionResult {
+  const CatalogModerationDecisionResult({
+    required this.status,
+    this.entityType,
+    this.entityId,
+  });
+
+  final CatalogReviewStatus status;
+  final String? entityType;
+  final String? entityId;
+}
+
+enum CatalogIconTargetType { product, category }
+
+final class CatalogIconWrite {
+  CatalogIconWrite({
+    required this.targetType,
+    required this.targetId,
+    required this.assetDigest,
+    required this.mediaType,
+    required this.altText,
+    required this.width,
+    required this.height,
+    required this.byteSize,
+    required this.provenance,
+    required this.expectedRevision,
+  }) {
+    _requireBoundedText(targetId, 'targetId');
+    if (!RegExp(r'^[a-f0-9]{64}$').hasMatch(assetDigest)) {
+      throw ArgumentError.value(
+        assetDigest,
+        'assetDigest',
+        'must be a lowercase SHA-256 digest',
+      );
+    }
+    if (!const <String>{
+      'image/png',
+      'image/webp',
+      'image/svg+xml',
+    }.contains(mediaType)) {
+      throw ArgumentError.value(mediaType, 'mediaType', 'is not supported');
+    }
+    _requireBoundedText(altText, 'altText');
+    _requireBoundedText(provenance, 'provenance');
+    if (width < 16 || width > 4096 || height < 16 || height > 4096) {
+      throw ArgumentError('Icon dimensions must be between 16 and 4096.');
+    }
+    if (byteSize < 1 || byteSize > 5242880) {
+      throw ArgumentError.value(
+        byteSize,
+        'byteSize',
+        'must be between 1 and 5242880',
+      );
+    }
+    if (expectedRevision < 0) {
+      throw ArgumentError.value(
+        expectedRevision,
+        'expectedRevision',
+        'must not be negative',
+      );
+    }
+  }
+
+  final CatalogIconTargetType targetType;
+  final String targetId;
+  final String assetDigest;
+  final String mediaType;
+  final String altText;
+  final int width;
+  final int height;
+  final int byteSize;
+  final String provenance;
+  final int expectedRevision;
+}
+
+void _requireBoundedText(String value, String name) {
+  final cleaned = value.trim();
+  if (cleaned.isEmpty || cleaned.length > 191) {
+    throw ArgumentError.value(value, name, 'must contain 1 to 191 characters');
+  }
+}
+
+final class CatalogRevisionResult {
+  const CatalogRevisionResult({required this.id, required this.revision});
+
+  final String id;
+  final int revision;
 }
 
 final class DuplicateSignal {
@@ -218,14 +325,20 @@ final class CatalogMergeImpact {
     required this.globalPackCount,
     required this.globalBarcodeCount,
     required this.hasPrivateReferences,
+    this.globalVariantCount = 0,
+    this.globalIconCount = 0,
+    this.privateReferenceCount = 0,
   });
 
   final int globalAliasCount;
   final int globalPackCount;
   final int globalBarcodeCount;
+  final int globalVariantCount;
+  final int globalIconCount;
 
   /// Deliberately opaque: no home count, identity, price, or stock is exposed.
   final bool hasPrivateReferences;
+  final int privateReferenceCount;
 }
 
 final class CatalogMergePreview {
@@ -237,8 +350,11 @@ final class CatalogMergePreview {
     required Map<String, int> expectedRevisions,
     required this.impact,
     required this.createdAt,
+    this.eligible = true,
+    List<String> conflicts = const <String>[],
   }) : absorbedProductIds = List<String>.unmodifiable(absorbedProductIds),
-       expectedRevisions = Map<String, int>.unmodifiable(expectedRevisions);
+       expectedRevisions = Map<String, int>.unmodifiable(expectedRevisions),
+       conflicts = List<String>.unmodifiable(conflicts);
 
   final String previewId;
   final CatalogMergePlanKind kind;
@@ -247,6 +363,8 @@ final class CatalogMergePreview {
   final Map<String, int> expectedRevisions;
   final CatalogMergeImpact impact;
   final DateTime createdAt;
+  final bool eligible;
+  final List<String> conflicts;
 }
 
 final class CatalogMergeResult {

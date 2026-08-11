@@ -31,10 +31,10 @@ final class HouseholdReportsPage extends StatelessWidget {
           ),
           ReportingStatus.contractUnavailable => _ReportMessage(
             icon: Icons.cloud_off_outlined,
-            title: 'Reports are not connected',
+            title: 'Reports are temporarily unavailable',
             detail:
-                'The pinned backend contract does not yet expose inventory, '
-                'consumption, price, suggestion, or evaluation reports.',
+                'The report response could not be verified safely. Refresh '
+                'and try again later.',
             action: controller.load,
             actionLabel: 'Check again',
           ),

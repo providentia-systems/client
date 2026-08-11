@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:providentia/core/database/app_database.dart';
@@ -165,6 +166,90 @@ void main() {
       ClientOperationState.blockedAuthorization.storageValue,
     );
   });
+
+  test(
+    'a blocked command remains a durable barrier across synchronization runs',
+    () async {
+      await local.commitLocalMutation(
+        _mutation(
+          operationId: 'operation-1',
+          entityId: 'record-1',
+          clientTimestamp: now,
+        ),
+      );
+      await local.commitLocalMutation(
+        _mutation(
+          operationId: 'operation-2',
+          entityId: 'record-2',
+          clientTimestamp: now.add(const Duration(seconds: 1)),
+        ),
+      );
+      await local.commitLocalMutation(
+        _mutation(
+          operationId: 'operation-3',
+          entityId: 'record-3',
+          clientTimestamp: now.add(const Duration(seconds: 2)),
+        ),
+      );
+      final remote = _FakeGateway(
+        pushHandler: (_, operations) async {
+          final operationId = operations.single.operationId;
+          if (operationId == 'operation-3') {
+            fail('A dependent command crossed an unresolved queue barrier.');
+          }
+          return PushResponse(
+            results: <PushOperationResult>[
+              PushOperationResult(
+                operationId: operationId,
+                kind: operationId == 'operation-1'
+                    ? PushResultKind.acknowledged
+                    : PushResultKind.conflict,
+                safeMessage: operationId == 'operation-2'
+                    ? 'Resolve the earlier revision conflict.'
+                    : null,
+              ),
+            ],
+          );
+        },
+      );
+      final coordinator = SyncCoordinator(
+        local: local,
+        remote: remote,
+        connectivity: const _OnlineProbe(),
+        clock: () => now,
+      );
+
+      expect(
+        (await coordinator.synchronize('home-1')).status,
+        SyncRunStatus.completed,
+      );
+      expect(remote.pushedOperationIds, <String>['operation-1', 'operation-2']);
+      var operations =
+          await (database.select(database.clientOperations)
+                ..orderBy(<OrderingTerm Function(ClientOperations)>[
+                  (row) => OrderingTerm.asc(row.clientTimestamp),
+                ]))
+              .get();
+      expect(operations.map((operation) => operation.state), <String>[
+        ClientOperationState.acknowledged.storageValue,
+        ClientOperationState.blockedConflict.storageValue,
+        ClientOperationState.pending.storageValue,
+      ]);
+
+      expect(
+        (await coordinator.synchronize('home-1')).status,
+        SyncRunStatus.completed,
+      );
+      expect(remote.pushedOperationIds, <String>['operation-1', 'operation-2']);
+      operations = await database.select(database.clientOperations).get();
+      expect(
+        operations
+            .singleWhere((operation) => operation.operationId == 'operation-3')
+            .state,
+        ClientOperationState.pending.storageValue,
+      );
+    },
+  );
 
   test(
     'bootstrap membership loss is a truthful authorization outcome',
@@ -417,15 +502,19 @@ void main() {
   });
 }
 
-LocalMutation _mutation() {
+LocalMutation _mutation({
+  String operationId = 'operation-1',
+  String entityId = 'record-1',
+  DateTime? clientTimestamp,
+}) {
   return LocalMutation(
-    operationId: 'operation-1',
+    operationId: operationId,
     deviceId: 'device-1',
     homeId: 'home-1',
     entityType: 'inventory_balance',
-    entityId: 'record-1',
+    entityId: entityId,
     operationType: 'create',
-    clientTimestamp: DateTime.utc(2026, 7, 29, 12),
+    clientTimestamp: clientTimestamp ?? DateTime.utc(2026, 7, 29, 12),
     payloadSchemaVersion: 1,
     payload: const <String, Object?>{'quantity': 1},
   );

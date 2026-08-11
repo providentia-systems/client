@@ -1,7 +1,7 @@
 {
   "artifact": "providentia-openapi",
   "source": "providentia-laminas",
-  "version": "1.11.1",
+  "version": "1.12.0",
   "path": "contracts/providentia-v1.json",
-  "sha256": "56933d2caebc66e238091762398880c8e92a9a9649ba1b7fafdc64b4b96552ef"
+  "sha256": "30604d238f9c29f9d6b09dbf1819c84a475cb93e94728a8b2888f9b65a865a44"
 }

@@ -253,12 +253,15 @@ void main() {
           operationId: operationId,
           deviceId: deviceId,
           homeId: homeId,
-          entityType: 'inventory.adjustment.create',
+          entityType: 'inventory-balance',
           entityId: '0198a0b1-c2d3-7e4f-b456-789abcdef012',
-          operationType: 'create',
+          operationType: 'inventory.adjustment.create',
           clientTimestamp: DateTime.utc(2026, 8, 9, 12),
           payloadSchemaVersion: 1,
-          payload: const <String, Object?>{'delta': 1},
+          payload: const <String, Object?>{
+            'quantityDelta': '1',
+            'reason': 'Physical recount',
+          },
           retryCount: 0,
         ),
       ],
@@ -272,6 +275,43 @@ void main() {
     expect(command, isNot(contains('entityType')));
     expect(response.results.single.kind, PushResultKind.acknowledged);
   });
+
+  test(
+    'protocol 2 rejects a command projected onto the wrong resource',
+    () async {
+      final client = generated.ProvidentiaApiClient(
+        baseUri: Uri.parse('https://api.example.test'),
+        httpClient: MockClient((_) async {
+          fail('A mismatched command must be rejected before HTTP.');
+        }),
+      );
+
+      await expectLater(
+        GeneratedSyncGateway(client).push(
+          homeId: homeId,
+          lastPulledCursor: null,
+          operations: <PendingClientOperation>[
+            PendingClientOperation(
+              operationId: operationId,
+              deviceId: deviceId,
+              homeId: homeId,
+              entityType: 'inventory-home-product',
+              entityId: '0198a0b1-c2d3-7e4f-b456-789abcdef012',
+              operationType: 'inventory.adjustment.create',
+              clientTimestamp: DateTime.utc(2026, 8, 9, 12),
+              payloadSchemaVersion: 1,
+              payload: const <String, Object?>{
+                'quantityDelta': '1',
+                'reason': 'Physical recount',
+              },
+              retryCount: 0,
+            ),
+          ],
+        ),
+        throwsFormatException,
+      );
+    },
+  );
 
   test(
     'HTTP 403 blocks each pushed operation as authorization failure',

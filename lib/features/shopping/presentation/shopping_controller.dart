@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:providentia/core/security/uuid_v4.dart';
 import 'package:providentia/features/shopping/application/shopping_repository.dart';
 import 'package:providentia/features/shopping/domain/shopping_models.dart';
 
@@ -22,7 +23,7 @@ final class ShoppingController extends ChangeNotifier {
     repository,
     homeId,
     clock ?? DateTime.now,
-    idGenerator ?? (() => DateTime.now().microsecondsSinceEpoch.toString()),
+    idGenerator ?? UuidV4Generator().call,
   );
 
   ShoppingController._(

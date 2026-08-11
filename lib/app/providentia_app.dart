@@ -65,6 +65,7 @@ class ProvidentiaApp extends StatefulWidget {
     required this.controller,
     this.features,
     this.access = HouseholdWorkspaceAccess.denied,
+    this.navigatorKey,
     this.onChangeHome,
     this.onSignOut,
     this.accountPageBuilder,
@@ -75,6 +76,7 @@ class ProvidentiaApp extends StatefulWidget {
   final AppController controller;
   final HouseholdFeatures? features;
   final HouseholdWorkspaceAccess access;
+  final GlobalKey<NavigatorState>? navigatorKey;
   final Future<void> Function()? onChangeHome;
   final Future<void> Function()? onSignOut;
   final WidgetBuilder? accountPageBuilder;
@@ -125,6 +127,7 @@ class _ProvidentiaAppState extends State<ProvidentiaApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: widget.navigatorKey,
       debugShowCheckedModeBanner: false,
       title: 'Providentia',
       theme: ProvidentiaTheme.light(),

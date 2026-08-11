@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 import 'package:providentia/features/ai_integration/application/ai_ports.dart';
 import 'package:providentia/features/ai_integration/domain/ai_models.dart';
@@ -9,9 +10,9 @@ abstract interface class PreparedMediaByteReader {
   Future<Uint8List> read(PreparedAiMedia media);
 }
 
-/// Server-proxy AI adapter for the single-image API 1.7 extraction contract.
-/// Multi-page, video-frame batches and independent validation deliberately
-/// remain in the orchestration layer until Laminas publishes a batch contract.
+/// Server-proxy AI adapter for the single-image API 1.12 extraction contract.
+/// The application currently sends one sanitized image so disclosure can bind
+/// one exact digest even though the server also supports bounded observations.
 final class Api17AiGateway implements AiProviderGateway {
   factory Api17AiGateway({
     required ProvidentiaApiClient client,
@@ -48,7 +49,7 @@ final class Api17AiGateway implements AiProviderGateway {
       final supported =
           providers is List<Object?> &&
           providers.whereType<Map<String, Object?>>().any(
-            (provider) => provider['id'] == profile.id,
+            (provider) => provider['id'] == profile.providerWireId,
           );
       return supported
           ? const AiGatewayReadiness.ready()
@@ -134,6 +135,15 @@ final class Api17AiGateway implements AiProviderGateway {
   }
 
   Future<Map<String, Object?>> _extract(AiExtractionRequest request) async {
+    if (request.homeId.trim().isEmpty ||
+        request.homeId != request.provider.homeId ||
+        request.homeId != request.media.homeId ||
+        request.media.purpose != request.kind) {
+      throw const _Api17AiBoundaryException(
+        'home_scope_mismatch',
+        'The provider, media, and extraction must belong to the active home.',
+      );
+    }
     if (request.privacyMode != AiPrivacyMode.serverProxyCloud ||
         request.provider.transport != AiTransport.serverProxy) {
       throw const _Api17AiBoundaryException(
@@ -165,6 +175,12 @@ final class Api17AiGateway implements AiProviderGateway {
         'The prepared image changed after consent. Prepare it again.',
       );
     }
+    if (sha256.convert(bytes).toString() != media.sha256) {
+      throw const _Api17AiBoundaryException(
+        'prepared_media_changed',
+        'The prepared image changed after consent. Prepare it again.',
+      );
+    }
     final created = (await _client.createAiExtraction(
       homeId: request.homeId,
       formFields: <String, String>{
@@ -181,6 +197,16 @@ final class Api17AiGateway implements AiProviderGateway {
       ],
     )).requireObject();
     final extractionId = _string(created, 'id');
+    if (created['status'] != 'review_required') {
+      throw const _Api17AiBoundaryException(
+        'invalid_ai_response',
+        'The AI extraction did not enter mandatory review.',
+      );
+    }
+    final createdCandidateCount = _integer(created, 'candidateCount');
+    if (createdCandidateCount < 0 || createdCandidateCount > 200) {
+      throw const FormatException('Invalid candidate count.');
+    }
     final extraction = (await _client.getAiExtraction(
       homeId: request.homeId,
       extractionId: extractionId,
@@ -191,6 +217,13 @@ final class Api17AiGateway implements AiProviderGateway {
         'The extraction did not reach mandatory human review.',
       );
     }
+    _validateExtractionBinding(
+      request: request,
+      media: media,
+      extractionId: extractionId,
+      candidateCount: createdCandidateCount,
+      extraction: extraction,
+    );
     return extraction;
   }
 
@@ -350,6 +383,30 @@ final class _Api17AiBoundaryException implements Exception {
 
   final String code;
   final String safeMessage;
+}
+
+void _validateExtractionBinding({
+  required AiExtractionRequest request,
+  required PreparedAiMedia media,
+  required String extractionId,
+  required int candidateCount,
+  required Map<String, Object?> extraction,
+}) {
+  final expectedKind = request.kind == AiExtractionKind.receipt
+      ? 'receipt'
+      : 'stock';
+  if (_string(extraction, 'id') != extractionId ||
+      _string(extraction, 'kind') != expectedKind ||
+      _string(extraction, 'inputMimeType') != media.mimeType ||
+      _string(extraction, 'inputSha256') != media.sha256 ||
+      _integer(extraction, 'inputByteCount') != media.byteLength ||
+      _integer(extraction, 'schemaVersion') != 1 ||
+      _integer(extraction, 'promptTemplateVersion') < 1 ||
+      _string(extraction, 'provider').trim().isEmpty ||
+      _string(extraction, 'model').trim().isEmpty ||
+      _objects(extraction['candidates']).length != candidateCount) {
+    throw const FormatException('Extraction response binding changed.');
+  }
 }
 
 String _extension(String mimeType) => switch (mimeType) {

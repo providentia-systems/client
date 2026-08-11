@@ -2,6 +2,41 @@ enum PurchaseSource { recentReceipt, historicalImport }
 
 enum PurchaseDatePrecision { exactDay, monthOnly }
 
+enum PurchaseReceiptStatus { draft, committed }
+
+enum PurchaseLineApprovalStatus { unreviewed, approved }
+
+/// `pending` is deliberately conservative: child commands may be acknowledged
+/// while the optimistic parent receipt revision still awaits a receipt-level
+/// acknowledgement or authoritative snapshot.
+enum PurchaseSynchronizationState { synchronized, pending }
+
+enum PurchaseMutationDisposition { queued, alreadyQueued, synchronized }
+
+final class PurchaseMutationResult {
+  const PurchaseMutationResult({
+    required this.entityId,
+    required this.revision,
+    required this.disposition,
+  });
+
+  final String entityId;
+  final int revision;
+  final PurchaseMutationDisposition disposition;
+
+  bool get awaitsServerConfirmation =>
+      disposition != PurchaseMutationDisposition.synchronized;
+}
+
+final class PurchaseCaptureException implements Exception {
+  const PurchaseCaptureException(this.safeMessage);
+
+  final String safeMessage;
+
+  @override
+  String toString() => 'PurchaseCaptureException: $safeMessage';
+}
+
 final class Money implements Comparable<Money> {
   Money({required this.minorUnits, required this.currency}) {
     if (currency.trim().isEmpty) {
@@ -44,6 +79,217 @@ final class Money implements Comparable<Money> {
   int get hashCode => Object.hash(minorUnits, currency);
 }
 
+/// A private, home-scoped item that a receipt line may be matched to.
+///
+/// Receipt text and match decisions deliberately remain outside the shared
+/// catalog models.
+final class PurchaseMatchCandidate {
+  PurchaseMatchCandidate({
+    required this.id,
+    required this.homeId,
+    required this.name,
+    required this.packSize,
+  }) {
+    _requireText(id, 'id');
+    _requireText(homeId, 'homeId');
+    _requireText(name, 'name');
+    _requireText(packSize, 'packSize');
+  }
+
+  final String id;
+  final String homeId;
+  final String name;
+  final String packSize;
+}
+
+final class PurchaseReceiptLineCapture {
+  PurchaseReceiptLineCapture({
+    required this.id,
+    required this.homeId,
+    required this.receiptId,
+    required this.rawDescription,
+    required this.quantity,
+    required this.revision,
+    required this.approvalStatus,
+    required this.synchronizationState,
+    this.originalPackText,
+    this.unitPrice,
+    this.lineTotal,
+    this.homeProductId,
+  }) {
+    _requireText(id, 'id');
+    _requireText(homeId, 'homeId');
+    _requireText(receiptId, 'receiptId');
+    _requireText(rawDescription, 'rawDescription');
+    _requirePositive(quantity, 'quantity');
+    if (revision < 1) {
+      throw ArgumentError.value(revision, 'revision', 'must be positive');
+    }
+    if (approvalStatus == PurchaseLineApprovalStatus.approved &&
+        homeProductId == null) {
+      throw ArgumentError(
+        'An approved purchase line requires a home product match.',
+      );
+    }
+  }
+
+  final String id;
+  final String homeId;
+  final String receiptId;
+  final String rawDescription;
+  final double quantity;
+  final String? originalPackText;
+  final Money? unitPrice;
+  final Money? lineTotal;
+  final String? homeProductId;
+  final int revision;
+  final PurchaseLineApprovalStatus approvalStatus;
+  final PurchaseSynchronizationState synchronizationState;
+
+  bool get approved => approvalStatus == PurchaseLineApprovalStatus.approved;
+}
+
+final class PurchaseReceiptCapture {
+  PurchaseReceiptCapture({
+    required this.id,
+    required this.homeId,
+    required this.purchaseDate,
+    required this.currency,
+    required this.notes,
+    required this.revision,
+    required this.status,
+    required this.synchronizationState,
+    required List<PurchaseReceiptLineCapture> lines,
+    this.storeId,
+    this.storeName,
+    this.total,
+    this.sourceReference,
+  }) : lines = List<PurchaseReceiptLineCapture>.unmodifiable(lines) {
+    _requireText(id, 'id');
+    _requireText(homeId, 'homeId');
+    _requireCurrency(currency);
+    if (revision < 1) {
+      throw ArgumentError.value(revision, 'revision', 'must be positive');
+    }
+    if (lines.any((line) => line.homeId != homeId || line.receiptId != id)) {
+      throw StateError('A receipt capture cannot contain a foreign line.');
+    }
+  }
+
+  final String id;
+  final String homeId;
+  final String? storeId;
+  final String? storeName;
+  final DateTime purchaseDate;
+  final String currency;
+  final Money? total;
+  final String notes;
+  final String? sourceReference;
+  final int revision;
+  final PurchaseReceiptStatus status;
+  final PurchaseSynchronizationState synchronizationState;
+  final List<PurchaseReceiptLineCapture> lines;
+
+  bool get reviewComplete =>
+      lines.isNotEmpty && lines.every((line) => line.approved);
+  bool get commitAwaitingConfirmation =>
+      status == PurchaseReceiptStatus.committed &&
+      synchronizationState == PurchaseSynchronizationState.pending;
+}
+
+final class PurchaseReceiptDraftRequest {
+  PurchaseReceiptDraftRequest({
+    required this.homeId,
+    required this.purchaseDate,
+    required this.currency,
+    this.storeId,
+    this.total,
+    this.notes = '',
+    this.sourceReference,
+  }) {
+    _requireText(homeId, 'homeId');
+    _requireCurrency(currency);
+    if (notes.length > 2000) {
+      throw ArgumentError.value(
+        notes,
+        'notes',
+        'must not exceed 2000 characters',
+      );
+    }
+    if (total != null && total!.currency != currency) {
+      throw ArgumentError('The receipt total must use the receipt currency.');
+    }
+    if (total != null && total!.minorUnits < 0) {
+      throw ArgumentError('The receipt total must not be negative.');
+    }
+    if (sourceReference != null && sourceReference!.trim().length > 191) {
+      throw ArgumentError.value(
+        sourceReference,
+        'sourceReference',
+        'must not exceed 191 characters',
+      );
+    }
+  }
+
+  final String homeId;
+  final String? storeId;
+  final DateTime purchaseDate;
+  final String currency;
+  final Money? total;
+  final String notes;
+  final String? sourceReference;
+}
+
+final class PurchaseReceiptLineRequest {
+  PurchaseReceiptLineRequest({
+    required this.homeId,
+    required this.receiptId,
+    required this.rawDescription,
+    required this.quantity,
+    this.originalPackText,
+    this.unitPrice,
+    this.lineTotal,
+  }) {
+    _requireText(homeId, 'homeId');
+    _requireText(receiptId, 'receiptId');
+    final description = rawDescription.trim();
+    if (description.isEmpty || description.length > 500) {
+      throw ArgumentError.value(
+        rawDescription,
+        'rawDescription',
+        'must contain 1 to 500 characters',
+      );
+    }
+    _requirePositive(quantity, 'quantity');
+    if (originalPackText != null && originalPackText!.trim().length > 191) {
+      throw ArgumentError.value(
+        originalPackText,
+        'originalPackText',
+        'must not exceed 191 characters',
+      );
+    }
+    if (unitPrice == null && lineTotal == null) {
+      throw ArgumentError('A unit price or line total is required.');
+    }
+    if (unitPrice != null &&
+        lineTotal != null &&
+        unitPrice!.currency != lineTotal!.currency) {
+      throw ArgumentError('Receipt-line prices must use one currency.');
+    }
+    if ((unitPrice?.minorUnits ?? 0) < 0 || (lineTotal?.minorUnits ?? 0) < 0) {
+      throw ArgumentError('Receipt-line prices must not be negative.');
+    }
+  }
+
+  final String homeId;
+  final String receiptId;
+  final String rawDescription;
+  final double quantity;
+  final String? originalPackText;
+  final Money? unitPrice;
+  final Money? lineTotal;
+}
+
 final class PurchaseLine {
   PurchaseLine({
     required this.id,
@@ -59,6 +305,7 @@ final class PurchaseLine {
     this.canonicalItemId,
     this.canonicalName,
     this.lineTotal,
+    this.pendingSynchronization = false,
   }) {
     _requireText(id, 'id');
     _requireText(homeId, 'homeId');
@@ -81,6 +328,7 @@ final class PurchaseLine {
   final String? canonicalItemId;
   final String? canonicalName;
   final Money? lineTotal;
+  final bool pendingSynchronization;
 
   String get displayName => canonicalName?.trim().isNotEmpty == true
       ? canonicalName!
@@ -104,6 +352,9 @@ final class PurchaseGroup {
   /// True when legacy data had no receipt identity and date/store grouping was
   /// used only for display parity.
   final bool inferred;
+
+  bool get pendingSynchronization =>
+      lines.any((line) => line.pendingSynchronization);
 
   Money? get total {
     final priced = lines.where((line) => line.lineTotal != null).toList();
@@ -194,6 +445,16 @@ final class PriceStatistics {
 void _requireText(String value, String name) {
   if (value.trim().isEmpty) {
     throw ArgumentError.value(value, name, 'must not be empty');
+  }
+}
+
+void _requireCurrency(String value) {
+  if (!RegExp(r'^[A-Z]{3}$').hasMatch(value)) {
+    throw ArgumentError.value(
+      value,
+      'currency',
+      'must be a three-letter uppercase ISO 4217 code',
+    );
   }
 }
 

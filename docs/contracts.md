@@ -13,13 +13,14 @@ local `providentia_api_client` Dart package.
 
 ## Current pin
 
-- Client OpenAPI version: `1.11.1`
+- Client OpenAPI version: `1.12.0`
 - Contract SHA-256:
-  `56933d2caebc66e238091762398880c8e92a9a9649ba1b7fafdc64b4b96552ef`
-- Declared/generated operations: 155
+  `30604d238f9c29f9d6b09dbf1819c84a475cb93e94728a8b2888f9b65a865a44`
+- Declared/generated operations: 156
 
-The login-link onboarding and account-management surface is deliberately
-adopted as one compatible boundary. Application-owned adapters compose:
+The login-link onboarding, account-management, and current household
+integration surfaces are deliberately adopted as one compatible boundary.
+Application-owned adapters compose:
 
 - generic email-only login-link start/status/cancel/exchange with client-owned
   poll and PKCE proofs;
@@ -27,7 +28,20 @@ adopted as one compatible boundary. Application-owned adapters compose:
   device-session list/revoke;
 - active-home selection, editable home settings, recipient invitations,
   memberships, roles, and permission policies; and
-- platform-administrator list/grant/revoke with revision conflict handling.
+- platform-administrator list/grant/revoke with revision conflict handling;
+- revisioned, home-scoped catalog sharing consent and consent-bound sanitized
+  contribution submission; and
+- attribution-free catalog review queues, platform-role moderation, icon
+  metadata, and revision-bound reversible merge operations;
+- home-scoped inventory, purchasing, shopping, reporting, and account/home
+  data-governance operations with exact permission checks; and
+- home-scoped AI settings, profiles, policy, sanitized extraction review, and
+  a non-mutating handoff that still requires an ordinary domain command.
+
+These application-owned adapters are composed into the signed-in production
+navigation and covered by focused transport, controller, privacy, and
+revocation tests. Composition and generated methods do not by themselves
+constitute live client/backend or supported-platform acceptance evidence.
 
 Session responses keep two UUIDs distinct. `installationId` is the stable UUID
 created by this app installation and is used to reject a grant issued for a

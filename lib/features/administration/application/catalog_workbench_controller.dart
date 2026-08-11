@@ -85,6 +85,13 @@ final class CatalogWorkbenchController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void clearSensitiveState() {
+    _items = const <CatalogQueueItem>[];
+    _auditEvents = const <CatalogAuditEvent>[];
+    _selectedItemId = null;
+    _setStatus(CatalogWorkbenchStatus.idle);
+  }
+
   void _setStatus(CatalogWorkbenchStatus value) {
     _status = value;
     if (!_disposed) {

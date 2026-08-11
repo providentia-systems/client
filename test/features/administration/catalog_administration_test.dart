@@ -259,6 +259,8 @@ void main() {
     final repository = _ModerationRepository(mode: _QueueMode.ready);
     final controller = CatalogWorkbenchController(repository);
     await controller.refresh();
+    CatalogQueueItem? reviewed;
+    CatalogQueueItem? mergePreviewed;
 
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1;
@@ -266,7 +268,17 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(
       MaterialApp(
-        home: Scaffold(body: CatalogWorkbench(controller: controller)),
+        home: Scaffold(
+          body: CatalogWorkbench(
+            controller: controller,
+            onReview: (item) {
+              reviewed = item;
+            },
+            onPreviewMerge: (item) {
+              mergePreviewed = item;
+            },
+          ),
+        ),
       ),
     );
 
@@ -279,6 +291,10 @@ void main() {
     expect(find.text('Catalog audit history'), findsOneWidget);
     expect(find.byIcon(Icons.qr_code_rounded), findsOneWidget);
     expect(find.byIcon(Icons.image_outlined), findsOneWidget);
+    await tester.tap(find.text('Review sanitized record'));
+    await tester.tap(find.text('Generate revision-bound merge preview'));
+    expect(reviewed?.kind, CatalogQueueKind.duplicate);
+    expect(mergePreviewed?.kind, CatalogQueueKind.duplicate);
 
     repository.mode = _QueueMode.unavailable;
     await controller.refresh();
@@ -291,7 +307,7 @@ void main() {
   });
 
   testWidgets(
-    'workbench renders narrow, empty, read-only and safe state cards',
+    'workbench renders narrow, reviewer, empty and safe state cards',
     (tester) async {
       tester.view.physicalSize = const Size(600, 900);
       tester.view.devicePixelRatio = 1;
@@ -310,7 +326,7 @@ void main() {
           home: Scaffold(body: CatalogWorkbench(controller: readOnly)),
         ),
       );
-      expect(find.textContaining('Read-only reviewer view'), findsOneWidget);
+      expect(find.text('Review sanitized record'), findsOneWidget);
       await tester.tap(find.text('Rice Basmati').first);
       await tester.pump();
       expect(

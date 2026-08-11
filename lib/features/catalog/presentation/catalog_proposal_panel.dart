@@ -7,6 +7,7 @@ final class CatalogProposalPanel extends StatelessWidget {
     required this.consented,
     required this.onConsentChanged,
     required this.onSubmit,
+    this.enabled = true,
     super.key,
   });
 
@@ -14,10 +15,13 @@ final class CatalogProposalPanel extends StatelessWidget {
   final bool consented;
   final ValueChanged<bool> onConsentChanged;
   final VoidCallback onSubmit;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
-    final values = proposal.toJson().entries.toList(growable: false);
+    final values = proposal.toIdentityContributionJson().entries.toList(
+      growable: false,
+    );
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(20),
@@ -41,15 +45,19 @@ final class CatalogProposalPanel extends StatelessWidget {
               ),
             const SizedBox(height: 12),
             CheckboxListTile(
+              key: const Key('catalog-contribution-explicit-checkbox'),
               contentPadding: EdgeInsets.zero,
               value: consented,
-              onChanged: (value) {
-                onConsentChanged(value ?? false);
-              },
+              onChanged: enabled
+                  ? (value) {
+                      onConsentChanged(value ?? false);
+                    }
+                  : null,
               title: const Text('Submit this sanitized proposal for review'),
             ),
             FilledButton(
-              onPressed: consented ? onSubmit : null,
+              key: const Key('submit-catalog-contribution'),
+              onPressed: enabled && consented ? onSubmit : null,
               child: const Text('Submit proposal'),
             ),
           ],

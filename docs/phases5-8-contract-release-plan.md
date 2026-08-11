@@ -3,17 +3,21 @@
 ## Decision
 
 The Flutter client must not invent transport operations that are absent from
-the backend-owned OpenAPI artifact. This release pins API `1.11.1`, SHA-256
-`56933d2caebc66e238091762398880c8e92a9a9649ba1b7fafdc64b4b96552ef`,
-from the companion backend login-link release. The generic synchronization
+the backend-owned OpenAPI artifact. This release pins API `1.12.0`, SHA-256
+`30604d238f9c29f9d6b09dbf1819c84a475cb93e94728a8b2888f9b65a865a44`,
+from the companion backend release. The generic synchronization
 allowlist remains limited to `home-preference` and `private-note`.
 
 All of these domains remain behind application-owned ports. Inventory,
 purchasing, and shopping synchronize only through the deliberately adopted
 typed protocol-v2 command adapter. Any further AI, catalog, or reporting
-resource still requires an explicit compatible adapter. No domain may be sent
-as a made-up entity type through the generic protocol-v1 synchronization
-endpoint; generated operations alone do not make a workflow reachable.
+resource still requires an explicit compatible adapter. The current contract's
+catalog consent/contribution/moderation, reporting, data-governance, and
+household-AI resources now have application-owned adapters and production
+composition. Live backend, provider, cross-device, and supported-platform
+acceptance remain separate release gates. No domain may be sent as a made-up
+entity type through the generic protocol-v1 synchronization endpoint;
+generated operations alone do not make a workflow reachable.
 
 This is a fail-closed compatibility rule, not a reason to put HTTP calls in
 widgets or to hand-edit the generated Dart client.

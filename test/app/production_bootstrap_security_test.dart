@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:providentia/app/production_bootstrap_app.dart';
 import 'package:providentia/features/administration/application/platform_administration_controller.dart';
+import 'package:providentia/features/administration/domain/catalog_administration_models.dart';
 import 'package:providentia/features/administration/domain/platform_administrator_models.dart';
 import 'package:providentia/features/homes/application/home_ports.dart';
 import 'package:providentia/features/homes/application/home_session_manager.dart';
@@ -33,6 +34,30 @@ void main() {
       contains('onAuthorizationLost: _handlePlatformAuthorizationLost'),
     );
     expect(source, contains('ProductionSessionSecurityBoundary'));
+    expect(source, contains('workspaceNavigatorKey: _workspaceNavigatorKey'));
+    expect(source, contains('GeneratedHouseholdReportRepository'));
+    expect(source, contains('GeneratedDataGovernanceRepository'));
+    expect(source, contains('HomePermissions.reportsRead'));
+    expect(source, contains('ProductionHouseholdReportsRoute'));
+    expect(source, contains('ProductionDataGovernanceRoute'));
+    expect(source, contains('GeneratedServerAiRepository'));
+    expect(source, contains('ServerAiWorkspaceController'));
+    expect(source, contains('Api17AiGateway'));
+    expect(source, contains('RegisteredMediaSourceReader'));
+    expect(source, contains('MemoryEphemeralPreparedMediaStore'));
+    expect(source, contains('SanitizingImageMediaPreparer'));
+    expect(source, contains('MediaAcquisitionService'));
+    expect(source, contains('AiHomeCapabilities.fromPermissions'));
+    expect(source, contains('ProductionAiIdentifierFactory'));
+    expect(source, contains('limit: 1'));
+    expect(
+      source,
+      contains(
+        'Accepted candidates still require an ordinary purchasing or inventory command and final confirmation. No household data changed.',
+      ),
+    );
+    expect(source, isNot(contains('ReceiptCommitPort')));
+    expect(source, isNot(contains('StockCountCommitPort')));
     expect(source, contains('HouseholdWorkspaceAccess.fromPermissions'));
     expect(source, contains('SyncAvailability.authorizationDenied'));
     expect(source, contains('RevocationGuardedSynchronization'));
@@ -85,10 +110,14 @@ void main() {
         await homes.load(sessionActiveHomeId: 'home-a');
         await administration.load();
         final navigatorKey = GlobalKey<NavigatorState>();
+        final workspaceNavigatorKey = GlobalKey<NavigatorState>();
+        var catalogClears = 0;
         final boundary = ProductionSessionSecurityBoundary(
-          navigatorKey: navigatorKey,
+          rootNavigatorKey: navigatorKey,
+          workspaceNavigatorKey: workspaceNavigatorKey,
           homesController: homes,
           platformAdministrationController: administration,
+          clearCatalogAdministration: () => catalogClears++,
         );
         await tester.pumpWidget(
           MaterialApp(
@@ -118,9 +147,144 @@ void main() {
         expect(homes.snapshot.homes, isEmpty);
         expect(homes.snapshot.activeHome, isNull);
         expect(administration.snapshot.administrators, isEmpty);
+        expect(catalogClears, 1);
       },
     );
   }
+
+  testWidgets('catalog role loss clears state and dismisses protected routes', (
+    tester,
+  ) async {
+    final homeManager = HomeSessionManager(
+      transport: _SecurityHomeTransport(),
+      activeHomeStore: _SecurityActiveHomeStore(),
+    );
+    final homes = HomesController(homeManager);
+    final administration = PlatformAdministrationController(
+      _SecurityAdministrationTransport(),
+    );
+    addTearDown(() async {
+      homes.dispose();
+      administration.dispose();
+      await homeManager.dispose();
+    });
+    final navigatorKey = GlobalKey<NavigatorState>();
+    final workspaceNavigatorKey = GlobalKey<NavigatorState>();
+    var catalogClears = 0;
+    final boundary = ProductionSessionSecurityBoundary(
+      rootNavigatorKey: navigatorKey,
+      workspaceNavigatorKey: workspaceNavigatorKey,
+      homesController: homes,
+      platformAdministrationController: administration,
+      clearCatalogAdministration: () => catalogClears++,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        navigatorKey: navigatorKey,
+        home: const Scaffold(body: Text('Account root')),
+      ),
+    );
+    unawaited(
+      navigatorKey.currentState!.push<void>(
+        MaterialPageRoute<void>(
+          builder: (_) => const Scaffold(body: Text('Catalog workbench')),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    boundary.handleCatalogRoleChange(
+      previousCapabilities: const <CatalogCapability>{
+        CatalogCapability.review,
+        CatalogCapability.curate,
+      },
+      currentCapabilities: const <CatalogCapability>{CatalogCapability.review},
+    );
+    await tester.pumpAndSettle();
+
+    expect(catalogClears, 1);
+    expect(find.text('Account root'), findsOneWidget);
+    expect(find.text('Catalog workbench'), findsNothing);
+  });
+
+  testWidgets(
+    'home permission loss dismisses outer and nested workspace routes',
+    (tester) async {
+      final homeManager = HomeSessionManager(
+        transport: _SecurityHomeTransport(),
+        activeHomeStore: _SecurityActiveHomeStore(),
+      );
+      final homes = HomesController(homeManager);
+      final administration = PlatformAdministrationController(
+        _SecurityAdministrationTransport(),
+      );
+      addTearDown(() async {
+        homes.dispose();
+        administration.dispose();
+        await homeManager.dispose();
+      });
+      final rootNavigatorKey = GlobalKey<NavigatorState>();
+      final workspaceNavigatorKey = GlobalKey<NavigatorState>();
+      final protectedRoutes = ProductionProtectedRouteRegistry();
+      var sensitiveClears = 0;
+      protectedRoutes.register(() => sensitiveClears++);
+      final boundary = ProductionSessionSecurityBoundary(
+        rootNavigatorKey: rootNavigatorKey,
+        workspaceNavigatorKey: workspaceNavigatorKey,
+        homesController: homes,
+        platformAdministrationController: administration,
+        clearProtectedRouteState: protectedRoutes.clearSensitiveState,
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          navigatorKey: rootNavigatorKey,
+          home: MaterialApp(
+            navigatorKey: workspaceNavigatorKey,
+            home: const Scaffold(body: Text('Workspace root')),
+          ),
+        ),
+      );
+      unawaited(
+        workspaceNavigatorKey.currentState!.push<void>(
+          MaterialPageRoute<void>(
+            builder: (_) => const Scaffold(body: Text('Private report')),
+          ),
+        ),
+      );
+      unawaited(
+        rootNavigatorKey.currentState!.push<void>(
+          MaterialPageRoute<void>(
+            builder: (_) => const Scaffold(body: Text('Account route')),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(workspaceNavigatorKey.currentState!.canPop(), isTrue);
+      expect(rootNavigatorKey.currentState!.canPop(), isTrue);
+
+      boundary.handleHomeAccessChange(
+        previousHomeId: 'home-a',
+        currentHomeId: 'home-a',
+        previousPermissions: const <String>{
+          HomePermissions.reportsRead,
+          HomePermissions.dataExport,
+          HomePermissions.aiRead,
+        },
+        currentPermissions: const <String>{
+          HomePermissions.reportsRead,
+          HomePermissions.dataExport,
+        },
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Workspace root'), findsOneWidget);
+      expect(find.text('Private report'), findsNothing);
+      expect(find.text('Account route'), findsNothing);
+      expect(workspaceNavigatorKey.currentState!.canPop(), isFalse);
+      expect(rootNavigatorKey.currentState!.canPop(), isFalse);
+      expect(sensitiveClears, 1);
+    },
+  );
 }
 
 final class _SecurityActiveHomeStore implements ActiveHomeStore {

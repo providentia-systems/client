@@ -147,6 +147,82 @@ void main() {
   );
 
   test(
+    'readiness uses provider kind, not household profile identity',
+    () async {
+      final gateway = Api17AiGateway(
+        client: _client(
+          (_) async => _json(<String, Object?>{
+            'credentialEncryptionAvailable': true,
+            'availableServerProviders': <Object?>[
+              <String, Object?>{'id': 'openai', 'requiresCredential': true},
+            ],
+          }),
+        ),
+        mediaReader: _MediaReader(_bytes),
+      );
+      final profile = AiProviderProfile(
+        id: 'household-profile-1',
+        homeId: 'home-1',
+        displayName: 'Receipt profile',
+        kind: AiProviderKind.openAi,
+        transport: AiTransport.serverProxy,
+        protocol: AiEndpointProtocol.openAiResponses,
+        model: 'vision-production',
+        capabilities: <AiCapability>{
+          AiCapability.vision,
+          AiCapability.strictJsonSchema,
+          AiCapability.storeFalse,
+        },
+        availability: AiProviderAvailability.available,
+        credentialConfigured: true,
+      );
+
+      expect((await gateway.readiness(profile)).isReady, isTrue);
+    },
+  );
+
+  test(
+    'same-length changed media and cross-home requests fail closed',
+    () async {
+      var calls = 0;
+      final changed = Api17AiGateway(
+        client: _client((_) async {
+          calls++;
+          throw StateError('must not call server');
+        }),
+        mediaReader: _MediaReader(Uint8List.fromList(List<int>.filled(16, 9))),
+      );
+      final changedResult =
+          await changed.extractReceipt(_request(AiExtractionKind.receipt))
+              as AiExtractionFailure<ReceiptProposal>;
+      expect(changedResult.code, 'prepared_media_changed');
+
+      final foreignProfile = AiProviderProfile(
+        id: 'openai',
+        homeId: 'home-2',
+        displayName: 'Foreign profile',
+        kind: AiProviderKind.openAi,
+        transport: AiTransport.serverProxy,
+        protocol: AiEndpointProtocol.openAiResponses,
+        model: 'vision-production',
+        capabilities: const <AiCapability>{
+          AiCapability.vision,
+          AiCapability.strictJsonSchema,
+        },
+        availability: AiProviderAvailability.available,
+        credentialConfigured: true,
+      );
+      final foreignResult =
+          await changed.extractReceipt(
+                _request(AiExtractionKind.receipt, profile: foreignProfile),
+              )
+              as AiExtractionFailure<ReceiptProposal>;
+      expect(foreignResult.code, 'home_scope_mismatch');
+      expect(calls, 0);
+    },
+  );
+
+  test(
     'API 1.7 rejects batches and unprepared media before transmission',
     () async {
       final gateway = Api17AiGateway(
@@ -194,7 +270,7 @@ void main() {
       final malformed = Api17AiGateway(
         client: _client(
           (request) async => request.method == 'POST'
-              ? _json(<String, Object?>{'id': 'extraction-1'}, statusCode: 201)
+              ? _json(_created(), statusCode: 201)
               : _json(<String, Object?>{
                   ..._extraction('receipt'),
                   'candidates': 'not-a-list',
@@ -256,7 +332,7 @@ void main() {
   test('pending and stock-photo error responses fail closed', () async {
     ProvidentiaApiClient extractionClient(Object response) => _client(
       (request) async => request.method == 'POST'
-          ? _json(<String, Object?>{'id': 'extraction-1'}, statusCode: 201)
+          ? _json(_created(), statusCode: 201)
           : _json(response),
     );
 
@@ -314,7 +390,7 @@ void main() {
 
   test('minimal optional receipt fields use deterministic fallbacks', () async {
     final minimal = <String, Object?>{
-      'id': 'extraction-1',
+      ..._binding(kind: 'receipt', mimeType: 'image/png'),
       'status': 'review_required',
       'result': <String, Object?>{'documentType': 'invoice'},
       'candidates': <Object?>[
@@ -332,7 +408,7 @@ void main() {
     final gateway = Api17AiGateway(
       client: _client(
         (request) async => request.method == 'POST'
-            ? _json(<String, Object?>{'id': 'extraction-1'}, statusCode: 201)
+            ? _json(_created(), statusCode: 201)
             : _json(minimal),
       ),
       mediaReader: _MediaReader(_bytes),
@@ -362,7 +438,7 @@ void main() {
     'minimal stock fields and WebP media use deterministic fallbacks',
     () async {
       final minimal = <String, Object?>{
-        'id': 'extraction-1',
+        ..._binding(kind: 'stock', mimeType: 'image/webp'),
         'status': 'review_required',
         'result': <String, Object?>{'documentType': 'unknown'},
         'candidates': <Object?>[
@@ -379,7 +455,7 @@ void main() {
       final gateway = Api17AiGateway(
         client: _client(
           (request) async => request.method == 'POST'
-              ? _json(<String, Object?>{'id': 'extraction-1'}, statusCode: 201)
+              ? _json(_created(), statusCode: 201)
               : _json(minimal),
         ),
         mediaReader: _MediaReader(_bytes),
@@ -439,7 +515,7 @@ void main() {
       Object position = 0,
     }) async {
       final response = <String, Object?>{
-        'id': 'extraction-1',
+        ..._binding(kind: 'receipt'),
         'status': 'review_required',
         'result': <String, Object?>{'documentType': 'receipt'},
         'candidates': <Object?>[
@@ -449,7 +525,7 @@ void main() {
       final gateway = Api17AiGateway(
         client: _client(
           (request) async => request.method == 'POST'
-              ? _json(<String, Object?>{'id': 'extraction-1'}, statusCode: 201)
+              ? _json(_created(), statusCode: 201)
               : _json(response),
         ),
         mediaReader: _MediaReader(_bytes),
@@ -487,7 +563,7 @@ ProvidentiaApiClient _extractionClient({required String documentType}) {
     expect(request.url.path, startsWith('/api/v1/homes/home-1/ai/extractions'));
     if (request.method == 'POST') {
       expect(request.headers['content-type'], contains('multipart/form-data'));
-      return _json(<String, Object?>{'id': 'extraction-1'}, statusCode: 201);
+      return _json(_created(), statusCode: 201);
     }
     expect(request.method, 'GET');
     expect(request.url.path, endsWith('/extraction-1'));
@@ -508,8 +584,30 @@ http.Response _json(Object body, {int statusCode = 200}) => http.Response(
   headers: const <String, String>{'content-type': 'application/json'},
 );
 
-Map<String, Object?> _extraction(String documentType) => <String, Object?>{
+Map<String, Object?> _created({int candidateCount = 1}) => <String, Object?>{
   'id': 'extraction-1',
+  'status': 'review_required',
+  'candidateCount': candidateCount,
+};
+
+Map<String, Object?> _binding({
+  required String kind,
+  String mimeType = 'image/jpeg',
+}) => <String, Object?>{
+  'id': 'extraction-1',
+  'kind': kind,
+  'provider': 'openai',
+  'model': 'vision-production',
+  'inputMimeType': mimeType,
+  'inputSha256':
+      'be45cb2605bf36bebde684841a28f0fd43c69850a3dce5fedba69928ee3a8991',
+  'inputByteCount': 16,
+  'schemaVersion': 1,
+  'promptTemplateVersion': 1,
+};
+
+Map<String, Object?> _extraction(String documentType) => <String, Object?>{
+  ..._binding(kind: documentType == 'stock' ? 'stock' : 'receipt'),
   'status': 'review_required',
   'model': 'vision-production',
   'processingMs': 125,
@@ -586,7 +684,7 @@ PreparedAiMedia _media({String mimeType = 'image/jpeg'}) => PreparedAiMedia(
   sourceMediaId: 'source-1',
   ephemeralReference: 'memory://prepared-1',
   previewReference: 'memory://preview-1',
-  sha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  sha256: 'be45cb2605bf36bebde684841a28f0fd43c69850a3dce5fedba69928ee3a8991',
   mimeType: mimeType,
   byteLength: 16,
   width: 1200,

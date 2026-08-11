@@ -126,6 +126,28 @@ void main() {
         expect(controller.report, isNull);
       }
     });
+
+    test(
+      'late report completion cannot notify or retain data after dispose',
+      () async {
+        final repository = _DelayedReportRepository();
+        final controller = ReportingController(
+          service: HouseholdReportService(repository),
+          activeHomeId: 'home-1',
+        );
+        var notifications = 0;
+        controller.addListener(() => notifications++);
+
+        final pending = controller.load();
+        expect(notifications, 1);
+        controller.dispose();
+        repository.complete('home-1', _report());
+        await pending;
+
+        expect(notifications, 1);
+        expect(controller.report, isNull);
+      },
+    );
   });
 
   testWidgets('report page renders all evidence-aware sections responsively', (
@@ -185,8 +207,8 @@ void main() {
         ),
       );
 
-      expect(find.text('Reports are not connected'), findsOneWidget);
-      expect(find.textContaining('pinned backend contract'), findsOneWidget);
+      expect(find.text('Reports are temporarily unavailable'), findsOneWidget);
+      expect(find.textContaining('verified safely'), findsOneWidget);
       expect(find.textContaining('home-1'), findsNothing);
     },
   );
