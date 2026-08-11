@@ -44,10 +44,10 @@
 Domain, app-store, and trademark due diligence remains mandatory before public
 launch. It does not reopen the owner-selected name.
 
-## Current integration note — 2026-08-09
+## Current integration note — 2026-08-11
 
-- The client pins the reviewed OpenAPI `1.11.1` onboarding/session boundary and
-  generates 155 operations. Contract, lock, manifest, and generated Dart are
+- The client pins the reviewed OpenAPI `1.12.0` boundary and generates 156
+  operations. Contract, lock, manifest, and generated Dart are
   updated as one deliberate change.
 - Product onboarding is email-only login-link authentication. The originating
   client owns a private poll token, state, and PKCE verifier; the emailed link
@@ -62,8 +62,16 @@ launch. It does not reopen the owner-selected name.
   revocation are visible from the account screen.
 - Recipient invitations, home selection/settings/governance, and
   platform-administrator management are composed client workflows.
+- Catalog sharing consent, explicit per-item product-identity contribution,
+  validated icon metadata, and attribution-free platform-role moderation are
+  production-composed behind independent home-permission and platform-role
+  gates. Consent and item selection do not submit; the server consent plus a
+  fresh per-item checkbox are required. Live backend acceptance remains open.
 - Home roles (`owner`, `manager`, `member`, `viewer`) and platform roles are
   separate authorization domains. A platform role grants no private home
   access.
 - The visible household workspaces are mostly local-only and must not be used
   as evidence that the corresponding backend APIs have been tested end to end.
+- Local Drift storage is not application-encrypted. Encryption and key
+  lifecycle remain an explicit release decision and must not be claimed as a
+  completed control.
