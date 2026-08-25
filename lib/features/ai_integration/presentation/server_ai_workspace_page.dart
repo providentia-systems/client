@@ -223,7 +223,11 @@ final class _ServerAiWorkspacePageState extends State<ServerAiWorkspacePage> {
               ),
               OutlinedButton.icon(
                 key: const Key('ai-enable-profile'),
-                onPressed: selected == null || controller.isBusy
+                onPressed:
+                    selected == null ||
+                        controller.isBusy ||
+                        selected.availability !=
+                            AiProviderAvailability.available
                     ? null
                     : () => controller.updateSettings(
                         AiSettingsUpdate(
@@ -238,7 +242,11 @@ final class _ServerAiWorkspacePageState extends State<ServerAiWorkspacePage> {
               ),
               OutlinedButton.icon(
                 key: const Key('ai-single-profile-policy'),
-                onPressed: selected == null || controller.isBusy
+                onPressed:
+                    selected == null ||
+                        controller.isBusy ||
+                        selected.availability !=
+                            AiProviderAvailability.available
                     ? null
                     : () => controller.updatePolicy(
                         AiOrchestrationPolicyUpdate(

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:providentia/features/inventory/domain/inventory_models.dart';
 import 'package:providentia/features/inventory/infrastructure/generated_home_item_master_source.dart';
 import 'package:providentia_api_client/providentia_api_client.dart';
 
@@ -12,6 +13,7 @@ const String _productTwo = '0198a0b1-c2d3-7e4f-a345-6789abcdef01';
 const String _packOne = '0198a0b1-c2d3-7e4f-b456-789abcdef012';
 const String _packTwo = '0198a0b1-c2d3-7e4f-9567-89abcdef0123';
 const String _homeProduct = '0198a0b1-c2d3-7e4f-a678-9abcdef01234';
+const String _homeCategory = '0198a0b1-c2d3-7e4f-8678-9abcdef01234';
 
 void main() {
   test(
@@ -94,6 +96,40 @@ void main() {
       source.loadAll(homeId: _homeId),
       throwsA(isA<FormatException>()),
     );
+  });
+
+  test('loads a home-private product and its private category', () async {
+    final source = GeneratedHomeItemMasterSource(
+      _client(
+        (_) async => _page(
+          data: <Object?>[
+            _item(
+              productId: null,
+              packId: null,
+              homeProductId: _homeProduct,
+              quantity: '4',
+              categoryId: null,
+              homeCategoryId: _homeCategory,
+              categorySource: 'home',
+              packStatus: null,
+            ),
+          ],
+          offset: 0,
+          total: 1,
+          hasMore: false,
+          nextOffset: null,
+        ),
+      ),
+    );
+
+    final item = (await source.loadAll(homeId: _homeId)).single;
+
+    expect(item.id, _homeProduct);
+    expect(item.productId, isNull);
+    expect(item.packId, isNull);
+    expect(item.homeCategoryId, _homeCategory);
+    expect(item.categorySource, InventoryCategorySource.home);
+    expect(item.currentQuantity, 4);
   });
 
   for (final statusCode in <int>[403, 404]) {
@@ -210,19 +246,25 @@ http.Response _page({
 );
 
 Map<String, Object?> _item({
-  required String productId,
-  required String packId,
+  required String? productId,
+  required String? packId,
   required String? homeProductId,
   required String quantity,
+  String? categoryId = '0198a0b1-c2d3-7e4f-8789-abcdef012345',
+  String? homeCategoryId,
+  String? categorySource = 'global',
+  String? packStatus = 'published',
 }) => <String, Object?>{
   'productId': productId,
   'packId': packId,
   'canonicalName': 'Rice',
   'brand': 'Harvest',
-  'categoryId': '0198a0b1-c2d3-7e4f-8789-abcdef012345',
+  'categoryId': categoryId,
   'categoryName': 'Grains',
+  'homeCategoryId': homeCategoryId,
+  'categorySource': categorySource,
   'packText': '1 kg',
-  'packStatus': 'published',
+  'packStatus': packStatus,
   'aliases': <Object?>['Long grain'],
   'homeProductId': homeProductId,
   'homeProductStatus': homeProductId == null ? null : 'active',

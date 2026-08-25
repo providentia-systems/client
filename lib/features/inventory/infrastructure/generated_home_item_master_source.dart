@@ -38,6 +38,7 @@ final class GeneratedHomeItemMasterSource implements HomeItemMasterSource {
     }
     const limit = 100;
     final items = <InventoryItem>[];
+    final itemIds = <String>{};
     final packIds = <String>{};
     var offset = 0;
     int? total;
@@ -82,8 +83,13 @@ final class GeneratedHomeItemMasterSource implements HomeItemMasterSource {
       total = expectedTotal;
       for (final record in data) {
         final item = _item(record, homeId);
-        final packId = item.packId!;
-        if (!packIds.add(packId)) {
+        if (!itemIds.add(item.id)) {
+          throw const FormatException(
+            'The item master returned the same identity more than once.',
+          );
+        }
+        final packId = item.packId;
+        if (packId != null && !packIds.add(packId)) {
           throw const FormatException(
             'The item master returned the same pack more than once.',
           );
@@ -112,9 +118,18 @@ final class GeneratedHomeItemMasterSource implements HomeItemMasterSource {
 }
 
 InventoryItem _item(Map<String, Object?> record, String homeId) {
-  final productId = _identifier(record, 'productId');
-  final packId = _identifier(record, 'packId');
-  _identifier(record, 'categoryId');
+  final productId = _nullableIdentifier(record, 'productId');
+  final packId = _nullableIdentifier(record, 'packId');
+  final categoryId = _nullableIdentifier(record, 'categoryId');
+  final homeCategoryId = _nullableIdentifier(record, 'homeCategoryId');
+  final categorySource = switch (_nullableString(record, 'categorySource')) {
+    'global' => InventoryCategorySource.global,
+    'home' => InventoryCategorySource.home,
+    null => null,
+    _ => throw const FormatException(
+      'The item-master category source is invalid.',
+    ),
+  };
   final homeProductId = _nullableIdentifier(record, 'homeProductId');
   final homeProductStatus = record['homeProductStatus'];
   if ((homeProductId == null && homeProductStatus != null) ||
@@ -123,8 +138,25 @@ InventoryItem _item(Map<String, Object?> record, String homeId) {
       'The item-master home-product state is invalid.',
     );
   }
-  final packStatus = _string(record, 'packStatus');
-  if (packStatus != 'published' && packStatus != 'pending-normalization') {
+  if (homeProductId == null && packId == null) {
+    throw const FormatException(
+      'The item-master row has no selectable identity.',
+    );
+  }
+  if (categorySource == InventoryCategorySource.global &&
+          (categoryId == null || homeCategoryId != null) ||
+      categorySource == InventoryCategorySource.home &&
+          (homeCategoryId == null || categoryId != null) ||
+      categorySource == null &&
+          (categoryId != null || homeCategoryId != null)) {
+    throw const FormatException(
+      'The item-master category identity is invalid.',
+    );
+  }
+  final packStatus = _nullableString(record, 'packStatus');
+  if (packStatus != null &&
+      packStatus != 'published' &&
+      packStatus != 'pending-normalization') {
     throw const FormatException('The item-master pack status is invalid.');
   }
   final quantity = double.tryParse(_string(record, 'quantity'));
@@ -132,18 +164,24 @@ InventoryItem _item(Map<String, Object?> record, String homeId) {
     throw const FormatException('The item-master quantity is invalid.');
   }
   final packText = _string(record, 'packText').trim();
+  final categoryName = _nullableString(record, 'categoryName')?.trim();
   return InventoryItem(
-    id: homeProductId ?? packId,
+    id: homeProductId ?? packId!,
     homeId: homeId,
     productId: productId,
     packId: packId,
     canonicalName: _string(record, 'canonicalName'),
     packSize: packText.isEmpty ? 'Unspecified pack' : packText,
-    category: _string(record, 'categoryName'),
+    category: categoryName == null || categoryName.isEmpty
+        ? 'Uncategorized'
+        : categoryName,
     brand: _string(record, 'brand'),
     aliases: _stringList(record, 'aliases'),
     currentQuantity: homeProductId == null ? null : quantity,
     isHomeProduct: homeProductId != null,
+    categoryId: categoryId,
+    homeCategoryId: homeCategoryId,
+    categorySource: categorySource,
   );
 }
 
@@ -186,6 +224,15 @@ String? _nullableIdentifier(Map<String, Object?> object, String key) {
   if (value == null) return null;
   if (value is! String || !_uuid.hasMatch(value)) {
     throw FormatException('Expected "$key" to be a UUID or null.');
+  }
+  return value;
+}
+
+String? _nullableString(Map<String, Object?> object, String key) {
+  final value = object[key];
+  if (value == null) return null;
+  if (value is! String) {
+    throw FormatException('Expected "$key" to be a string or null.');
   }
   return value;
 }
