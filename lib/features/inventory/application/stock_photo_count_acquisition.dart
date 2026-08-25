@@ -306,8 +306,9 @@ extension StockPhotoCountAcquisition on StockPhotoCountController {
             result.proposal.candidates,
           );
           final reviews = deduplicated.$1
-              .map(
-                (candidate) => StockPhotoCandidateReview(
+              .map((candidate) {
+                final serverCandidate = _serverCandidate(candidate);
+                return StockPhotoCandidateReview(
                   proposal: candidate,
                   quantity:
                       candidate.quantityMinimum.isFinite &&
@@ -315,8 +316,12 @@ extension StockPhotoCountAcquisition on StockPhotoCountController {
                           candidate.quantityMinimum == candidate.quantityMaximum
                       ? candidate.quantityMinimum
                       : null,
-                ),
-              )
+                  serverCandidate: serverCandidate,
+                  rejected:
+                      serverCandidate?.status ==
+                      AiCandidateReviewStatus.rejected,
+                );
+              })
               .toList(growable: false);
           _consent = null;
           _setState(

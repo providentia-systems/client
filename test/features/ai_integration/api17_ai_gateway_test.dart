@@ -82,10 +82,46 @@ void main() {
     expect(success.proposal.candidates.single.quantityMinimum, 2);
     expect(success.proposal.candidates.single.quantityMaximum, 2);
     expect(
+      success.proposal.candidates.single.serverReview?.extractionId,
+      'extraction-1',
+    );
+    expect(success.proposal.candidates.single.serverReview?.position, 0);
+    expect(success.proposal.candidates.single.serverReview?.revision, 1);
+    expect(
+      success.proposal.candidates.single.serverReview?.status,
+      StockCandidateServerReviewStatus.pending,
+    );
+    expect(
       success.proposal.candidates.single.warnings,
       contains('Check pack size'),
     );
     expect(success.proposal.warnings, contains('Review every line'));
+  });
+
+  test('stock extraction rejects an unbound server review candidate', () async {
+    final extraction = _extraction('stock');
+    final candidate =
+        (extraction['candidates']! as List<Object?>).single!
+            as Map<String, Object?>;
+    final gateway = Api17AiGateway(
+      client: _client(
+        (request) async => request.method == 'POST'
+            ? _json(_created(), statusCode: 201)
+            : _json(<String, Object?>{
+                ...extraction,
+                'candidates': <Object?>[
+                  <String, Object?>{...candidate, 'reviewStatus': 'unknown'},
+                ],
+              }),
+      ),
+      mediaReader: _MediaReader(_bytes),
+    );
+
+    final result =
+        await gateway.extractStockPhoto(_request(AiExtractionKind.stockPhoto))
+            as AiExtractionFailure<StockPhotoProposal>;
+
+    expect(result.code, 'invalid_ai_response');
   });
 
   test('unsupported routes and changed prepared bytes fail closed', () async {
@@ -644,6 +680,8 @@ void main() {
         'candidates': <Object?>[
           <String, Object?>{
             'position': 0,
+            'revision': 1,
+            'reviewStatus': 'pending',
             'payload': <String, Object?>{
               'description': 'Rice',
               'quantity': 'not-a-number',
@@ -829,6 +867,8 @@ Map<String, Object?> _extraction(String documentType) => <String, Object?>{
   'candidates': <Object?>[
     <String, Object?>{
       'position': 0,
+      'revision': 1,
+      'reviewStatus': 'pending',
       'payload': <String, Object?>{
         'rawText': 'Rice 2 x 10.00',
         'description': 'Rice',

@@ -3,6 +3,10 @@ part of 'stock_photo_count_controller.dart';
 extension StockPhotoCountReview on StockPhotoCountController {
   void matchCandidate(String candidateId, String? homeProductId) {
     if (_disposed || _state.status != StockPhotoCountStatus.review) return;
+    final review = _state.candidates
+        .where((candidate) => candidate.proposal.candidateId == candidateId)
+        .firstOrNull;
+    if (review == null || review.resolved) return;
     final product = homeProductId == null
         ? null
         : homeProducts.where((item) => item.id == homeProductId).firstOrNull;
@@ -31,7 +35,7 @@ extension StockPhotoCountReview on StockPhotoCountController {
     final review = _state.candidates
         .where((candidate) => candidate.proposal.candidateId == candidateId)
         .firstOrNull;
-    if (review == null || review.counted) return;
+    if (review == null || review.resolved) return;
     final item = searchItems()
         .where((candidate) => candidate.id == inventoryItemId)
         .firstOrNull;
@@ -97,7 +101,7 @@ extension StockPhotoCountReview on StockPhotoCountController {
     final review = _state.candidates
         .where((candidate) => candidate.proposal.candidateId == candidateId)
         .firstOrNull;
-    if (review == null || review.counted) return;
+    if (review == null || review.resolved) return;
     if (_pendingCandidateIds.contains(candidateId)) return;
     final name = privateName.trim();
     final pack = packText?.trim();
@@ -144,6 +148,10 @@ extension StockPhotoCountReview on StockPhotoCountController {
 
   void setQuantity(String candidateId, double? quantity) {
     if (_disposed || _state.status != StockPhotoCountStatus.review) return;
+    final review = _state.candidates
+        .where((candidate) => candidate.proposal.candidateId == candidateId)
+        .firstOrNull;
+    if (review == null || review.resolved) return;
     if (quantity != null && (!quantity.isFinite || quantity < 0)) {
       quantity = null;
     }
@@ -165,6 +173,14 @@ extension StockPhotoCountReview on StockPhotoCountController {
     if (index < 0) return;
     final candidate = _state.candidates[index];
     if (candidate.counted || _pendingCandidateIds.contains(candidateId)) return;
+    if (candidate.rejected ||
+        candidate.serverCandidate?.status == AiCandidateReviewStatus.rejected) {
+      _fail(
+        'This AI candidate was rejected and cannot update inventory.',
+        keepReview: true,
+      );
+      return;
+    }
     final quantity = candidate.quantity;
     final product = homeProducts
         .where((item) => item.id == candidate.homeProductId)
@@ -181,7 +197,10 @@ extension StockPhotoCountReview on StockPhotoCountController {
     }
     final proposal = _state.proposal;
     if (proposal == null) return;
-    final photoReferenceId = '${proposal.id}:$candidateId';
+    final serverCandidate = candidate.serverCandidate;
+    final photoReferenceId = serverCandidate == null
+        ? '${proposal.id}:$candidateId'
+        : '${serverCandidate.extractionId}:${serverCandidate.position}';
     final session = _inventory.state.activeSession;
     if (session == null || session.status != CountSessionStatus.open) {
       _fail('Keep the ordinary stock count open.', keepReview: true);
@@ -190,21 +209,15 @@ extension StockPhotoCountReview on StockPhotoCountController {
     final replayedLine = session.confirmedLines
         .where((line) => line.photoId == photoReferenceId)
         .firstOrNull;
-    if (replayedLine != null) {
-      if (replayedLine.itemId != product.id) {
-        _fail(
-          'This photo candidate was already matched differently.',
-          keepReview: true,
-        );
-        return;
-      }
-      _updateCandidate(
-        candidateId,
-        (current) => current.copyWith(counted: true),
+    if (replayedLine != null && replayedLine.itemId != product.id) {
+      _fail(
+        'This photo candidate was already matched differently.',
+        keepReview: true,
       );
       return;
     }
-    if (session.confirmedLines.any((line) => line.itemId == product.id) ||
+    if ((replayedLine == null &&
+            session.confirmedLines.any((line) => line.itemId == product.id)) ||
         _pendingHomeProductIds.contains(product.id)) {
       _fail(
         'This product is already counted in the open session.',
@@ -217,6 +230,22 @@ extension StockPhotoCountReview on StockPhotoCountController {
     final epoch = _accessEpoch;
     _setReviewState(candidateBusyId: candidateId);
     try {
+      final accepted = await _acceptServerCandidate(candidate);
+      if (!_current(epoch)) return;
+      if (accepted != null) {
+        _updateCandidate(
+          candidateId,
+          (current) => current.copyWith(serverCandidate: accepted),
+          preserveBusy: true,
+        );
+      }
+      if (replayedLine != null) {
+        _updateCandidate(
+          candidateId,
+          (current) => current.copyWith(counted: true),
+        );
+        return;
+      }
       await _inventory.recordPhotoCount(
         item: product,
         observedQuantity: quantity,
@@ -227,6 +256,12 @@ extension StockPhotoCountReview on StockPhotoCountController {
         candidateId,
         (current) => current.copyWith(counted: true),
       );
+    } on AiServerException catch (error) {
+      if (error.kind == AiServerFailureKind.authorizationDenied) {
+        await _denyAccess(error.safeMessage);
+      } else if (_current(epoch)) {
+        _fail(error.safeMessage, keepReview: true);
+      }
     } catch (_) {
       final projected = await _awaitProjectedCountLine(photoReferenceId);
       if (!_current(epoch)) return;
@@ -250,5 +285,115 @@ extension StockPhotoCountReview on StockPhotoCountController {
         _setReviewState();
       }
     }
+  }
+
+  /// Rejects a proposal without issuing any ordinary inventory command.
+  /// Server-proxy candidates are revision-bound at the backend first; local
+  /// candidates are dismissed only in this ephemeral review.
+  Future<void> rejectCandidate(String candidateId) async {
+    if (_disposed || _state.status != StockPhotoCountStatus.review) return;
+    final candidate = _state.candidates
+        .where((item) => item.proposal.candidateId == candidateId)
+        .firstOrNull;
+    if (candidate == null ||
+        candidate.resolved ||
+        _pendingCandidateIds.contains(candidateId)) {
+      return;
+    }
+    final serverCandidate = candidate.serverCandidate;
+    if (serverCandidate?.status == AiCandidateReviewStatus.accepted) {
+      _fail(
+        'This AI candidate was already accepted; finish or retry its count.',
+        keepReview: true,
+      );
+      return;
+    }
+    final epoch = _accessEpoch;
+    _pendingCandidateIds.add(candidateId);
+    _setReviewState(candidateBusyId: candidateId);
+    try {
+      final rejected = serverCandidate == null
+          ? null
+          : serverCandidate.status == AiCandidateReviewStatus.rejected
+          ? serverCandidate
+          : await _decideServerCandidate(
+              serverCandidate,
+              AiCandidateDecision.reject,
+            );
+      if (!_current(epoch)) return;
+      _updateCandidate(
+        candidateId,
+        (current) =>
+            current.copyWith(serverCandidate: rejected, rejected: true),
+      );
+    } on AiServerException catch (error) {
+      if (error.kind == AiServerFailureKind.authorizationDenied) {
+        await _denyAccess(error.safeMessage);
+      } else if (_current(epoch)) {
+        _fail(error.safeMessage, keepReview: true);
+      }
+    } catch (_) {
+      if (_current(epoch)) {
+        _fail(
+          'The AI candidate could not be rejected safely.',
+          keepReview: true,
+        );
+      }
+    } finally {
+      _pendingCandidateIds.remove(candidateId);
+      if (_current(epoch) &&
+          _state.status == StockPhotoCountStatus.review &&
+          _state.candidateBusyId == candidateId) {
+        _setReviewState();
+      }
+    }
+  }
+
+  Future<AiReviewCandidate?> _acceptServerCandidate(
+    StockPhotoCandidateReview review,
+  ) async {
+    final candidate = review.serverCandidate;
+    if (candidate == null) return null;
+    return switch (candidate.status) {
+      AiCandidateReviewStatus.pending => await _decideServerCandidate(
+        candidate,
+        AiCandidateDecision.accept,
+      ),
+      AiCandidateReviewStatus.accepted => candidate,
+      AiCandidateReviewStatus.rejected => throw const AiServerException(
+        AiServerFailureKind.validation,
+      ),
+    };
+  }
+
+  Future<AiReviewCandidate> _decideServerCandidate(
+    AiReviewCandidate candidate,
+    AiCandidateDecision decision,
+  ) async {
+    final reviewer = _activeRoute?.reviewCandidate;
+    if (reviewer == null ||
+        candidate.homeId != homeId ||
+        candidate.type != AiCandidateType.stockItem ||
+        candidate.status != AiCandidateReviewStatus.pending) {
+      throw const AiServerException(AiServerFailureKind.validation);
+    }
+    final review = await reviewer(candidate: candidate, decision: decision);
+    final updated = review.candidates
+        .where((item) => item.position == candidate.position)
+        .firstOrNull;
+    final expectedStatus = switch (decision) {
+      AiCandidateDecision.accept => AiCandidateReviewStatus.accepted,
+      AiCandidateDecision.reject => AiCandidateReviewStatus.rejected,
+    };
+    if (review.homeId != homeId ||
+        review.extractionId != candidate.extractionId ||
+        review.kind != AiExtractionKind.stockPhoto ||
+        updated == null ||
+        updated.type != AiCandidateType.stockItem ||
+        updated.status != expectedStatus ||
+        updated.revision != candidate.revision + 1) {
+      throw const AiServerException(AiServerFailureKind.invalidResponse);
+    }
+    return updated;
   }
 }

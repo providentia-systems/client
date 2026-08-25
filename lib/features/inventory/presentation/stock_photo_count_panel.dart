@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:providentia/features/ai_integration/domain/ai_models.dart';
+import 'package:providentia/features/ai_integration/domain/server_ai_models.dart';
 import 'package:providentia/features/inventory/application/stock_photo_count_controller.dart';
 import 'package:providentia/features/inventory/domain/inventory_models.dart';
 
@@ -288,7 +289,7 @@ final class _CandidateReviewCardState extends State<_CandidateReviewCard> {
         .take(8)
         .toList(growable: false);
     return Card.outlined(
-      color: widget.review.counted
+      color: widget.review.resolved
           ? Theme.of(context).colorScheme.secondaryContainer
           : null,
       child: Padding(
@@ -304,7 +305,7 @@ final class _CandidateReviewCardState extends State<_CandidateReviewCard> {
             TextField(
               key: Key('stock-photo-item-search-${proposal.candidateId}'),
               controller: _productSearch,
-              enabled: !widget.review.counted && !widget.busy,
+              enabled: !widget.review.resolved && !widget.busy,
               decoration: const InputDecoration(
                 labelText: 'Search full item master',
                 hintText: 'Name, brand, category, alias, or pack',
@@ -320,7 +321,7 @@ final class _CandidateReviewCardState extends State<_CandidateReviewCard> {
                   key: Key('stock-photo-selected-${proposal.candidateId}'),
                 ),
               ),
-            if (!widget.review.counted) ...<Widget>[
+            if (!widget.review.resolved) ...<Widget>[
               const SizedBox(height: 6),
               for (final item in matches)
                 Padding(
@@ -365,7 +366,7 @@ final class _CandidateReviewCardState extends State<_CandidateReviewCard> {
             TextField(
               key: Key('stock-photo-quantity-${proposal.candidateId}'),
               controller: _quantity,
-              enabled: !widget.review.counted && !widget.busy,
+              enabled: !widget.review.resolved && !widget.busy,
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
               ),
@@ -380,7 +381,7 @@ final class _CandidateReviewCardState extends State<_CandidateReviewCard> {
             const SizedBox(height: 8),
             FilledButton(
               key: Key('stock-photo-counted-${proposal.candidateId}'),
-              onPressed: widget.review.counted || widget.busy
+              onPressed: widget.review.resolved || widget.busy
                   ? null
                   : () => widget.controller.confirmCandidate(
                       proposal.candidateId,
@@ -388,11 +389,28 @@ final class _CandidateReviewCardState extends State<_CandidateReviewCard> {
               child: Text(
                 widget.review.counted
                     ? 'Photo counted'
+                    : widget.review.rejected
+                    ? 'Candidate rejected'
                     : widget.busy
                     ? 'Saving…'
                     : 'Confirm photo count',
               ),
             ),
+            if (!widget.review.resolved) ...<Widget>[
+              const SizedBox(height: 4),
+              TextButton(
+                key: Key('stock-photo-reject-${proposal.candidateId}'),
+                onPressed:
+                    widget.busy ||
+                        widget.review.serverCandidate?.status ==
+                            AiCandidateReviewStatus.accepted
+                    ? null
+                    : () => widget.controller.rejectCandidate(
+                        proposal.candidateId,
+                      ),
+                child: const Text('Reject candidate'),
+              ),
+            ],
           ],
         ),
       ),

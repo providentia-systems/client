@@ -443,6 +443,32 @@ final class NormalizedRegion {
   final double height;
 }
 
+/// Revision-bound identity for a server-proxy stock candidate.
+///
+/// Strict-local proposals deliberately omit this value. Keeping this small
+/// binding beside the proposal lets the inventory workflow require the
+/// backend review decision before it issues an ordinary count command without
+/// coupling the provider-neutral proposal model to the server repository.
+enum StockCandidateServerReviewStatus { pending, accepted, rejected }
+
+final class StockCandidateServerReviewBinding {
+  StockCandidateServerReviewBinding({
+    required this.extractionId,
+    required this.position,
+    required this.revision,
+    required this.status,
+  }) {
+    if (extractionId.trim().isEmpty || position < 0 || revision < 1) {
+      throw ArgumentError('Invalid server stock-candidate review binding.');
+    }
+  }
+
+  final String extractionId;
+  final int position;
+  final int revision;
+  final StockCandidateServerReviewStatus status;
+}
+
 final class StockCandidateProposal {
   StockCandidateProposal({
     required this.candidateId,
@@ -455,6 +481,7 @@ final class StockCandidateProposal {
     required this.confidence,
     required List<String> warnings,
     this.region,
+    this.serverReview,
   }) : warnings = UnmodifiableListView<String>(List<String>.of(warnings));
 
   final String candidateId;
@@ -467,6 +494,7 @@ final class StockCandidateProposal {
   final double confidence;
   final List<String> warnings;
   final NormalizedRegion? region;
+  final StockCandidateServerReviewBinding? serverReview;
 }
 
 final class StockPhotoProposal {

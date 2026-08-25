@@ -680,6 +680,7 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
               profile: profile,
               gateway: serverGateway,
               privacyMode: AiPrivacyMode.serverProxyCloud,
+              reviewCandidate: aiRepository.reviewCandidate,
             );
           }
         }

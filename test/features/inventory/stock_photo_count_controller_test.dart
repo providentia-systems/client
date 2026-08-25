@@ -120,6 +120,116 @@ void main() {
     },
   );
 
+  test(
+    'server candidate is revision-bound before the ordinary count command',
+    () async {
+      final harness = _Harness();
+      await harness.openReview();
+      harness.stock.matchCandidate('candidate-1', _item.id);
+      harness.stock.setQuantity('candidate-1', 4);
+      harness.lifecycleEvents.clear();
+
+      await harness.stock.confirmCandidate('candidate-1');
+
+      expect(harness.reviewer.decisions, <AiCandidateDecision>[
+        AiCandidateDecision.accept,
+      ]);
+      expect(harness.lifecycleEvents, <String>[
+        'server:accept:0',
+        'inventory:photo:proposal-1:0',
+      ]);
+      expect(
+        harness.stock.state.candidates.single.serverCandidate?.status,
+        AiCandidateReviewStatus.accepted,
+      );
+      expect(
+        harness.repository.saved.last.lines.single.photoId,
+        'proposal-1:0',
+      );
+      harness.dispose();
+    },
+  );
+
+  test('server review conflict never creates a count line', () async {
+    final harness = _Harness(
+      reviewError: const AiServerException(AiServerFailureKind.conflict),
+    );
+    await harness.openReview();
+    harness.stock.matchCandidate('candidate-1', _item.id);
+    harness.stock.setQuantity('candidate-1', 2);
+
+    await harness.stock.confirmCandidate('candidate-1');
+
+    expect(harness.reviewer.calls, 1);
+    expect(harness.repository.saved.last.lines, isEmpty);
+    expect(harness.stock.state.candidates.single.counted, isFalse);
+    expect(harness.stock.state.safeMessage, contains('changed'));
+    harness.dispose();
+  });
+
+  test(
+    'accepted candidate retries only the failed ordinary count command',
+    () async {
+      final harness = _Harness();
+      await harness.openReview();
+      harness.stock.matchCandidate('candidate-1', _item.id);
+      harness.stock.setQuantity('candidate-1', 3);
+      harness.repository.throwBeforeNextOpenSessionProjection = true;
+
+      await harness.stock.confirmCandidate('candidate-1');
+      expect(harness.reviewer.calls, 1);
+      expect(
+        harness.stock.state.candidates.single.serverCandidate?.status,
+        AiCandidateReviewStatus.accepted,
+      );
+      expect(harness.stock.state.candidates.single.counted, isFalse);
+
+      await harness.stock.confirmCandidate('candidate-1');
+
+      expect(harness.reviewer.calls, 1);
+      expect(harness.repository.saved.last.lines, hasLength(1));
+      expect(harness.stock.state.candidates.single.counted, isTrue);
+      harness.dispose();
+    },
+  );
+
+  test('rejecting a server candidate cannot mutate inventory', () async {
+    final harness = _Harness();
+    await harness.openReview();
+
+    await harness.stock.rejectCandidate('candidate-1');
+
+    expect(harness.reviewer.decisions, <AiCandidateDecision>[
+      AiCandidateDecision.reject,
+    ]);
+    expect(harness.stock.state.candidates.single.rejected, isTrue);
+    expect(
+      harness.stock.state.candidates.single.serverCandidate?.status,
+      AiCandidateReviewStatus.rejected,
+    );
+    expect(harness.repository.saved.last.lines, isEmpty);
+    harness.dispose();
+  });
+
+  test('candidate-review authorization loss is terminal', () async {
+    final harness = _Harness(
+      reviewError: const AiServerException(
+        AiServerFailureKind.authorizationDenied,
+      ),
+    );
+    await harness.openReview();
+    harness.stock.matchCandidate('candidate-1', _item.id);
+    harness.stock.setQuantity('candidate-1', 1);
+
+    await harness.stock.confirmCandidate('candidate-1');
+
+    expect(harness.stock.state.status, StockPhotoCountStatus.accessDenied);
+    expect(harness.authorizationDenials, 1);
+    expect(harness.repository.saved.last.lines, isEmpty);
+    expect(harness.preparer.hasPreparedBytes, isFalse);
+    harness.dispose();
+  });
+
   test('exact selections are de-duplicated before ordered consent', () async {
     final harness = _Harness(assets: <AiMediaAsset>[_assetA, _assetA, _assetB]);
     await harness.openCount();
@@ -436,7 +546,7 @@ void main() {
 
       final projectedLines = harness.repository.saved
           .expand((session) => session.lines)
-          .where((line) => line.photoId == 'proposal-1:candidate-1');
+          .where((line) => line.photoId == 'proposal-1:0');
       expect(projectedLines, hasLength(1));
       expect(harness.stock.state.candidates.single.counted, isTrue);
       expect(harness.repository.movements, isEmpty);
@@ -511,6 +621,7 @@ final class _Harness {
     Object? readinessError,
     Object? extractionError,
     Object? loadRouteError,
+    Object? reviewError,
   }) : repository = _InventoryRepository(),
        preparer = _MediaPreparer(),
        gateway = route?.gateway is _Gateway
@@ -522,6 +633,11 @@ final class _Harness {
                extractionError: extractionError,
              ),
        _assets = assets ?? <AiMediaAsset>[_assetA, _assetB] {
+    repository.lifecycleEvents = lifecycleEvents;
+    reviewer = _ServerReviewer(
+      lifecycleEvents: lifecycleEvents,
+      error: reviewError,
+    );
     var nextId = 0;
     String id() => 'id-${++nextId}';
     inventory = InventoryController(
@@ -538,6 +654,7 @@ final class _Harness {
             mediaPreparation: preparer,
             mediaReader: preparer,
             gateway: gateway,
+            reviewCandidate: reviewer.reviewCandidate,
             pickAssets: () async => _assets,
             loadProvider: () async {
               if (loadRouteError case final error?) throw error;
@@ -564,15 +681,16 @@ final class _Harness {
   final _MediaPreparer preparer;
   final _Gateway gateway;
   final List<AiMediaAsset> _assets;
+  final List<String> lifecycleEvents = <String>[];
   late final InventoryController inventory;
   late final StockPhotoCountController stock;
+  late final _ServerReviewer reviewer;
   int authorizationDenials = 0;
 
   String get sessionId => repository.saved.first.id;
 
   Future<void> openCount() async {
     await inventory.startCount(locationId: 'primary');
-    await Future<void>.delayed(Duration.zero);
     expect(inventory.state.activeSession, isNotNull);
   }
 
@@ -591,6 +709,45 @@ final class _Harness {
   }
 }
 
+final class _ServerReviewer {
+  _ServerReviewer({required this.lifecycleEvents, this.error});
+
+  final List<String> lifecycleEvents;
+  final Object? error;
+  final List<AiCandidateDecision> decisions = <AiCandidateDecision>[];
+  int calls = 0;
+
+  Future<AiExtractionReview> reviewCandidate({
+    required AiReviewCandidate candidate,
+    required AiCandidateDecision decision,
+  }) async {
+    calls++;
+    decisions.add(decision);
+    lifecycleEvents.add('server:${decision.name}:${candidate.position}');
+    if (error case final failure?) throw failure;
+    final status = switch (decision) {
+      AiCandidateDecision.accept => AiCandidateReviewStatus.accepted,
+      AiCandidateDecision.reject => AiCandidateReviewStatus.rejected,
+    };
+    return AiExtractionReview(
+      homeId: candidate.homeId,
+      extractionId: candidate.extractionId,
+      kind: AiExtractionKind.stockPhoto,
+      candidates: <AiReviewCandidate>[
+        AiReviewCandidate(
+          homeId: candidate.homeId,
+          extractionId: candidate.extractionId,
+          position: candidate.position,
+          type: candidate.type,
+          label: candidate.label,
+          status: status,
+          revision: candidate.revision + 1,
+        ),
+      ],
+    );
+  }
+}
+
 final class _InventoryRepository implements InventoryProductCreationRepository {
   final _items = StreamController<List<InventoryItem>>.broadcast();
   final _sessions = StreamController<StockCountSession?>.broadcast();
@@ -602,6 +759,8 @@ final class _InventoryRepository implements InventoryProductCreationRepository {
   bool throwAfterCatalogProjection = false;
   bool throwAfterPrivateProjection = false;
   bool throwAfterNextOpenSessionProjection = false;
+  bool throwBeforeNextOpenSessionProjection = false;
+  List<String>? lifecycleEvents;
 
   void emitItems(List<InventoryItem> items) {
     currentItems = List<InventoryItem>.of(items);
@@ -710,6 +869,13 @@ final class _InventoryRepository implements InventoryProductCreationRepository {
 
   @override
   Future<void> saveCountSession(StockCountSession session) async {
+    if (session.status == CountSessionStatus.open && session.lines.isNotEmpty) {
+      lifecycleEvents?.add('inventory:photo:${session.lines.last.photoId}');
+      if (throwBeforeNextOpenSessionProjection) {
+        throwBeforeNextOpenSessionProjection = false;
+        throw StateError('simulated count queue failure');
+      }
+    }
     saved.add(session);
     _sessions.add(session.status == CountSessionStatus.open ? session : null);
     if (session.status == CountSessionStatus.open &&
@@ -814,9 +980,10 @@ final class _Gateway implements AiProviderGateway {
         schemaVersion: request.schemaVersion,
         classification: StockImageClassification.pantryStock,
         candidates: <StockCandidateProposal>[
-          _candidate('candidate-1'),
-          if (duplicateCandidates) _candidate('candidate-2'),
-          if (distinctCandidates) _candidate('candidate-2', name: 'Beans'),
+          _candidate('candidate-1', position: 0),
+          if (duplicateCandidates) _candidate('candidate-2', position: 1),
+          if (distinctCandidates)
+            _candidate('candidate-2', position: 1, name: 'Beans'),
         ],
         warnings: const <String>[],
       ),
@@ -831,21 +998,32 @@ final class _Gateway implements AiProviderGateway {
     );
   }
 
-  StockCandidateProposal _candidate(String id, {String name = 'Rice'}) =>
-      StockCandidateProposal(
-        candidateId: id,
-        brand: const ExtractedField<String>(value: 'Brand', confidence: 0.9),
-        productName: ExtractedField<String>(value: name, confidence: 0.9),
-        variant: const ExtractedField<String>(value: null, confidence: 0),
-        packDescription: const ExtractedField<String>(
-          value: '1 kg',
-          confidence: 0.9,
-        ),
-        quantityMinimum: 2,
-        quantityMaximum: 2,
-        confidence: 0.9,
-        warnings: const <String>[],
-      );
+  StockCandidateProposal _candidate(
+    String id, {
+    required int position,
+    String name = 'Rice',
+  }) => StockCandidateProposal(
+    candidateId: id,
+    brand: const ExtractedField<String>(value: 'Brand', confidence: 0.9),
+    productName: ExtractedField<String>(value: name, confidence: 0.9),
+    variant: const ExtractedField<String>(value: null, confidence: 0),
+    packDescription: const ExtractedField<String>(
+      value: '1 kg',
+      confidence: 0.9,
+    ),
+    quantityMinimum: 2,
+    quantityMaximum: 2,
+    confidence: 0.9,
+    warnings: const <String>[],
+    serverReview: route == AiGatewayRoute.serverProxyCloud
+        ? StockCandidateServerReviewBinding(
+            extractionId: 'proposal-1',
+            position: position,
+            revision: 1,
+            status: StockCandidateServerReviewStatus.pending,
+          )
+        : null,
+  );
 }
 
 final InventoryItem _item = InventoryItem(

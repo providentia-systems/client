@@ -89,10 +89,35 @@ extension StockPhotoCountLifecycle on StockPhotoCountController {
       .trim()
       .replaceAll(RegExp(r'\s+'), ' ');
 
+  AiReviewCandidate? _serverCandidate(StockCandidateProposal proposal) {
+    final binding = proposal.serverReview;
+    if (binding == null) return null;
+    final label = proposal.productName.value?.trim().isNotEmpty == true
+        ? proposal.productName.value!.trim()
+        : 'Stock candidate ${binding.position + 1}';
+    return AiReviewCandidate(
+      homeId: homeId,
+      extractionId: binding.extractionId,
+      position: binding.position,
+      type: AiCandidateType.stockItem,
+      label: label,
+      status: switch (binding.status) {
+        StockCandidateServerReviewStatus.pending =>
+          AiCandidateReviewStatus.pending,
+        StockCandidateServerReviewStatus.accepted =>
+          AiCandidateReviewStatus.accepted,
+        StockCandidateServerReviewStatus.rejected =>
+          AiCandidateReviewStatus.rejected,
+      },
+      revision: binding.revision,
+    );
+  }
+
   void _updateCandidate(
     String candidateId,
-    StockPhotoCandidateReview Function(StockPhotoCandidateReview) update,
-  ) {
+    StockPhotoCandidateReview Function(StockPhotoCandidateReview) update, {
+    bool preserveBusy = false,
+  }) {
     final candidates = _state.candidates
         .map(
           (candidate) => candidate.proposal.candidateId == candidateId
@@ -100,7 +125,10 @@ extension StockPhotoCountLifecycle on StockPhotoCountController {
               : candidate,
         )
         .toList(growable: false);
-    _setReviewState(candidates: candidates);
+    _setReviewState(
+      candidates: candidates,
+      candidateBusyId: preserveBusy ? _state.candidateBusyId : null,
+    );
   }
 
   (List<StockCandidateProposal>, int) _deduplicateCandidates(
