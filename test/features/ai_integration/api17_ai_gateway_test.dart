@@ -344,8 +344,9 @@ void main() {
             final body = latin1.decode(request.bodyBytes, allowInvalid: true);
             expect(
               body.indexOf('name="image"'),
-              lessThan(body.indexOf('name="images"')),
+              lessThan(body.indexOf('name="images[]"')),
             );
+            expect(body, isNot(contains('name="images"')));
             expect(body, contains('name="targetId"'));
             expect(body, contains('count-session-1'));
             return _json(
