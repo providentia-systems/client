@@ -58,6 +58,7 @@ void main() {
       );
 
       final link = await service.submit(
+        submissionId: _submissionId,
         product: privateProduct,
         preview: proposal,
         explicitlyConsented: true,
@@ -69,11 +70,13 @@ void main() {
       expect(link.homeProductId, _homeProductId);
       expect(submitted, isNotNull);
       expect(submitted!.keys.toSet(), <String>{
+        'submissionId',
         'type',
         'sourceEntityId',
         'expectedConsentRevision',
         'payload',
       });
+      expect(submitted!['submissionId'], _submissionId);
       expect(submitted!['type'], 'product_identity');
       expect(submitted!['sourceEntityId'], _homeProductId);
       expect(submitted!['expectedConsentRevision'], 4);
@@ -159,6 +162,7 @@ void main() {
 
     await expectLater(
       repository.submit(
+        submissionId: _submissionId,
         homeId: _homeId,
         homeProductId: _homeProductId,
         proposal: proposal,
@@ -190,6 +194,7 @@ const String _otherHomeId = '01912345-6789-7abc-8def-1123456789ab';
 const String _homeProductId = '01912345-6789-7abc-8def-2123456789ab';
 const String _categoryId = '01912345-6789-7abc-8def-3123456789ab';
 const String _contributionId = '01912345-6789-7abc-8def-4123456789ab';
+const String _submissionId = '01912345-6789-4abc-8def-5123456789ab';
 
 ProvidentiaApiClient _client(
   Future<http.Response> Function(http.Request request) handler,

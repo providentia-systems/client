@@ -41,6 +41,7 @@ final class GeneratedCatalogContributionRepository
 
   @override
   Future<CatalogSubmissionLink> submit({
+    required String submissionId,
     required String homeId,
     required String homeProductId,
     required SanitizedCatalogProposal proposal,
@@ -57,6 +58,7 @@ final class GeneratedCatalogContributionRepository
       final object = (await _client.createCatalogContribution(
         homeId: homeId,
         body: <String, Object?>{
+          'submissionId': submissionId,
           'type': 'product_identity',
           'sourceEntityId': homeProductId,
           'expectedConsentRevision': consent.revision,

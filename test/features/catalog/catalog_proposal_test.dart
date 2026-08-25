@@ -73,6 +73,7 @@ void main() {
 
       expect(
         () => service.submit(
+          submissionId: _submissionId,
           product: product,
           preview: proposal,
           explicitlyConsented: false,
@@ -84,6 +85,7 @@ void main() {
       return expectLater(
         service
             .submit(
+              submissionId: _submissionId,
               product: product,
               preview: proposal,
               explicitlyConsented: true,
@@ -171,11 +173,13 @@ final class _ProposalRepository implements CatalogProposalRepository {
 
   @override
   Future<CatalogSubmissionLink> submit({
+    required String submissionId,
     required String homeId,
     required String homeProductId,
     required SanitizedCatalogProposal proposal,
   }) async {
     submissionCount++;
+    expect(submissionId, _submissionId);
     expect(proposal.toJson(), isNot(contains('homeId')));
     return CatalogSubmissionLink(
       homeId: homeId,
@@ -185,3 +189,5 @@ final class _ProposalRepository implements CatalogProposalRepository {
     );
   }
 }
+
+const String _submissionId = '01912345-6789-4abc-8def-0123456789ab';

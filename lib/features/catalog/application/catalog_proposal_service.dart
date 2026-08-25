@@ -1,7 +1,9 @@
+import 'package:providentia/core/security/uuid_v4.dart';
 import 'package:providentia/features/catalog/domain/catalog_models.dart';
 
 abstract interface class CatalogProposalRepository {
   Future<CatalogSubmissionLink> submit({
+    required String submissionId,
     required String homeId,
     required String homeProductId,
     required SanitizedCatalogProposal proposal,
@@ -70,6 +72,7 @@ final class CatalogProposalService {
   }
 
   Future<CatalogSubmissionLink> submit({
+    required String submissionId,
     required PrivateProduct product,
     required SanitizedCatalogProposal preview,
     required bool explicitlyConsented,
@@ -77,7 +80,11 @@ final class CatalogProposalService {
     if (!explicitlyConsented) {
       throw const CatalogProposalConsentRequiredException();
     }
+    if (!isUuid(submissionId)) {
+      throw ArgumentError.value(submissionId, 'submissionId', 'must be a UUID');
+    }
     return _repository.submit(
+      submissionId: submissionId,
       homeId: product.homeId,
       homeProductId: product.homeProductId,
       proposal: preview,

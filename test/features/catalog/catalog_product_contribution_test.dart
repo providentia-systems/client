@@ -20,6 +20,7 @@ void main() {
         homeId: _homeId,
         locale: 'en-NA',
         canContribute: true,
+        submissionIdGenerator: () => _submissionId,
       );
       addTearDown(controller.dispose);
 
@@ -58,6 +59,7 @@ void main() {
       expect(repository.submissions, hasLength(1));
       expect(repository.submissions.single.homeId, _homeId);
       expect(repository.submissions.single.homeProductId, _productId);
+      expect(repository.submissions.single.submissionId, _submissionId);
       expect(controller.status, CatalogProductContributionStatus.submitted);
     },
   );
@@ -197,6 +199,42 @@ void main() {
     },
   );
 
+  test('an ambiguous retry reuses the exact submission intent UUID', () async {
+    final repository = _ContributionRepository(
+      submitFailure: const CatalogContributionUnavailableException(),
+    );
+    final controller = CatalogProductContributionController(
+      consentRepository: repository,
+      proposalService: CatalogProposalService(repository),
+      homeId: _homeId,
+      locale: 'en-NA',
+      canContribute: true,
+      submissionIdGenerator: () => _submissionId,
+    );
+    addTearDown(controller.dispose);
+
+    await controller.loadConsent();
+    controller.selectProduct(privateProductIdentityPreview(_inventoryItem()));
+    controller.setExplicitConsent(true);
+    await controller.submit();
+
+    expect(controller.status, CatalogProductContributionStatus.offline);
+    expect(controller.pendingSubmissionId, _submissionId);
+    expect(repository.attemptedSubmissionIds, <String>[_submissionId]);
+
+    repository.submitFailure = null;
+    await controller.loadConsent();
+    controller.setExplicitConsent(true);
+    await controller.submit();
+
+    expect(repository.attemptedSubmissionIds, <String>[
+      _submissionId,
+      _submissionId,
+    ]);
+    expect(controller.status, CatalogProductContributionStatus.submitted);
+    expect(controller.pendingSubmissionId, isNull);
+  });
+
   testWidgets(
     'production route requires checkbox and clears through registry',
     (tester) async {
@@ -258,6 +296,7 @@ void main() {
 
 const String _homeId = 'home-a';
 const String _productId = 'product-a';
+const String _submissionId = '01912345-6789-4abc-8def-0123456789ab';
 
 InventoryItem _inventoryItem() => InventoryItem(
   id: _productId,
@@ -283,11 +322,13 @@ InventoryItem _legacyInventoryItem() => InventoryItem(
 
 final class _Submission {
   const _Submission({
+    required this.submissionId,
     required this.homeId,
     required this.homeProductId,
     required this.proposal,
   });
 
+  final String submissionId;
   final String homeId;
   final String homeProductId;
   final SanitizedCatalogProposal proposal;
@@ -303,8 +344,9 @@ final class _ContributionRepository
 
   final bool identityConsent;
   final Exception? loadFailure;
-  final Exception? submitFailure;
+  Exception? submitFailure;
   int consentLoads = 0;
+  final List<String> attemptedSubmissionIds = <String>[];
   final List<_Submission> submissions = <_Submission>[];
 
   @override
@@ -330,14 +372,17 @@ final class _ContributionRepository
 
   @override
   Future<CatalogSubmissionLink> submit({
+    required String submissionId,
     required String homeId,
     required String homeProductId,
     required SanitizedCatalogProposal proposal,
   }) async {
+    attemptedSubmissionIds.add(submissionId);
     final failure = submitFailure;
     if (failure != null) throw failure;
     submissions.add(
       _Submission(
+        submissionId: submissionId,
         homeId: homeId,
         homeProductId: homeProductId,
         proposal: proposal,
