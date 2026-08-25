@@ -8,11 +8,14 @@ enum CountSource { manual, photo }
 
 enum InventoryProductCreationDisposition { queued, synchronized }
 
+enum InventoryCategorySource { global, home }
+
 final class PrivateHomeProductDraft {
   PrivateHomeProductDraft({
     required this.homeId,
     required this.privateName,
     this.originalPackText,
+    this.homeCategoryId,
   }) {
     _requireText(homeId, 'homeId');
     final name = privateName.trim();
@@ -30,11 +33,19 @@ final class PrivateHomeProductDraft {
         'must not exceed 191 characters',
       );
     }
+    if (homeCategoryId != null && homeCategoryId!.trim().isEmpty) {
+      throw ArgumentError.value(
+        homeCategoryId,
+        'homeCategoryId',
+        'must not be empty',
+      );
+    }
   }
 
   final String homeId;
   final String privateName;
   final String? originalPackText;
+  final String? homeCategoryId;
 }
 
 final class CatalogHomeProductDraft {
@@ -131,6 +142,9 @@ final class InventoryItem {
     this.isHomeProduct = false,
     this.productId,
     this.packId,
+    this.categoryId,
+    this.homeCategoryId,
+    this.categorySource,
   }) : aliases = List<String>.unmodifiable(aliases) {
     _requireText(id, 'id');
     _requireText(homeId, 'homeId');
@@ -153,6 +167,9 @@ final class InventoryItem {
   final bool isHomeProduct;
   final String? productId;
   final String? packId;
+  final String? categoryId;
+  final String? homeCategoryId;
+  final InventoryCategorySource? categorySource;
 
   bool get isCounted => currentQuantity != null;
 
@@ -175,6 +192,9 @@ final class InventoryItem {
       isHomeProduct: isHomeProduct,
       productId: productId,
       packId: packId,
+      categoryId: categoryId,
+      homeCategoryId: homeCategoryId,
+      categorySource: categorySource,
     );
   }
 }
