@@ -45,6 +45,7 @@ verify_linux_deb() {
 dependencies=$(dpkg-deb --field "$package" Depends)
 dependencies=${dependencies// /}
 for dependency in \
+  libegl1 \
   libgtk-3-0 \
   libsecret-1-0 \
   libgstreamer1.0-0 \
