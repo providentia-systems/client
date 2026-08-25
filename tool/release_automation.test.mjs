@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 import assert from 'node:assert/strict';
-import {readFile, stat} from 'node:fs/promises';
+import {chmod, mkdtemp, mkdir, readFile, rm, stat, writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
@@ -160,6 +161,53 @@ test('agent bootstrap repairs SDK corruption and pins its executable tools', asy
   assert.match(lockWorkflow, /for attempt in 1 2 3/u);
   assert.match(lockWorkflow, /\.\/gradlew --no-daemon :generateLockfiles/u);
   assert.match(lockWorkflow, /failed after three bounded attempts/u);
+});
+
+test('Linux plugin linkage resolves the bundled Flutter sibling library', async (context) => {
+  const fixtureRoot = await mkdtemp(path.join(tmpdir(), 'providentia-linkage-'));
+  context.after(() => rm(fixtureRoot, {recursive: true, force: true}));
+  const fixtureBin = path.join(fixtureRoot, 'bin');
+  const pluginRoot = path.join(fixtureRoot, 'bundle', 'lib');
+  const plugin = path.join(pluginRoot, 'libfile_selector_linux_plugin.so');
+  const flutterLibrary = path.join(pluginRoot, 'libflutter_linux_gtk.so');
+  await mkdir(fixtureBin, {recursive: true});
+  await mkdir(pluginRoot, {recursive: true});
+  await writeFile(plugin, 'fixture plugin');
+  await writeFile(flutterLibrary, 'fixture sibling');
+  const fakeLdd = path.join(fixtureBin, 'ldd');
+  await writeFile(
+    fakeLdd,
+    `#!/usr/bin/env bash
+set -euo pipefail
+plugin_root=$(dirname -- "$1")
+if [[ "\${LD_LIBRARY_PATH:-}" == "$plugin_root"* && -f "$plugin_root/libflutter_linux_gtk.so" ]]; then
+  echo "libflutter_linux_gtk.so => $plugin_root/libflutter_linux_gtk.so"
+else
+  echo 'libflutter_linux_gtk.so => not found'
+fi
+`,
+  );
+  await chmod(fakeLdd, 0o755);
+  const verifier = path.join(root, 'tool/release/verify_linux_deb.sh');
+  const environment = {
+    ...process.env,
+    PATH: `${fixtureBin}:${process.env.PATH}`,
+  };
+
+  const resolved = spawnSync(
+    'bash',
+    ['-c', 'source "$1"; verify_linkage "$2" "$3"', 'fixture', verifier, plugin, pluginRoot],
+    {encoding: 'utf8', env: environment},
+  );
+  assert.equal(resolved.status, 0, resolved.stderr);
+
+  const unresolved = spawnSync(
+    'bash',
+    ['-c', 'source "$1"; verify_linkage "$2"', 'fixture', verifier, plugin],
+    {encoding: 'utf8', env: environment},
+  );
+  assert.equal(unresolved.status, 66);
+  assert.match(unresolved.stderr, /libflutter_linux_gtk\.so => not found/u);
 });
 
 test('browser dispatch input never enters a shell script by interpolation', async () => {

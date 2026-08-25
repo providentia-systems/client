@@ -1,12 +1,33 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if (( $# != 1 )); then
-  echo 'Usage: verify_linux_deb.sh DEBIAN_PACKAGE' >&2
-  exit 64
-fi
+verify_linkage() {
+  local native_file=$1
+  local library_path=${2:-}
+  local linkage
+  if [[ -n "$library_path" ]]; then
+    linkage=$(
+      LD_LIBRARY_PATH="$library_path${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        ldd "$native_file"
+    )
+  else
+    linkage=$(ldd "$native_file")
+  fi
+  if grep -q 'not found' <<< "$linkage"; then
+    echo "Unresolved native dependency in $native_file:" >&2
+    grep 'not found' <<< "$linkage" >&2
+    exit 66
+  fi
+}
 
-package=$(realpath "$1")
+verify_linux_deb() {
+  if (( $# != 1 )); then
+    echo 'Usage: verify_linux_deb.sh DEBIAN_PACKAGE' >&2
+    exit 64
+  fi
+
+  local package
+  package=$(realpath "$1")
 [[ -f "$package" ]] || {
   echo "Debian package does not exist: $package" >&2
   exit 66
@@ -49,21 +70,14 @@ plugin_root="$extraction_root/opt/providentia/lib"
   echo 'Installed desktop camera plugin is missing.' >&2
   exit 66
 }
-
-verify_linkage() {
-  local native_file=$1
-  local linkage
-  linkage=$(ldd "$native_file")
-  if grep -q 'not found' <<< "$linkage"; then
-    echo "Unresolved native dependency in $native_file:" >&2
-    grep 'not found' <<< "$linkage" >&2
-    exit 66
-  fi
+[[ -f "$plugin_root/libflutter_linux_gtk.so" ]] || {
+  echo 'Installed Flutter Linux runtime is missing.' >&2
+  exit 66
 }
 
 verify_linkage "$binary"
 while IFS= read -r -d '' plugin; do
-  verify_linkage "$plugin"
+  verify_linkage "$plugin" "$plugin_root"
 done < <(find "$plugin_root" -type f -name '*.so' -print0)
 
 if [[ "${PROVIDENTIA_LINUX_LAUNCH_SMOKE:-false}" == true ]]; then
@@ -79,4 +93,9 @@ if [[ "${PROVIDENTIA_LINUX_LAUNCH_SMOKE:-false}" == true ]]; then
     echo "Providentia exited before the 15-second launch smoke completed (status $launch_status)." >&2
     exit 70
   }
+fi
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  verify_linux_deb "$@"
 fi
