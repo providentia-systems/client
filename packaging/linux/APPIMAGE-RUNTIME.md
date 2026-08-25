@@ -5,6 +5,7 @@ runtime rather than embedding a second plugin registry. Install these host
 packages before launching it:
 
 - `libegl1`
+- `libgles2`
 - `libgtk-3-0`
 - `libsecret-1-0`
 - `libgstreamer1.0-0`

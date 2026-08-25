@@ -81,6 +81,7 @@ test('platform signing is real and independently verified', async () => {
   assert.match(linuxPackage, /ldd "\$camera_plugin"/u);
   for (const dependency of [
     'libegl1',
+    'libgles2',
     'libgstreamer1.0-0',
     'libgstreamer-plugins-base1.0-0',
     'gstreamer1.0-plugins-base',
@@ -95,6 +96,8 @@ test('platform signing is real and independently verified', async () => {
   assert.match(linuxPackage, /PROVIDENTIA_LINUX_PACKAGE_FORMATS/u);
   assert.match(linuxPackageVerification, /libcamera_desktop_plugin\.so/u);
   assert.match(linuxPackageVerification, /PROVIDENTIA_LINUX_LAUNCH_SMOKE/u);
+  assert.match(linuxPackageVerification, /libEGL\.so\.1/u);
+  assert.match(linuxPackageVerification, /libGLESv2\.so\.2/u);
   assert.match(flutterCi, /Package Linux Debian proof/u);
   assert.match(flutterCi, /ubuntu:24\.04/u);
   assert.match(flutterCi, /providentia-linux-debian-package-proof/u);
@@ -209,6 +212,42 @@ fi
   );
   assert.equal(unresolved.status, 66);
   assert.match(unresolved.stderr, /libflutter_linux_gtk\.so => not found/u);
+});
+
+test('Linux launch smoke verifies dynamically loaded graphics libraries', async (context) => {
+  const fixtureRoot = await mkdtemp(path.join(tmpdir(), 'providentia-loader-'));
+  context.after(() => rm(fixtureRoot, {recursive: true, force: true}));
+  const fakeLddConfig = path.join(fixtureRoot, 'ldconfig');
+  await writeFile(
+    fakeLddConfig,
+    `#!/usr/bin/env bash
+if [[ "\${PROVIDENTIA_TEST_GLES:-present}" == present ]]; then
+  echo '  libGLESv2.so.2 (libc6,x86-64) => /lib/libGLESv2.so.2'
+fi
+echo '  libEGL.so.1 (libc6,x86-64) => /lib/libEGL.so.1'
+`,
+  );
+  await chmod(fakeLddConfig, 0o755);
+  const verifier = path.join(root, 'tool/release/verify_linux_deb.sh');
+  const environment = {...process.env, PATH: `${fixtureRoot}:${process.env.PATH}`};
+
+  const resolved = spawnSync(
+    'bash',
+    ['-c', 'source "$1"; verify_loader_library "$2"', 'fixture', verifier, 'libGLESv2.so.2'],
+    {encoding: 'utf8', env: environment},
+  );
+  assert.equal(resolved.status, 0, resolved.stderr);
+
+  const missing = spawnSync(
+    'bash',
+    ['-c', 'source "$1"; verify_loader_library "$2"', 'fixture', verifier, 'libGLESv2.so.2'],
+    {
+      encoding: 'utf8',
+      env: {...environment, PROVIDENTIA_TEST_GLES: 'missing'},
+    },
+  );
+  assert.equal(missing.status, 66);
+  assert.match(missing.stderr, /libGLESv2\.so\.2/u);
 });
 
 test('Linux resolution excludes Android JNI native assets', async () => {

@@ -91,7 +91,7 @@ metadata; a detached package signature is not represented as an APT repository
 signature.
 
 Linux camera capture uses the distribution GStreamer registry. The Debian
-package declares `libegl1`, `libsecret-1-0`, `libgstreamer1.0-0`,
+package declares `libegl1`, `libgles2`, `libsecret-1-0`, `libgstreamer1.0-0`,
 `libgstreamer-plugins-base1.0-0`,
 `gstreamer1.0-plugins-base`, and `gstreamer1.0-plugins-good`; the x86-64
 AppImage documents the same required
