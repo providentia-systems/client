@@ -9,6 +9,7 @@ on:
       - 'task/**'
       - 'feature/**'
       - 'phase-*/**'
+      - 'codex/**'
   workflow_dispatch:
 
 permissions:
