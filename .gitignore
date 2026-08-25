@@ -4,6 +4,8 @@
 .flutter-plugins-dependencies
 .packages
 .pub-cache/
+.agent-env
+.agent-tools/
 .pub/
 build/
 coverage/

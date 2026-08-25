@@ -52,6 +52,15 @@ installation, refresh, and native dependency commands. FVM/asdf and the
 checksum-verifying scripts in `tool/` retain the exact baseline for
 reproducible CI and release investigation.
 
+Fresh Linux development agents can provision and validate themselves with the
+vendor-neutral bootstrap documented in
+[agent development](docs/agent-development.md):
+
+```bash
+bash tools/agent-setup.sh
+source .agent-env
+```
+
 Then run:
 
 ```bash
