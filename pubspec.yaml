@@ -38,5 +38,11 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
 
+dependency_overrides:
+  # path_provider_android 2.3.x uses Android JNI native assets. Flutter's
+  # platform package graph otherwise carries libdartjni into Linux bundles,
+  # despite the homeowner client having no Linux JNI runtime edge.
+  path_provider_android: 2.2.23
+
 flutter:
   uses-material-design: true

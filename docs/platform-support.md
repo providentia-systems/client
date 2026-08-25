@@ -38,3 +38,9 @@ The first Linux release lane is x86-64. Its desktop camera plugin uses the
 host's GTK and GStreamer runtime; exact AppImage host packages and Debian
 dependencies are versioned in `tools/agent-requirements.json` and
 `packaging/linux/APPIMAGE-RUNTIME.md`.
+
+`path_provider_android` is deliberately locked to 2.2.23, the last reviewed
+pre-JNI implementation. Its 2.3.x Android native-asset graph otherwise places
+`libdartjni.so` in Linux bundles even though the desktop client has no JNI
+runtime edge. Upgrade that pin only after Android and clean-host Linux package
+gates prove the JNI packages and library remain absent.

@@ -210,6 +210,26 @@ fi
   assert.match(unresolved.stderr, /libflutter_linux_gtk\.so => not found/u);
 });
 
+test('Linux resolution excludes Android JNI native assets', async () => {
+  const pubspec = await readFile(path.join(root, 'pubspec.yaml'), 'utf8');
+  const lock = await readFile(path.join(root, 'pubspec.lock'), 'utf8');
+  const packager = await readFile(path.join(root, 'tool/release/package_linux.sh'), 'utf8');
+  const verifier = await readFile(
+    path.join(root, 'tool/release/verify_linux_deb.sh'),
+    'utf8',
+  );
+  assert.match(pubspec, /path_provider_android:\s+2\.2\.23/u);
+  assert.match(
+    lock,
+    /^  path_provider_android:\n[\s\S]*?^    version: "2\.2\.23"$/mu,
+  );
+  for (const packageName of ['jni', 'jni_flutter', 'jni_util']) {
+    assert.doesNotMatch(lock, new RegExp(`^  ${packageName}:$`, 'mu'));
+  }
+  assert.match(packager, /libdartjni\.so/u);
+  assert.match(verifier, /libdartjni\.so/u);
+});
+
 test('browser dispatch input never enters a shell script by interpolation', async () => {
   const relative = '.github/workflows/browser-acceptance.yml';
   const workflow = await readFile(path.join(root, relative), 'utf8');
