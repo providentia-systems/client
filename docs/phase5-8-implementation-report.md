@@ -1,5 +1,8 @@
 # Phase 5–8 implementation report
 
+> Historical API 1.13.2 implementation checkpoint. It is not the current
+> contract or release declaration; see `docs/contracts.md` and `README.md`.
+
 Status: client implementation and testing readiness against API `1.13.2`,
 SHA-256
 `1b6b7f09240ace0ba6b7e7279259687569dfbacb112ea7dbd4094fe27ccd0108`.

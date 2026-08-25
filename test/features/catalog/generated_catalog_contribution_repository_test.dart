@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:providentia/features/catalog/application/catalog_proposal_service.dart';
 import 'package:providentia/features/catalog/domain/catalog_models.dart';
+import 'package:providentia/features/catalog/domain/catalog_store_price_models.dart';
 import 'package:providentia/features/catalog/infrastructure/generated_catalog_contribution_repository.dart';
 import 'package:providentia_api_client/providentia_api_client.dart';
 
@@ -61,10 +62,11 @@ void main() {
         submissionId: _submissionId,
         product: privateProduct,
         preview: proposal,
+        expectedConsentRevision: 4,
         explicitlyConsented: true,
       );
 
-      expect(requestCount, 2);
+      expect(requestCount, 1);
       expect(link.proposalId, _contributionId);
       expect(link.homeId, _homeId);
       expect(link.homeProductId, _homeProductId);
@@ -146,6 +148,167 @@ void main() {
     },
   );
 
+  test('store price uses the exact consent-bound API 1.18 shape', () async {
+    Map<String, Object?>? submitted;
+    final repository = GeneratedCatalogContributionRepository(
+      _client((request) async {
+        if (request.method == 'GET') {
+          return _json(
+            _consentJson(revision: 7, identity: false, storePrices: true),
+          );
+        }
+        submitted = _requestObject(request);
+        return _json(<String, Object?>{
+          'id': _contributionId,
+          'contributionType': 'store_price',
+          'payload': submitted!['payload'],
+          'status': 'pending',
+          'revision': 1,
+          'createdAt': '2026-08-25T12:00:00Z',
+        }, status: 201);
+      }),
+    );
+    final observation = CatalogStorePriceObservation(
+      source: CatalogStorePriceSource(
+        homeId: _homeId,
+        homeProductId: _homeProductId,
+        productId: _productId,
+        packId: _packId,
+        displayName: 'Rolled oats',
+        packText: '1 kg bag',
+      ),
+      storeName: 'Corner Shop',
+      storeLocation: 'Windhoek West',
+      price: '12.99',
+      currency: 'NAD',
+      observedOn: DateTime.utc(2026, 8, 24),
+    );
+
+    final receipt = await repository.submitStorePrice(
+      submissionId: _submissionId,
+      expectedConsentRevision: 7,
+      observation: observation,
+    );
+
+    expect(submitted, <String, Object?>{
+      'submissionId': _submissionId,
+      'type': 'store_price',
+      'sourceEntityId': _homeProductId,
+      'expectedConsentRevision': 7,
+      'payload': <String, Object?>{
+        'productId': _productId,
+        'packId': _packId,
+        'storeName': 'Corner Shop',
+        'storeLocation': 'Windhoek West',
+        'price': '12.99',
+        'currency': 'NAD',
+        'observedOn': '2026-08-24',
+      },
+    });
+    expect(receipt.contributionId, _contributionId);
+    expect(receipt.type, CatalogContributionType.storePrice);
+    expect(receipt.sourceEntityId, _homeProductId);
+    expect(receipt.revision, 1);
+  });
+
+  test(
+    'store price fails before POST when server opt-in is disabled',
+    () async {
+      var requestCount = 0;
+      final repository = GeneratedCatalogContributionRepository(
+        _client((request) async {
+          requestCount++;
+          return _json(_consentJson(revision: 3, identity: false));
+        }),
+      );
+      final observation = CatalogStorePriceObservation(
+        source: CatalogStorePriceSource(
+          homeId: _homeId,
+          homeProductId: _homeProductId,
+          productId: _productId,
+          packId: _packId,
+          displayName: 'Rolled oats',
+          packText: '1 kg bag',
+        ),
+        storeName: 'Corner Shop',
+        price: '12.99',
+        currency: 'NAD',
+        observedOn: DateTime.utc(2026, 8, 24),
+      );
+
+      await expectLater(
+        repository.submitStorePrice(
+          submissionId: _submissionId,
+          expectedConsentRevision: 0,
+          observation: observation,
+        ),
+        throwsA(isA<CatalogServerConsentRequiredException>()),
+      );
+      expect(requestCount, 0);
+    },
+  );
+
+  for (final scenario in <({int status, String title, Matcher expected})>[
+    (
+      status: 401,
+      title: 'Authentication required',
+      expected: isA<CatalogContributionAuthenticationRequiredException>(),
+    ),
+    (
+      status: 403,
+      title: 'Forbidden',
+      expected: isA<CatalogContributionForbiddenException>(),
+    ),
+    (
+      status: 404,
+      title: 'Source home product not found',
+      expected: isA<CatalogContributionSourceUnavailableException>(),
+    ),
+    (
+      status: 409,
+      title: 'Catalog contribution conflict',
+      expected: isA<CatalogContributionConflictException>(),
+    ),
+    (
+      status: 409,
+      title: 'Catalog consent changed',
+      expected: isA<CatalogServerConsentRequiredException>(),
+    ),
+    (
+      status: 422,
+      title: 'Invalid store-price payload',
+      expected: isA<CatalogContributionValidationException>(),
+    ),
+  ]) {
+    test(
+      'store-price ${scenario.status} maps to a closed domain failure',
+      () async {
+        final repository = GeneratedCatalogContributionRepository(
+          _client((request) async {
+            if (request.method == 'GET') {
+              return _json(
+                _consentJson(revision: 7, identity: false, storePrices: true),
+              );
+            }
+            return _json(
+              _problem(scenario.status, scenario.title),
+              status: scenario.status,
+            );
+          }),
+        );
+
+        await expectLater(
+          repository.submitStorePrice(
+            submissionId: _submissionId,
+            expectedConsentRevision: 7,
+            observation: _storePriceObservation(),
+          ),
+          throwsA(scenario.expected),
+        );
+      },
+    );
+  }
+
   test('disabled or absent server consent prevents submission', () async {
     var requestCount = 0;
     final repository = GeneratedCatalogContributionRepository(
@@ -165,11 +328,12 @@ void main() {
         submissionId: _submissionId,
         homeId: _homeId,
         homeProductId: _homeProductId,
+        expectedConsentRevision: 0,
         proposal: proposal,
       ),
       throwsA(isA<CatalogServerConsentRequiredException>()),
     );
-    expect(requestCount, 1);
+    expect(requestCount, 0);
   });
 
   test('cross-home consent response fails closed', () async {
@@ -195,6 +359,8 @@ const String _homeProductId = '01912345-6789-7abc-8def-2123456789ab';
 const String _categoryId = '01912345-6789-7abc-8def-3123456789ab';
 const String _contributionId = '01912345-6789-7abc-8def-4123456789ab';
 const String _submissionId = '01912345-6789-4abc-8def-5123456789ab';
+const String _productId = '01912345-6789-4abc-8def-6123456789ab';
+const String _packId = '01912345-6789-4abc-8def-7123456789ab';
 
 ProvidentiaApiClient _client(
   Future<http.Response> Function(http.Request request) handler,
@@ -206,13 +372,37 @@ ProvidentiaApiClient _client(
 Map<String, Object?> _consentJson({
   required int revision,
   required bool identity,
+  bool storePrices = false,
 }) => <String, Object?>{
   'homeId': _homeId,
   'shareProductIdentity': identity,
   'shareProductImages': false,
-  'shareStorePrices': false,
+  'shareStorePrices': storePrices,
   'noticeVersion': 'catalog-sharing-v1',
   'revision': revision,
+};
+
+CatalogStorePriceObservation _storePriceObservation() =>
+    CatalogStorePriceObservation(
+      source: CatalogStorePriceSource(
+        homeId: _homeId,
+        homeProductId: _homeProductId,
+        productId: _productId,
+        packId: _packId,
+        displayName: 'Rolled oats',
+        packText: '1 kg bag',
+      ),
+      storeName: 'Corner Shop',
+      price: '12.99',
+      currency: 'NAD',
+      observedOn: DateTime.utc(2026, 8, 24),
+    );
+
+Map<String, Object?> _problem(int status, String title) => <String, Object?>{
+  'type': 'https://api.example.test/problems/catalog-contribution',
+  'title': title,
+  'status': status,
+  'requestId': 'request-catalog-contribution',
 };
 
 Map<String, Object?> _requestObject(http.Request request) {

@@ -36,37 +36,39 @@
   before package resolution.
 - Linux desktop setup must include Flutter's native build prerequisites plus
   Libsecret development and runtime packages for secure session storage.
-- Local login-link acceptance must explicitly verify the backend-hosted browser
-  approval origin as well as the Flutter web origins. The default loopback
-  handoff supplies `127.0.0.1:8080` and `localhost:8080` in the backend CORS
-  allowlist and requires a `303` capture smoke test before client onboarding.
+- Local login-link acceptance must explicitly verify the configured Flutter
+  homeowner app-link origin and JSON proof/review/decision APIs. The backend
+  serves no interactive approval page. The default loopback handoff keeps the
+  Flutter web origin in CORS and scrubs the approval fragment before review.
 
 Domain, app-store, and trademark due diligence remains mandatory before public
 launch. It does not reopen the owner-selected name.
 
-## Current integration note — 2026-08-11
+## Current integration note — 2026-08-25
 
-- The client pins the reviewed OpenAPI `1.13.2` boundary and generates 158
-  operations. Contract, lock, manifest, and generated Dart are
-  updated as one deliberate change.
+- The client pins the reviewed OpenAPI `1.18.0` boundary at SHA-256
+  `fb7f18cc8d2e0f7aaf3ec9f1bd3039316c6f44af0023110936778a8d616a6759`.
+  The canonical contract contains 177 operations; the default-deny homeowner
+  facade generates 145 and excludes every admin/operator/moderation method.
 - Product onboarding is email-only login-link authentication. The originating
-  client owns a private poll token, state, and PKCE verifier; the emailed link
-  can be approved in any browser; the originating client polls and exchanges.
-  A platform return link is only a convenience, never the authoritative
-  handoff, and session credentials do not appear in URLs.
+  client owns a private poll token, state, and PKCE verifier. The emailed
+  fragment-secret homeowner link opens this Flutter client, which proves,
+  reviews, and approves or denies through JSON APIs. The originating client
+  then polls and exchanges; session credentials never appear in URLs.
 - The backend creates a verified account only after approval. A new person gets
   exactly one editable `My home` and becomes its `owner`; an existing person
   restores the same account and memberships without another default home.
 - Web sessions use sliding 30-day inactivity and native sessions use sliding
   60-day inactivity, subject to backend enforcement. Signed-in devices and
   revocation are visible from the account screen.
-- Recipient invitations, home selection/settings/governance, and
-  platform-administrator management are composed client workflows.
-- Catalog sharing consent, explicit per-item product-identity contribution,
-  validated icon metadata, and attribution-free platform-role moderation are
-  production-composed behind independent home-permission and platform-role
-  gates. Consent and item selection do not submit; the server consent plus a
-  fresh per-item checkbox are required. Live backend acceptance remains open.
+- Recipient invitations and home selection/settings/governance are composed
+  homeowner workflows. Platform administration exists only in the separate
+  Admin Flutter client.
+- Catalog sharing consent and explicit product-identity/store-price
+  contributions are production-composed behind home permissions. Consent and
+  selection do not submit; server opt-in, exact preview, and a fresh checkbox
+  are required. A durable submission UUID is bound to the exact payload and
+  consent revision before transport.
 - Home roles (`owner`, `manager`, `member`, `viewer`) and platform roles are
   separate authorization domains. A platform role grants no private home
   access.

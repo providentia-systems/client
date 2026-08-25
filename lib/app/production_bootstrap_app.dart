@@ -45,9 +45,14 @@ import 'package:providentia/features/ai_integration/presentation/server_ai_works
 import 'package:providentia/features/catalog/application/catalog_product_contribution_controller.dart';
 import 'package:providentia/features/catalog/application/catalog_proposal_service.dart';
 import 'package:providentia/features/catalog/application/catalog_sharing_controller.dart';
+import 'package:providentia/features/catalog/application/catalog_store_price_contribution_controller.dart';
+import 'package:providentia/features/catalog/application/catalog_store_price_service.dart';
+import 'package:providentia/features/catalog/application/catalog_submission_intent.dart';
 import 'package:providentia/features/catalog/infrastructure/generated_catalog_contribution_repository.dart';
+import 'package:providentia/features/catalog/infrastructure/platform_catalog_submission_intent_store.dart';
 import 'package:providentia/features/catalog/presentation/catalog_product_contribution_page.dart';
 import 'package:providentia/features/catalog/presentation/catalog_sharing_page.dart';
+import 'package:providentia/features/catalog/presentation/catalog_store_price_contribution_page.dart';
 import 'package:providentia/features/data_governance/application/data_governance_service.dart';
 import 'package:providentia/features/data_governance/domain/data_governance_models.dart';
 import 'package:providentia/features/data_governance/infrastructure/generated_data_governance_repository.dart';
@@ -934,6 +939,8 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
             homesController: widget.homesController,
             catalogSharingPageBuilder: widget.catalogSharingPageBuilder,
             catalogContributionPageBuilder: _catalogContributionPageBuilder,
+            catalogStorePriceContributionPageBuilder:
+                _catalogStorePriceContributionPageBuilder,
             householdReportsPageBuilder: widget.householdReportsPageBuilder,
             householdAiPageBuilder: _connectedHouseholdAiPageBuilder,
             dataGovernancePageBuilder: widget.dataGovernancePageBuilder,
@@ -953,6 +960,22 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
         inventoryController: _features.inventory,
         homeId: widget.home.id,
         locale: widget.home.locale,
+        protectedRouteRegistry: widget.protectedRouteRegistry,
+        onAuthorizationLost: widget.onCatalogAuthorizationLost,
+      );
+    };
+  }
+
+  WidgetBuilder? get _catalogStorePriceContributionPageBuilder {
+    if (!widget.canContributeCatalog) return null;
+    return (_) {
+      final repository = GeneratedCatalogContributionRepository(widget.api);
+      return ProductionCatalogStorePriceContributionRoute(
+        consentRepository: repository,
+        storePriceRepository: repository,
+        inventoryController: _features.inventory,
+        homeId: widget.home.id,
+        defaultCurrency: widget.home.currency,
         protectedRouteRegistry: widget.protectedRouteRegistry,
         onAuthorizationLost: widget.onCatalogAuthorizationLost,
       );
@@ -1245,6 +1268,9 @@ final class _ProductionCatalogProductContributionRouteState
       homeId: widget.homeId,
       locale: widget.locale,
       canContribute: true,
+      submissionIntents: CatalogSubmissionIntentCoordinator(
+        store: PlatformCatalogSubmissionIntentStore(),
+      ),
       onAuthorizationLost: widget.onAuthorizationLost,
     );
     _clearSensitiveState = _controller.clearSensitiveState;
@@ -1255,6 +1281,73 @@ final class _ProductionCatalogProductContributionRouteState
   Widget build(BuildContext context) => CatalogProductContributionPage(
     controller: _controller,
     inventoryController: widget.inventoryController,
+  );
+
+  @override
+  void dispose() {
+    widget.protectedRouteRegistry.unregister(_clearSensitiveState);
+    _clearSensitiveState();
+    _controller.dispose();
+    super.dispose();
+  }
+}
+
+/// Route-owned bridge for one explicit, consent-bound public store-price
+/// observation. Household inventory remains read-only to this route.
+@visibleForTesting
+final class ProductionCatalogStorePriceContributionRoute
+    extends StatefulWidget {
+  const ProductionCatalogStorePriceContributionRoute({
+    required this.consentRepository,
+    required this.storePriceRepository,
+    required this.inventoryController,
+    required this.homeId,
+    required this.defaultCurrency,
+    required this.protectedRouteRegistry,
+    required this.onAuthorizationLost,
+    super.key,
+  });
+
+  final CatalogSharingConsentRepository consentRepository;
+  final CatalogStorePriceRepository storePriceRepository;
+  final InventoryController inventoryController;
+  final String homeId;
+  final String defaultCurrency;
+  final ProductionProtectedRouteRegistry protectedRouteRegistry;
+  final Future<void> Function() onAuthorizationLost;
+
+  @override
+  State<ProductionCatalogStorePriceContributionRoute> createState() =>
+      _ProductionCatalogStorePriceContributionRouteState();
+}
+
+final class _ProductionCatalogStorePriceContributionRouteState
+    extends State<ProductionCatalogStorePriceContributionRoute> {
+  late final CatalogStorePriceContributionController _controller;
+  late final VoidCallback _clearSensitiveState;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = CatalogStorePriceContributionController(
+      consentRepository: widget.consentRepository,
+      service: CatalogStorePriceService(widget.storePriceRepository),
+      homeId: widget.homeId,
+      canContribute: true,
+      submissionIntents: CatalogSubmissionIntentCoordinator(
+        store: PlatformCatalogSubmissionIntentStore(),
+      ),
+      onAuthorizationLost: widget.onAuthorizationLost,
+    );
+    _clearSensitiveState = _controller.clearSensitiveState;
+    widget.protectedRouteRegistry.register(_clearSensitiveState);
+  }
+
+  @override
+  Widget build(BuildContext context) => CatalogStorePriceContributionPage(
+    controller: _controller,
+    inventoryController: widget.inventoryController,
+    defaultCurrency: widget.defaultCurrency,
   );
 
   @override

@@ -13,26 +13,25 @@ local `providentia_api_client` Dart package.
 
 ## Current pin
 
-- Client OpenAPI version: `1.13.2`
+- Client OpenAPI version: `1.18.0`
 - Contract SHA-256:
-  `1b6b7f09240ace0ba6b7e7279259687569dfbacb112ea7dbd4094fe27ccd0108`
-- Declared/generated operations: 158
+  `fb7f18cc8d2e0f7aaf3ec9f1bd3039316c6f44af0023110936778a8d616a6759`
+- Canonical backend operations: 177
+- Generated homeowner operations: 145
 
 The login-link onboarding, account-management, and current household
 integration surfaces are deliberately adopted as one compatible boundary.
 Application-owned adapters compose:
 
 - generic email-only login-link start/status/cancel/exchange with client-owned
-  poll and PKCE proofs;
+  poll and PKCE proofs, plus app-owned fragment-secret proof, review, and
+  approve/deny handling for the exact homeowner link base;
 - web cookie and native bearer refresh/logout, current-user bootstrap, and
   device-session list/revoke;
 - active-home selection, editable home settings, recipient invitations,
-  memberships, roles, and permission policies; and
-- platform-administrator list/grant/revoke with revision conflict handling;
+  memberships, roles, and permission policies;
 - revisioned, home-scoped catalog sharing consent and consent-bound sanitized
-  contribution submission; and
-- attribution-free catalog review queues, platform-role moderation, icon
-  metadata, and revision-bound reversible merge operations;
+  product-identity and store-price contribution submission;
 - home-scoped inventory, purchasing, shopping, reporting, and account/home
   data-governance operations with exact permission checks; and
 - home-scoped AI settings, profiles, policy, sanitized extraction review, and
@@ -53,8 +52,11 @@ created by this app installation and is used to reject a grant issued for a
 different installation. `deviceId` is the backend's account-scoped UUID and is
 retained for session identity, device management, and synchronization.
 
-Generated methods show what the pinned server contract can express; they do
-not prove that every household operation is reachable from a visible screen.
+The canonical contract records the complete backend API. The generated client
+is a default-deny homeowner facade and excludes platform administration,
+operator, catalog-administration, webhook, and moderation methods. Generated
+methods still do not prove that every homeowner operation is reachable from a
+visible screen.
 Inventory workspaces commit through local projections and the durable outbox.
 Sync protocol v2, revision-bound stock-count cancellation, and paged bootstrap
 support are retained in the generated gateway.
@@ -64,11 +66,11 @@ explicit Add to list. Suggestion feedback, existing-line quantity edits, and
 authoritative cross-device suggestion provenance remain deferred even where a
 generated method exists; generation is not a retry/idempotency guarantee.
 
-Direct per-item product-identity contribution is distinct from receipt-driven
-catalog publication. Receipt matching does not submit a sanitized catalog
-proposal or publish a global alias. Those general Phase 7 workflows remain
-unimplemented and may not be inferred from moderation or contribution methods
-in the generated client.
+Direct product-identity and store-price contributions are distinct from
+receipt-driven catalog publication. Each requires revisioned server opt-in, an
+exact local review, a fresh per-submission confirmation, and a durable UUID
+bound to the payload and consent revision. Receipt matching does not submit a
+catalog contribution or publish a global alias.
 
 The generated operation-status lookup is integrated into synchronization
 response-loss recovery. A known immutable result is applied once, an unknown

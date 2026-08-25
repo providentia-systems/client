@@ -12,7 +12,7 @@ abstract interface class PreparedMediaByteReader {
   Future<Uint8List> read(PreparedAiMedia media);
 }
 
-/// Server-proxy AI adapter for the bounded API 1.12 multi-image contract.
+/// Server-proxy AI adapter for the bounded API 1.18 multi-image contract.
 final class Api17AiGateway implements AiProviderGateway {
   factory Api17AiGateway({
     required ProvidentiaApiClient client,

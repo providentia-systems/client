@@ -76,6 +76,7 @@ void main() {
           submissionId: _submissionId,
           product: product,
           preview: proposal,
+          expectedConsentRevision: 3,
           explicitlyConsented: false,
         ),
         throwsA(isA<CatalogProposalConsentRequiredException>()),
@@ -88,6 +89,7 @@ void main() {
               submissionId: _submissionId,
               product: product,
               preview: proposal,
+              expectedConsentRevision: 3,
               explicitlyConsented: true,
             )
             .then((link) {
@@ -176,10 +178,12 @@ final class _ProposalRepository implements CatalogProposalRepository {
     required String submissionId,
     required String homeId,
     required String homeProductId,
+    required int expectedConsentRevision,
     required SanitizedCatalogProposal proposal,
   }) async {
     submissionCount++;
     expect(submissionId, _submissionId);
+    expect(expectedConsentRevision, 3);
     expect(proposal.toJson(), isNot(contains('homeId')));
     return CatalogSubmissionLink(
       homeId: homeId,

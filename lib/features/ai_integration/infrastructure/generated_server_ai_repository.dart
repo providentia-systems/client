@@ -4,7 +4,7 @@ import 'package:providentia/features/ai_integration/domain/ai_models.dart';
 import 'package:providentia/features/ai_integration/domain/server_ai_models.dart';
 import 'package:providentia_api_client/providentia_api_client.dart';
 
-/// Closed, current-contract (API 1.12) boundary for household AI management
+/// Closed, current-contract (API 1.18) boundary for household AI management
 /// and mandatory review. Raw response maps and credential material never
 /// leave this adapter.
 final class GeneratedServerAiRepository implements ServerAiRepository {
