@@ -59,7 +59,19 @@ jobs:
 
       - name: Refresh Android dependency locks
         working-directory: android
-        run: ./gradlew :generateLockfiles
+        run: |
+          for attempt in 1 2 3; do
+            if ./gradlew --no-daemon :generateLockfiles; then
+              exit 0
+            fi
+            if [[ "$attempt" -eq 3 ]]; then
+              echo 'Gradle dependency resolution failed after three bounded attempts.' >&2
+              exit 1
+            fi
+            delay=$((attempt * 15))
+            echo "Transient repository failure; retrying in ${delay}s." >&2
+            sleep "$delay"
+          done
 
       - name: Verify mutation scope
         id: mutation

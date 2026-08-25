@@ -90,6 +90,14 @@ APT distribution additionally requires the operator's signed repository
 metadata; a detached package signature is not represented as an APT repository
 signature.
 
+Linux camera capture uses the distribution GStreamer registry. The Debian
+package declares `libsecret-1-0`, `libgstreamer1.0-0`,
+`libgstreamer-plugins-base1.0-0`,
+`gstreamer1.0-plugins-base`, and `gstreamer1.0-plugins-good`; the x86-64
+AppImage documents the same required
+host packages in its embedded `APPIMAGE-RUNTIME.md`. Packaging fails if the
+desktop camera plugin is missing or has an unresolved native link dependency.
+
 ### Hosted web and browser acceptance
 
 - `WEB_DEPLOY_WEBHOOK_URL`

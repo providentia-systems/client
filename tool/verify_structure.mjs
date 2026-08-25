@@ -54,6 +54,10 @@ const requiredFiles = [
   'contracts/generated/providentia_api_client/generation-manifest.json',
   'AGENTS.md',
   'tools/agent-requirements.json',
+  'tools/agent-setup.sh',
+  'tools/install_node_linux.sh',
+  'packaging/linux/APPIMAGE-RUNTIME.md',
+  'tool/release/verify_linux_deb.sh',
 ];
 
 for (const relativePath of requiredDirectories) {
@@ -77,6 +81,16 @@ assert(
   'Agent runtime requirements are missing or inconsistent.',
 );
 assert(
+  agentRequirements.nodeDistribution?.linuxX64?.url ===
+    'https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-x64.tar.xz' &&
+    agentRequirements.nodeDistribution?.linuxX64?.sha256 ===
+      '69b09dba5c8dcb05c4e4273a4340db1005abeafe3927efda2bc5b249e80437ec' &&
+    agentRequirements.supportedHosts?.canonicalAgentHost ===
+      'debian-or-ubuntu-linux-x86_64' &&
+    !agentRequirements.supportedHosts?.development?.includes('linux-arm64'),
+  'Pinned Node distribution or canonical agent architecture is inconsistent.',
+);
+assert(
   agentRequirements.linux?.immutableRunner?.sysrootEnvironmentVariable ===
     'PROVIDENTIA_CLIENT_SYSROOT' &&
     agentRequirements.linux?.immutableRunner
@@ -84,6 +98,20 @@ assert(
       'PROVIDENTIA_CLIENT_NATIVE_LINK_DIR',
   'Immutable Linux runner requirements are missing.',
 );
+for (const dependency of [
+  'gstreamer-app-1.0',
+  'libgstapp-1.0.so',
+  'gstreamer1.0-plugins-base',
+  'gstreamer1.0-plugins-good',
+]) {
+  const immutable = agentRequirements.linux?.immutableRunner;
+  assert(
+    immutable?.requiredPkgConfigModules?.includes(dependency) ||
+      immutable?.requiredLinkLibraries?.includes(dependency) ||
+      immutable?.appImageHostPackages?.includes(dependency),
+    `Linux camera runtime requirements are missing ${dependency}.`,
+  );
+}
 for (const requiredHost of [
   'archive.ubuntu.com',
   'security.ubuntu.com',
@@ -93,12 +121,40 @@ for (const requiredHost of [
   'github.com',
   'api.github.com',
   'objects.githubusercontent.com',
+  'nodejs.org',
 ]) {
   assert(
     agentRequirements.networkAllowlist?.includes(requiredHost),
     `Agent network allowlist is missing ${requiredHost}.`,
   );
 }
+
+const agentSetup = await readFile(
+  path.join(root, 'tools/agent-setup.sh'),
+  'utf8',
+);
+for (const required of [
+  'install_node_linux.sh',
+  'quarantine_tool',
+  'frameworkRevision',
+  'ANALYZER_STATE_LOCATION_OVERRIDE',
+  'flutter_revision',
+]) {
+  assert(
+    agentSetup.includes(required),
+    `Agent setup is missing guarded runtime behavior: ${required}.`,
+  );
+}
+const nodeInstaller = await readFile(
+  path.join(root, 'tools/install_node_linux.sh'),
+  'utf8',
+);
+assert(
+  nodeInstaller.includes(agentRequirements.nodeDistribution.linuxX64.sha256) &&
+    nodeInstaller.includes('tar --no-same-owner') &&
+    nodeInstaller.includes('mv -- "$staging_directory" "$install_directory"'),
+  'Pinned Node installation must remain checksum-verified and atomic.',
+);
 
 await assertContains(
   'android/app/build.gradle.kts',

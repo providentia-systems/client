@@ -84,7 +84,8 @@ sudo apt-get update
 sudo apt-get install -y \
   clang cmake ninja-build pkg-config libgtk-3-dev libstdc++-12-dev \
   liblzma-dev libsecret-1-0 libsecret-1-dev libgstreamer1.0-dev \
-  libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-good
+  libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-base \
+  gstreamer1.0-plugins-good zip
 ```
 
 For a first Snap installation, classic confinement is required:
