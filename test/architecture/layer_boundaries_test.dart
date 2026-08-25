@@ -105,8 +105,6 @@ void main() {
       'lib/features/ai_integration/infrastructure/api17_ai_gateway.dart',
       'lib/features/ai_integration/infrastructure/api17_server_credential_provisioning.dart',
       'lib/features/ai_integration/infrastructure/generated_server_ai_repository.dart',
-      'lib/features/administration/infrastructure/api11_platform_administration_transport.dart',
-      'lib/features/administration/infrastructure/generated_catalog_administration_repository.dart',
       'lib/features/catalog/infrastructure/generated_catalog_contribution_repository.dart',
       'lib/features/data_governance/infrastructure/generated_data_governance_repository.dart',
       'lib/features/homes/infrastructure/api11_home_transport.dart',
@@ -157,8 +155,6 @@ void main() {
       'Api11HomeTransport',
       'HomeSelectionPage',
       'AccountAccessPage',
-      'Api11PlatformAdministrationTransport',
-      'PlatformAdministrationController',
     ]) {
       expect(
         source,
@@ -174,7 +170,6 @@ void main() {
     for (final settingsDestination in <String>[
       'DeviceSessionsPage',
       'HomeGovernancePage',
-      'PlatformAdministratorsPage',
     ]) {
       expect(
         accountSource,

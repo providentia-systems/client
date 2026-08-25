@@ -1,5 +1,4 @@
 import 'package:providentia/core/architecture/feature_descriptor.dart';
-import 'package:providentia/features/administration/administration_feature.dart';
 import 'package:providentia/features/ai_integration/ai_integration_feature.dart';
 import 'package:providentia/features/catalog/catalog_feature.dart';
 import 'package:providentia/features/homes/homes_feature.dart';
@@ -17,6 +16,5 @@ const List<FeatureDescriptor> featureRegistry = <FeatureDescriptor>[
   purchasingFeature,
   shoppingFeature,
   aiIntegrationFeature,
-  administrationFeature,
   reportingFeature,
 ];

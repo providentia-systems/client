@@ -74,11 +74,13 @@ const outputs = new Map([
     path.join(generatedDirectory, 'generation-manifest.json'),
     json({
       generator: 'tool/generate_api_client.mjs',
-      generatorVersion: 5,
+      generatorVersion: 6,
+      clientProfile: 'homeowner',
       contract: '../../providentia-v1.json',
       contractVersion: contract.info.version,
       contractSha256,
-      operationCount: operationCount(contract),
+      canonicalOperationCount: operationCount(contract),
+      generatedOperationCount: homeownerOperationEntries(contract).length,
       generatedFiles: [
         'pubspec.yaml',
         'lib/providentia_api_client.dart',
@@ -892,11 +894,6 @@ ${operations.registry}
     return SystemInfo.fromJson(_decodeObject(response.body));
   }
 
-  Future<String> getMetrics() async {
-    final response = await _get('/metrics', accept: 'text/plain');
-    return response.body;
-  }
-
   Future<SyncPushResponse> pushHomeSynchronization({
     required String homeId,
     required String idempotencyKey,
@@ -1137,12 +1134,11 @@ function generatedOperationArtifacts(document) {
     'getLiveness',
     'getReadiness',
     'getSystemInfo',
-    'getMetrics',
     'pushHomeSynchronization',
     'pullHomeSynchronization',
     'bootstrapHomeSynchronization',
   ]);
-  const entries = operationEntries(document);
+  const entries = homeownerOperationEntries(document);
   const registryLines = entries.map(({method, operationId, path, multipart}) => {
     const encodedPath = JSON.stringify(path);
     const pathLine = `      pathTemplate: ${encodedPath},`;
@@ -1329,6 +1325,46 @@ function operationEntries(document) {
     }
   }
   return entries.sort((left, right) => left.operationId.localeCompare(right.operationId));
+}
+
+function homeownerOperationEntries(document) {
+  return operationEntries(document).filter(({method, path}) =>
+    isHomeownerOperation(method, path),
+  );
+}
+
+function isHomeownerOperation(method, resourcePath) {
+  if (
+    ['/health/live', '/health/ready', '/api/v1/system/info'].includes(
+      resourcePath,
+    )
+  ) {
+    return method === 'get';
+  }
+  if (resourcePath.startsWith('/api/v1/auth/')) return true;
+  if (
+    resourcePath === '/api/v1/me' ||
+    resourcePath.startsWith('/api/v1/me/') ||
+    resourcePath.startsWith('/api/v1/home-invitations/') ||
+    resourcePath === '/api/v1/homes' ||
+    resourcePath.startsWith('/api/v1/homes/') ||
+    resourcePath.startsWith('/api/v1/account/') ||
+    resourcePath.startsWith('/api/v1/data-governance-requests/')
+  ) {
+    return true;
+  }
+  if (resourcePath === '/api/v1/billing/plans') return method === 'get';
+  if (resourcePath === '/api/v1/catalog-contributions') {
+    return method === 'get';
+  }
+  if (
+    resourcePath === '/api/v1/catalog/categories' ||
+    resourcePath.startsWith('/api/v1/catalog/products') ||
+    resourcePath.startsWith('/api/v1/catalog/assets/')
+  ) {
+    return method === 'get';
+  }
+  return resourcePath === '/api/v1/catalog/proposals' && method === 'post';
 }
 
 function generatedOperationMethod(entry) {

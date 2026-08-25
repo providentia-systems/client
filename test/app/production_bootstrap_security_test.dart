@@ -4,9 +4,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:providentia/app/production_bootstrap_app.dart';
-import 'package:providentia/features/administration/application/platform_administration_controller.dart';
-import 'package:providentia/features/administration/domain/catalog_administration_models.dart';
-import 'package:providentia/features/administration/domain/platform_administrator_models.dart';
 import 'package:providentia/features/homes/application/home_ports.dart';
 import 'package:providentia/features/homes/application/home_session_manager.dart';
 import 'package:providentia/features/homes/domain/home_models.dart';
@@ -29,10 +26,9 @@ void main() {
     expect(source, contains('onHomeAccessRevoked: _scheduleRevokedHomePurge'));
     expect(source, contains('coordinateActiveHomeMutation<HomeSummary>'));
     expect(source, contains('coordinateActiveHomeMutation<void>'));
-    expect(
-      source,
-      contains('onAuthorizationLost: _handlePlatformAuthorizationLost'),
-    );
+    expect(source, isNot(contains('features/administration')));
+    expect(source, isNot(contains('PlatformAdministrationController')));
+    expect(source, isNot(contains('CatalogWorkbench')));
     expect(source, contains('ProductionSessionSecurityBoundary'));
     expect(source, contains('workspaceNavigatorKey: _workspaceNavigatorKey'));
     expect(source, contains('GeneratedHouseholdReportRepository'));
@@ -106,25 +102,17 @@ void main() {
           activeHomeStore: _SecurityActiveHomeStore(),
         );
         final homes = HomesController(homeManager);
-        final administration = PlatformAdministrationController(
-          _SecurityAdministrationTransport(),
-        );
         addTearDown(() async {
           homes.dispose();
-          administration.dispose();
           await homeManager.dispose();
         });
         await homes.load(sessionActiveHomeId: 'home-a');
-        await administration.load();
         final navigatorKey = GlobalKey<NavigatorState>();
         final workspaceNavigatorKey = GlobalKey<NavigatorState>();
-        var catalogClears = 0;
         final boundary = ProductionSessionSecurityBoundary(
           rootNavigatorKey: navigatorKey,
           workspaceNavigatorKey: workspaceNavigatorKey,
           homesController: homes,
-          platformAdministrationController: administration,
-          clearCatalogAdministration: () => catalogClears++,
         );
         await tester.pumpWidget(
           MaterialApp(
@@ -144,7 +132,6 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text('Protected account and device data'), findsOneWidget);
         expect(homes.snapshot.activeHome, isNotNull);
-        expect(administration.snapshot.administrators, isNotEmpty);
 
         boundary.handleIdentitySession(scenario.snapshot);
         await tester.pumpAndSettle();
@@ -153,66 +140,9 @@ void main() {
         expect(find.text('Protected account and device data'), findsNothing);
         expect(homes.snapshot.homes, isEmpty);
         expect(homes.snapshot.activeHome, isNull);
-        expect(administration.snapshot.administrators, isEmpty);
-        expect(catalogClears, 1);
       },
     );
   }
-
-  testWidgets('catalog role loss clears state and dismisses protected routes', (
-    tester,
-  ) async {
-    final homeManager = HomeSessionManager(
-      transport: _SecurityHomeTransport(),
-      activeHomeStore: _SecurityActiveHomeStore(),
-    );
-    final homes = HomesController(homeManager);
-    final administration = PlatformAdministrationController(
-      _SecurityAdministrationTransport(),
-    );
-    addTearDown(() async {
-      homes.dispose();
-      administration.dispose();
-      await homeManager.dispose();
-    });
-    final navigatorKey = GlobalKey<NavigatorState>();
-    final workspaceNavigatorKey = GlobalKey<NavigatorState>();
-    var catalogClears = 0;
-    final boundary = ProductionSessionSecurityBoundary(
-      rootNavigatorKey: navigatorKey,
-      workspaceNavigatorKey: workspaceNavigatorKey,
-      homesController: homes,
-      platformAdministrationController: administration,
-      clearCatalogAdministration: () => catalogClears++,
-    );
-    await tester.pumpWidget(
-      MaterialApp(
-        navigatorKey: navigatorKey,
-        home: const Scaffold(body: Text('Account root')),
-      ),
-    );
-    unawaited(
-      navigatorKey.currentState!.push<void>(
-        MaterialPageRoute<void>(
-          builder: (_) => const Scaffold(body: Text('Catalog workbench')),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    boundary.handleCatalogRoleChange(
-      previousCapabilities: const <CatalogCapability>{
-        CatalogCapability.review,
-        CatalogCapability.curate,
-      },
-      currentCapabilities: const <CatalogCapability>{CatalogCapability.review},
-    );
-    await tester.pumpAndSettle();
-
-    expect(catalogClears, 1);
-    expect(find.text('Account root'), findsOneWidget);
-    expect(find.text('Catalog workbench'), findsNothing);
-  });
 
   testWidgets(
     'home permission loss dismisses outer and nested workspace routes',
@@ -222,12 +152,8 @@ void main() {
         activeHomeStore: _SecurityActiveHomeStore(),
       );
       final homes = HomesController(homeManager);
-      final administration = PlatformAdministrationController(
-        _SecurityAdministrationTransport(),
-      );
       addTearDown(() async {
         homes.dispose();
-        administration.dispose();
         await homeManager.dispose();
       });
       final rootNavigatorKey = GlobalKey<NavigatorState>();
@@ -239,7 +165,6 @@ void main() {
         rootNavigatorKey: rootNavigatorKey,
         workspaceNavigatorKey: workspaceNavigatorKey,
         homesController: homes,
-        platformAdministrationController: administration,
         clearProtectedRouteState: protectedRoutes.clearSensitiveState,
       );
       await tester.pumpWidget(
@@ -393,29 +318,4 @@ final class _SecurityHomeTransport implements HomeTransportPort {
 
   @override
   Future<void> leaveHome(String homeId) => throw UnimplementedError();
-}
-
-final class _SecurityAdministrationTransport
-    implements PlatformAdministrationPort {
-  @override
-  Future<List<PlatformAdministrator>> listAdministrators() async =>
-      <PlatformAdministrator>[
-        PlatformAdministrator(
-          id: 'administrator-a',
-          email: 'admin@example.com',
-          status: PlatformAdministratorStatus.active,
-          revision: 1,
-          createdAt: DateTime.utc(2026, 8, 9),
-        ),
-      ];
-
-  @override
-  Future<PlatformAdministrator> grantAdministrator(String email) =>
-      throw UnimplementedError();
-
-  @override
-  Future<void> revokeAdministrator({
-    required String administratorId,
-    required int expectedRevision,
-  }) => throw UnimplementedError();
 }

@@ -1,6 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:providentia/features/homes/domain/home_models.dart';
-import 'package:providentia/features/identity/domain/identity_models.dart';
 import 'package:providentia/features/identity/presentation/account_access_page.dart';
 
 void main() {
@@ -51,35 +50,11 @@ void main() {
     );
   });
 
-  test(
-    'catalog administration derives only from current-user platform roles',
-    () {
-      for (final role in const <PlatformRole>{
-        PlatformRole.platformAdministrator,
-        PlatformRole.catalogCurator,
-        PlatformRole.catalogReviewer,
-      }) {
-        expect(
-          mayAccessCatalogAdministration(<PlatformRole>{role}),
-          isTrue,
-          reason: role.name,
-        );
-      }
-      expect(
-        mayAccessCatalogAdministration(const <PlatformRole>{
-          PlatformRole.billingOperator,
-        }),
-        isFalse,
-      );
-    },
-  );
-
-  test('even all household permissions cannot escalate to moderation', () {
+  test('household permissions expose contribution but never moderation', () {
     expect(
       HomePermissions.owner,
       contains(HomePermissions.catalogConsentManage),
     );
     expect(HomePermissions.owner, contains(HomePermissions.catalogContribute));
-    expect(mayAccessCatalogAdministration(const <PlatformRole>{}), isFalse);
   });
 }

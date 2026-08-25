@@ -13,7 +13,6 @@ void main() {
       'purchasing',
       'shopping',
       'ai_integration',
-      'administration',
       'reporting',
     ]);
     expect(ids.toSet(), hasLength(ids.length));

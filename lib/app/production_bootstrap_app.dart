@@ -24,13 +24,6 @@ import 'package:providentia/core/synchronization/privacy_safe_sync_metrics.dart'
 import 'package:providentia/core/synchronization/sync_coordinator.dart';
 import 'package:providentia/core/synchronization/sync_models.dart';
 import 'package:providentia/core/synchronization/sync_ports.dart';
-import 'package:providentia/features/administration/application/catalog_merge_workflow.dart';
-import 'package:providentia/features/administration/application/catalog_workbench_controller.dart';
-import 'package:providentia/features/administration/application/platform_administration_controller.dart';
-import 'package:providentia/features/administration/domain/catalog_administration_models.dart';
-import 'package:providentia/features/administration/infrastructure/api11_platform_administration_transport.dart';
-import 'package:providentia/features/administration/infrastructure/generated_catalog_administration_repository.dart';
-import 'package:providentia/features/administration/presentation/catalog_workbench_page.dart';
 import 'package:providentia/features/ai_integration/application/ai_ports.dart';
 import 'package:providentia/features/ai_integration/application/receipt_ai_handoff_controller.dart';
 import 'package:providentia/features/ai_integration/domain/ai_models.dart';
@@ -115,13 +108,9 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp> {
   late final IdentitySessionManager _identityManager;
   late final IdentityController _identityController;
   late final HomesController _homesController;
-  late final PlatformAdministrationController _platformAdministrationController;
   late final ProductionSessionSecurityBoundary _sessionSecurityBoundary;
   late final ProductionHomeRevocationBoundary _homeRevocationBoundary;
   late final Future<void> _initialization;
-  GeneratedCatalogAdministrationRepository? _catalogAdministrationRepository;
-  CatalogWorkbenchController? _catalogWorkbenchController;
-  Set<CatalogCapability> _catalogCapabilities = const <CatalogCapability>{};
   StreamSubscription<IdentitySessionSnapshot>? _identitySubscription;
   SessionHttpClient? _authorizedTransport;
   final GlobalKey<NavigatorState> _rootNavigatorKey =
@@ -200,16 +189,10 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp> {
           ),
     );
     _homesController = HomesController(homes);
-    _platformAdministrationController = PlatformAdministrationController(
-      Api11PlatformAdministrationTransport(_authorizedApi),
-      onAuthorizationLost: _handlePlatformAuthorizationLost,
-    );
     _sessionSecurityBoundary = ProductionSessionSecurityBoundary(
       rootNavigatorKey: _rootNavigatorKey,
       workspaceNavigatorKey: _workspaceNavigatorKey,
       homesController: _homesController,
-      platformAdministrationController: _platformAdministrationController,
-      clearCatalogAdministration: _clearCatalogAdministration,
       clearProtectedRouteState: _protectedRouteRegistry.clearSensitiveState,
     );
     _securedHomeId = _homesController.snapshot.activeHome?.id;
@@ -253,17 +236,10 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp> {
                   accountPageBuilder: (context) => AccountAccessPage(
                     identityController: _identityController,
                     homesController: _homesController,
-                    platformAdministrationController:
-                        identitySnapshot.currentUser?.isPlatformAdministrator ??
-                            false
-                        ? _platformAdministrationController
-                        : null,
                     catalogSharingPageBuilder: _catalogSharingPageBuilder(
                       _homesController.snapshot.activeHome,
                       _homesController.snapshot.effectivePermissions,
                     ),
-                    catalogAdministrationPageBuilder:
-                        _catalogAdministrationPageBuilder,
                     householdReportsPageBuilder: _householdReportsPageBuilder,
                     householdAiPageBuilder: _householdAiPageBuilder,
                     dataGovernancePageBuilder: _dataGovernancePageBuilder,
@@ -290,13 +266,6 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp> {
                       api: _authorizedApi,
                       identityController: _identityController,
                       homesController: _homesController,
-                      platformAdministrationController:
-                          identitySnapshot
-                                  .currentUser
-                                  ?.isPlatformAdministrator ??
-                              false
-                          ? _platformAdministrationController
-                          : null,
                       catalogSharingPageBuilder: _catalogSharingPageBuilder(
                         home,
                         permissions,
@@ -304,8 +273,6 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp> {
                       canContributeCatalog: mayContributeCatalogProduct(
                         permissions,
                       ),
-                      catalogAdministrationPageBuilder:
-                          _catalogAdministrationPageBuilder,
                       householdReportsPageBuilder: _householdReportsPageBuilder,
                       householdAiPageBuilder: _householdAiPageBuilder,
                       dataGovernancePageBuilder: _dataGovernancePageBuilder,
@@ -331,8 +298,6 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp> {
         await _identitySubscription?.cancel();
         _homesController.removeListener(_handleHomeSecurityState);
         _homesController.dispose();
-        _platformAdministrationController.dispose();
-        _catalogWorkbenchController?.dispose();
         _identityController.dispose();
         await _identityManager.dispose();
         _authorizedApi.close();
@@ -363,51 +328,8 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp> {
     await logout;
   }
 
-  Future<void> _handlePlatformAuthorizationLost() async {
-    _sessionSecurityBoundary.dismissProtectedRoutes();
-    await _identityController.refreshCurrentUser();
-  }
-
   void _handleIdentitySession(IdentitySessionSnapshot snapshot) {
     _sessionSecurityBoundary.handleIdentitySession(snapshot);
-    final roles = snapshot.isAuthenticated
-        ? snapshot.currentUser?.platformRoles ?? const <PlatformRole>{}
-        : const <PlatformRole>{};
-    final nextCapabilities =
-        GeneratedCatalogAdministrationRepository.capabilitiesForPlatformRoles(
-          roles,
-        );
-    if (setEquals(nextCapabilities, _catalogCapabilities)) return;
-    _sessionSecurityBoundary.handleCatalogRoleChange(
-      previousCapabilities: _catalogCapabilities,
-      currentCapabilities: nextCapabilities,
-    );
-    _catalogWorkbenchController?.dispose();
-    _catalogAdministrationRepository = null;
-    _catalogWorkbenchController = null;
-    _catalogCapabilities = Set<CatalogCapability>.unmodifiable(
-      nextCapabilities,
-    );
-    if (nextCapabilities.contains(CatalogCapability.review)) {
-      final repository = GeneratedCatalogAdministrationRepository(
-        _authorizedApi,
-        platformRoles: roles,
-        onAuthorizationLost: _handleCatalogAuthorizationLost,
-      );
-      _catalogAdministrationRepository = repository;
-      _catalogWorkbenchController = CatalogWorkbenchController(repository);
-    }
-    if (mounted) setState(() {});
-  }
-
-  void _clearCatalogAdministration() {
-    _catalogWorkbenchController?.clearSensitiveState();
-  }
-
-  Future<void> _handleCatalogAuthorizationLost() async {
-    _sessionSecurityBoundary.dismissProtectedRoutes();
-    _clearCatalogAdministration();
-    await _identityController.refreshCurrentUser();
   }
 
   Future<void> _handleCatalogSharingAuthorizationLost() async {
@@ -511,20 +433,6 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp> {
     );
   }
 
-  WidgetBuilder? get _catalogAdministrationPageBuilder {
-    final repository = _catalogAdministrationRepository;
-    final controller = _catalogWorkbenchController;
-    if (repository == null || controller == null) return null;
-    return (_) => CatalogWorkbenchPage(
-      controller: controller,
-      proposalDecisions: repository,
-      contributionDecisions: repository,
-      conflictDecisions: repository,
-      iconRepository: repository,
-      mergeWorkflow: CatalogMergeWorkflow(repository),
-    );
-  }
-
   void _scheduleRevokedHomePurge(String homeId) {
     final quiesced = _homeSyncRevocationGate.revokeAndWait(homeId);
     _revokedHomePurges[homeId] = quiesced
@@ -541,16 +449,12 @@ final class ProductionSessionSecurityBoundary {
     required this.rootNavigatorKey,
     required this.workspaceNavigatorKey,
     required this.homesController,
-    required this.platformAdministrationController,
-    this.clearCatalogAdministration,
     this.clearProtectedRouteState,
   });
 
   final GlobalKey<NavigatorState> rootNavigatorKey;
   final GlobalKey<NavigatorState> workspaceNavigatorKey;
   final HomesController homesController;
-  final PlatformAdministrationController platformAdministrationController;
-  final VoidCallback? clearCatalogAdministration;
   final VoidCallback? clearProtectedRouteState;
 
   void handleIdentitySession(IdentitySessionSnapshot snapshot) {
@@ -558,18 +462,7 @@ final class ProductionSessionSecurityBoundary {
       return;
     }
     dismissProtectedRoutes();
-    clearCatalogAdministration?.call();
-    platformAdministrationController.clearSensitiveState();
     homesController.handleAuthenticationLost();
-  }
-
-  void handleCatalogRoleChange({
-    required Set<CatalogCapability> previousCapabilities,
-    required Set<CatalogCapability> currentCapabilities,
-  }) {
-    if (previousCapabilities.difference(currentCapabilities).isEmpty) return;
-    dismissProtectedRoutes();
-    clearCatalogAdministration?.call();
   }
 
   void handleHomeAccessChange({
@@ -627,10 +520,8 @@ final class _ConnectedHomeWorkspace extends StatefulWidget {
     required this.api,
     required this.identityController,
     required this.homesController,
-    required this.platformAdministrationController,
     required this.catalogSharingPageBuilder,
     required this.canContributeCatalog,
-    required this.catalogAdministrationPageBuilder,
     required this.householdReportsPageBuilder,
     required this.householdAiPageBuilder,
     required this.dataGovernancePageBuilder,
@@ -652,10 +543,8 @@ final class _ConnectedHomeWorkspace extends StatefulWidget {
   final ProvidentiaApiClient api;
   final IdentityController identityController;
   final HomesController homesController;
-  final PlatformAdministrationController? platformAdministrationController;
   final WidgetBuilder? catalogSharingPageBuilder;
   final bool canContributeCatalog;
-  final WidgetBuilder? catalogAdministrationPageBuilder;
   final WidgetBuilder householdReportsPageBuilder;
   final WidgetBuilder householdAiPageBuilder;
   final WidgetBuilder dataGovernancePageBuilder;
@@ -970,12 +859,8 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
           accountPageBuilder: (context) => AccountAccessPage(
             identityController: widget.identityController,
             homesController: widget.homesController,
-            platformAdministrationController:
-                widget.platformAdministrationController,
             catalogSharingPageBuilder: widget.catalogSharingPageBuilder,
             catalogContributionPageBuilder: _catalogContributionPageBuilder,
-            catalogAdministrationPageBuilder:
-                widget.catalogAdministrationPageBuilder,
             householdReportsPageBuilder: widget.householdReportsPageBuilder,
             householdAiPageBuilder: _connectedHouseholdAiPageBuilder,
             dataGovernancePageBuilder: widget.dataGovernancePageBuilder,
