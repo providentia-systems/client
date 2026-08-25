@@ -211,14 +211,6 @@ String _string(Map<String, Object?> object, String key) {
   return value;
 }
 
-String _identifier(Map<String, Object?> object, String key) {
-  final value = _string(object, key);
-  if (!_uuid.hasMatch(value)) {
-    throw FormatException('Expected "$key" to be a UUID.');
-  }
-  return value;
-}
-
 String? _nullableIdentifier(Map<String, Object?> object, String key) {
   final value = object[key];
   if (value == null) return null;
