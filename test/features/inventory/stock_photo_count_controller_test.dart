@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:providentia/features/ai_integration/application/ai_ports.dart';
 import 'package:providentia/features/ai_integration/domain/ai_models.dart';
@@ -12,8 +13,65 @@ import 'package:providentia/features/inventory/application/inventory_repository.
 import 'package:providentia/features/inventory/application/stock_photo_count_controller.dart';
 import 'package:providentia/features/inventory/domain/inventory_models.dart';
 import 'package:providentia/features/inventory/presentation/inventory_controller.dart';
+import 'package:providentia/features/inventory/presentation/stock_photo_count_panel.dart';
 
 void main() {
+  testWidgets(
+    'camera, gallery, and files are explicit stock acquisition paths',
+    (tester) async {
+      final harness = _Harness();
+      await harness.openCount();
+      final calls = <String>[];
+      Future<List<AiMediaAsset>> picked(String source) async {
+        calls.add(source);
+        return const <AiMediaAsset>[];
+      }
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: StockPhotoCountPanel(
+              controller: harness.stock,
+              acquisition: StockPhotoAcquisitionActions(
+                takePhoto: () => picked('camera'),
+                chooseGallery: () => picked('gallery'),
+                uploadFiles: () => picked('files'),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      for (final key in <String>[
+        'stock-photo-camera',
+        'stock-photo-gallery',
+        'stock-photo-files',
+      ]) {
+        await tester.tap(find.byKey(Key(key)));
+        await tester.pumpAndSettle();
+      }
+
+      expect(calls, <String>['camera', 'gallery', 'files']);
+      harness.dispose();
+    },
+  );
+
+  test('explicit acquisition sources share the stock-photo workflow', () async {
+    final harness = _Harness();
+    await harness.openCount();
+    var pickerCalls = 0;
+
+    await harness.stock.selectAssets(() async {
+      pickerCalls++;
+      return <AiMediaAsset>[_assetB];
+    });
+
+    expect(pickerCalls, 1);
+    expect(harness.preparer.lastAssets, <AiMediaAsset>[_assetB]);
+    expect(harness.stock.state.status, StockPhotoCountStatus.awaitingConsent);
+    harness.dispose();
+  });
+
   test(
     'photo candidates create ordinary lines only and explicit close happens once',
     () async {

@@ -4,6 +4,7 @@ import 'package:crypto/crypto.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:providentia/features/ai_integration/domain/ai_models.dart';
+import 'package:providentia/features/ai_integration/infrastructure/captured_file_cleanup.dart';
 import 'package:providentia/features/ai_integration/infrastructure/sanitizing_image_media_preparer.dart';
 
 final class MediaAcquisitionException implements Exception {
@@ -49,7 +50,22 @@ final class MediaAcquisitionService {
     final selected = await _imagePicker.pickImage(source: ImageSource.camera);
     return selected == null
         ? null
-        : _registerXFile(selected, homeId: homeId, purpose: purpose);
+        : registerCapturedPhoto(selected, homeId: homeId, purpose: purpose);
+  }
+
+  /// Registers an image created by Providentia's camera surface, then removes
+  /// the plugin-owned temporary file. User-selected gallery and file-system
+  /// originals never pass through this ownership boundary and are untouched.
+  Future<AiMediaAsset> registerCapturedPhoto(
+    XFile captured, {
+    required String homeId,
+    required AiExtractionKind purpose,
+  }) async {
+    try {
+      return await _registerXFile(captured, homeId: homeId, purpose: purpose);
+    } finally {
+      await discardCapturedFile(captured.path);
+    }
   }
 
   Future<List<AiMediaAsset>> choosePhotos({
@@ -64,17 +80,24 @@ final class MediaAcquisitionService {
     }
     final selected = await _imagePicker.pickMultiImage(limit: limit);
     final assets = <AiMediaAsset>[];
-    for (var index = 0; index < selected.length; index++) {
-      assets.add(
-        await _registerXFile(
-          selected[index],
-          homeId: homeId,
-          purpose: purpose,
-          pageIndex: purpose == AiExtractionKind.receipt ? index : null,
-        ),
-      );
+    try {
+      for (var index = 0; index < selected.length; index++) {
+        assets.add(
+          await _registerXFile(
+            selected[index],
+            homeId: homeId,
+            purpose: purpose,
+            pageIndex: purpose == AiExtractionKind.receipt ? index : null,
+          ),
+        );
+      }
+      return assets;
+    } on Object {
+      for (final asset in assets) {
+        _registry.remove(asset.id);
+      }
+      rethrow;
     }
-    return assets;
   }
 
   Future<AiMediaAsset?> recordVideo({
@@ -95,28 +118,61 @@ final class MediaAcquisitionService {
     required String homeId,
     required AiExtractionKind purpose,
     bool allowMultiple = true,
+    bool imagesOnly = false,
+    int? limit,
   }) async {
     final result = await _filePicker(allowMultiple: allowMultiple);
     if (result == null) return const <AiMediaAsset>[];
-    final assets = <AiMediaAsset>[];
-    for (final file in result.files) {
-      final bytes = file.bytes;
-      if (bytes == null) {
-        throw const MediaAcquisitionException(
-          'The selected file could not be read on this device.',
-        );
-      }
-      assets.add(
-        _registerBytes(
-          bytes,
-          name: file.name,
-          mimeType: _mimeType(file.extension),
-          homeId: homeId,
-          purpose: purpose,
-        ),
+    if (limit != null && (limit < 1 || result.files.length > limit)) {
+      throw MediaAcquisitionException(
+        'Select no more than $limit image${limit == 1 ? '' : 's'}.',
       );
     }
-    return assets;
+    final selected = <({PlatformFile file, String mimeType})>[
+      for (final file in result.files)
+        (
+          file: file,
+          mimeType: _mimeType(file.extension ?? file.name.split('.').last),
+        ),
+    ];
+    if (imagesOnly &&
+        selected.any(
+          (entry) => !const <String>{
+            'image/jpeg',
+            'image/png',
+            'image/webp',
+          }.contains(entry.mimeType),
+        )) {
+      throw const MediaAcquisitionException(
+        'Choose only JPEG, PNG, or WebP image files.',
+      );
+    }
+    final assets = <AiMediaAsset>[];
+    try {
+      for (final entry in selected) {
+        final bytes = entry.file.bytes;
+        if (bytes == null) {
+          throw const MediaAcquisitionException(
+            'The selected file could not be read on this device.',
+          );
+        }
+        assets.add(
+          _registerBytes(
+            bytes,
+            name: entry.file.name,
+            mimeType: entry.mimeType,
+            homeId: homeId,
+            purpose: purpose,
+          ),
+        );
+      }
+      return assets;
+    } on Object {
+      for (final asset in assets) {
+        _registry.remove(asset.id);
+      }
+      rethrow;
+    }
   }
 
   Future<AiMediaAsset> _registerXFile(

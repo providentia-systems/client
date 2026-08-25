@@ -5,6 +5,10 @@ Debian or Ubuntu cloud session. It installs the native Flutter/Linux build
 packages, installs the repository's checksum-verified Flutter 3.44.7 SDK,
 uses a checkout-local Pub cache, regenerates guarded artifacts, runs every
 source, analysis, test, and coverage gate, and produces a Linux release build.
+It also persists project-local XDG configuration, cache, and data directories
+and `CI=true` in `.agent-env`, preventing cloud metadata probes and writes to a
+runner's shared user configuration. The Flutter archive is kept in an atomic,
+checksum-verified download cache and extracted with ownership normalization.
 
 Run it from the repository root:
 

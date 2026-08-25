@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
@@ -179,6 +180,58 @@ void main() {
         'application/octet-stream',
       ]);
       expect(registry.registeredIds, hasLength(7));
+    },
+  );
+
+  test('stock file upload rejects non-images before registration', () async {
+    final registry = RegisteredMediaSourceReader();
+    final service = MediaAcquisitionService(
+      registry: registry,
+      imagePicker: _FakeImagePicker(),
+      filePicker: ({required bool allowMultiple}) async =>
+          FilePickerResult(<PlatformFile>[
+            PlatformFile(name: 'pantry.jpg', size: 28, bytes: _raw(28)),
+            PlatformFile(name: 'notes.pdf', size: 32, bytes: _raw(32)),
+          ]),
+    );
+
+    await expectLater(
+      service.chooseFiles(
+        homeId: 'home-1',
+        purpose: AiExtractionKind.stockPhoto,
+        imagesOnly: true,
+        limit: 8,
+      ),
+      throwsA(isA<MediaAcquisitionException>()),
+    );
+    expect(registry.registeredIds, isEmpty);
+  });
+
+  test(
+    'registered camera capture removes its app-owned temporary file',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'providentia-camera-test-',
+      );
+      final file = File('${directory.path}/captured.jpg');
+      await file.writeAsBytes(_raw(32));
+      final registry = RegisteredMediaSourceReader();
+      final service = MediaAcquisitionService(
+        registry: registry,
+        imagePicker: _FakeImagePicker(),
+      );
+      try {
+        final asset = await service.registerCapturedPhoto(
+          XFile(file.path, mimeType: 'image/jpeg', name: 'captured.jpg'),
+          homeId: 'home-1',
+          purpose: AiExtractionKind.stockPhoto,
+        );
+
+        expect(registry.registeredIds, <String>{asset.id});
+        expect(await file.exists(), isFalse);
+      } finally {
+        if (await directory.exists()) await directory.delete(recursive: true);
+      }
     },
   );
 

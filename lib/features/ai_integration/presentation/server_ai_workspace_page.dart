@@ -30,6 +30,8 @@ final class ServerAiWorkspacePage extends StatefulWidget {
   const ServerAiWorkspacePage({
     required this.controller,
     required this.pickSingleImage,
+    this.captureSingleImage,
+    this.pickFileImage,
     this.pickMultipleImages,
     this.pickReceiptPdf,
     this.readLocalImage,
@@ -42,6 +44,8 @@ final class ServerAiWorkspacePage extends StatefulWidget {
 
   final ServerAiWorkspaceController controller;
   final AiSingleImagePicker pickSingleImage;
+  final AiSingleImagePicker? captureSingleImage;
+  final AiSingleImagePicker? pickFileImage;
   final AiMultipleImagePicker? pickMultipleImages;
   final AiReceiptPdfPicker? pickReceiptPdf;
   final AiLocalImageReader? readLocalImage;
@@ -294,15 +298,41 @@ final class _ServerAiWorkspacePageState extends State<ServerAiWorkspacePage> {
                 icon: const Icon(Icons.picture_as_pdf_outlined),
                 label: const Text('Choose receipt PDF'),
               ),
-            FilledButton.tonalIcon(
+            if (widget.captureSingleImage != null)
+              FilledButton.tonalIcon(
+                key: const Key('ai-capture-stock'),
+                onPressed: _canExtract(selected)
+                    ? () => _pickAndPrepare(
+                        selected!,
+                        AiExtractionKind.stockPhoto,
+                        picker: widget.captureSingleImage,
+                      )
+                    : null,
+                icon: const Icon(Icons.photo_camera_outlined),
+                label: const Text('Take stock photo'),
+              ),
+            OutlinedButton.icon(
               key: const Key('ai-pick-stock'),
               onPressed: _canExtract(selected)
                   ? () =>
                         _pickAndPrepare(selected!, AiExtractionKind.stockPhoto)
                   : null,
-              icon: const Icon(Icons.photo_camera_outlined),
-              label: const Text('Choose stock photo'),
+              icon: const Icon(Icons.photo_library_outlined),
+              label: const Text('Choose stock image'),
             ),
+            if (widget.pickFileImage != null)
+              OutlinedButton.icon(
+                key: const Key('ai-upload-stock'),
+                onPressed: _canExtract(selected)
+                    ? () => _pickAndPrepare(
+                        selected!,
+                        AiExtractionKind.stockPhoto,
+                        picker: widget.pickFileImage,
+                      )
+                    : null,
+                icon: const Icon(Icons.upload_file_outlined),
+                label: const Text('Upload stock image'),
+              ),
           ],
         ),
         if (_receiptDraftPages.isNotEmpty) ...<Widget>[
@@ -367,9 +397,10 @@ final class _ServerAiWorkspacePageState extends State<ServerAiWorkspacePage> {
 
   Future<void> _pickAndPrepare(
     AiProviderProfile provider,
-    AiExtractionKind kind,
-  ) async {
-    final asset = await widget.pickSingleImage(kind);
+    AiExtractionKind kind, {
+    AiSingleImagePicker? picker,
+  }) async {
+    final asset = await (picker ?? widget.pickSingleImage)(kind);
     if (!mounted || asset == null) return;
     await widget.controller.prepareOne(provider: provider, asset: asset);
   }

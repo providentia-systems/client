@@ -8,11 +8,13 @@ class InventoryWorkspace extends StatefulWidget {
   const InventoryWorkspace({
     required this.controller,
     this.stockPhotoController,
+    this.stockPhotoAcquisition,
     super.key,
   });
 
   final InventoryController controller;
   final StockPhotoCountController? stockPhotoController;
+  final StockPhotoAcquisitionActions? stockPhotoAcquisition;
 
   @override
   State<InventoryWorkspace> createState() => _InventoryWorkspaceState();
@@ -126,6 +128,7 @@ class _InventoryWorkspaceState extends State<InventoryWorkspace> {
                     const SizedBox(height: 12),
                     StockPhotoCountPanel(
                       controller: widget.stockPhotoController!,
+                      acquisition: widget.stockPhotoAcquisition,
                     ),
                   ],
                   if (state.safeError != null)

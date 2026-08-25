@@ -367,6 +367,7 @@ class _ContentViewport extends StatelessWidget {
             ? InventoryWorkspace(
                 controller: features!.inventory,
                 stockPhotoController: features!.stockPhotoCount,
+                stockPhotoAcquisition: features!.stockPhotoAcquisition,
               )
             : _ReadOnlyInventoryWorkspace(controller: features!.inventory),
       AppSection.purchases =>

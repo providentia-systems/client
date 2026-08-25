@@ -98,6 +98,20 @@ typedef StockPhotoAssetPicker = Future<List<AiMediaAsset>> Function();
 typedef StockPhotoProviderLoader = Future<AiProviderProfile> Function();
 typedef StockPhotoAiRouteLoader = Future<StockPhotoAiRoute> Function();
 
+/// UI-independent acquisition ports for the three explicit stock-image
+/// sources. Every source is consumed by [StockPhotoCountController.selectAssets].
+final class StockPhotoAcquisitionActions {
+  const StockPhotoAcquisitionActions({
+    required this.takePhoto,
+    required this.chooseGallery,
+    required this.uploadFiles,
+  });
+
+  final StockPhotoAssetPicker takePhoto;
+  final StockPhotoAssetPicker chooseGallery;
+  final StockPhotoAssetPicker uploadFiles;
+}
+
 final class StockPhotoAiRoute {
   const StockPhotoAiRoute({
     required this.profile,
@@ -273,7 +287,11 @@ final class StockPhotoCountController extends ChangeNotifier {
     return _mediaReader.read(media);
   }
 
-  Future<void> selectPhotos() async {
+  Future<void> selectPhotos() => selectAssets(_pickAssets);
+
+  /// Runs camera, gallery, and file-upload acquisitions through the same
+  /// preparation, consent, review, and ordinary-count command boundary.
+  Future<void> selectAssets(StockPhotoAssetPicker picker) async {
     if (_disposed || _state.status == StockPhotoCountStatus.accessDenied) {
       return;
     }
