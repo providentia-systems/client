@@ -72,6 +72,26 @@ for (const relativePath of requiredFiles) {
 const agentRequirements = JSON.parse(
   await readFile(path.join(root, 'tools/agent-requirements.json'), 'utf8'),
 );
+const pubspec = await readFile(path.join(root, 'pubspec.yaml'), 'utf8');
+const pubspecLock = await readFile(path.join(root, 'pubspec.lock'), 'utf8');
+assert(
+  /dependency_overrides:\s+[\s\S]*?path_provider_android:\s+2\.2\.23/u.test(
+    pubspec,
+  ),
+  'The Android path-provider implementation must remain on the pre-JNI release.',
+);
+assert(
+  /^  path_provider_android:\n[\s\S]*?^    version: "2\.2\.23"$/mu.test(
+    pubspecLock,
+  ),
+  'The dependency lock must contain the reviewed pre-JNI Android implementation.',
+);
+for (const androidJniPackage of ['jni', 'jni_flutter', 'jni_util']) {
+  assert(
+    !new RegExp(`^  ${androidJniPackage}:$`, 'mu').test(pubspecLock),
+    `Linux-capable dependency resolution cannot contain ${androidJniPackage}.`,
+  );
+}
 assert(
   agentRequirements.schemaVersion === 1 &&
     agentRequirements.repositoryRole === 'homeowner-client' &&

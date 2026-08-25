@@ -31,6 +31,10 @@ done
   echo 'Flutter Linux release bundle is missing its executable.' >&2
   exit 66
 }
+if find "$bundle" -type f -name 'libdartjni.so' -print -quit | grep -q .; then
+  echo 'Linux release bundle contains an Android-only JNI runtime.' >&2
+  exit 66
+fi
 camera_plugin="$bundle/lib/libcamera_desktop_plugin.so"
 [[ -f "$camera_plugin" ]] || {
   echo 'Flutter Linux release bundle is missing the desktop camera plugin.' >&2

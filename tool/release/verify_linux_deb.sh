@@ -74,6 +74,10 @@ plugin_root="$extraction_root/opt/providentia/lib"
   echo 'Installed Flutter Linux runtime is missing.' >&2
   exit 66
 }
+[[ ! -e "$plugin_root/libdartjni.so" ]] || {
+  echo 'Installed Linux package contains an Android-only JNI runtime.' >&2
+  exit 66
+}
 
 verify_linkage "$binary"
 while IFS= read -r -d '' plugin; do
