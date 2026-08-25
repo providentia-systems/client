@@ -103,7 +103,7 @@ Priority: optional
 Architecture: amd64
 Installed-Size: ${installed_size}
 Maintainer: Vast Development Method
-Depends: libgtk-3-0, libblkid1, liblzma5, libsecret-1-0, libgstreamer1.0-0, libgstreamer-plugins-base1.0-0, gstreamer1.0-plugins-base, gstreamer1.0-plugins-good
+Depends: libegl1, libgtk-3-0, libblkid1, liblzma5, libsecret-1-0, libgstreamer1.0-0, libgstreamer-plugins-base1.0-0, gstreamer1.0-plugins-base, gstreamer1.0-plugins-good
 Description: Providentia household stock control client
  Proprietary multi-platform client for authorized Providentia users.
 EOF

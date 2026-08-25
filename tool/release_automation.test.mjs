@@ -80,6 +80,7 @@ test('platform signing is real and independently verified', async () => {
   assert.match(linuxPackage, /libcamera_desktop_plugin\.so/u);
   assert.match(linuxPackage, /ldd "\$camera_plugin"/u);
   for (const dependency of [
+    'libegl1',
     'libgstreamer1.0-0',
     'libgstreamer-plugins-base1.0-0',
     'gstreamer1.0-plugins-base',
