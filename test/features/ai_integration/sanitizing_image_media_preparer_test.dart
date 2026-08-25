@@ -3,9 +3,18 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as image;
 import 'package:providentia/features/ai_integration/domain/ai_models.dart';
+import 'package:providentia/features/ai_integration/infrastructure/ephemeral_bytes.dart';
 import 'package:providentia/features/ai_integration/infrastructure/sanitizing_image_media_preparer.dart';
 
 void main() {
+  test('ephemeral byte zeroization overwrites the retained buffer', () {
+    final bytes = Uint8List.fromList(<int>[1, 2, 3, 4]);
+
+    wipeEphemeralBytes(bytes);
+
+    expect(bytes, everyElement(0));
+  });
+
   test('registered source reader owns a defensive transient copy', () async {
     final reader = RegisteredMediaSourceReader();
     final bytes = Uint8List.fromList(List<int>.generate(32, (index) => index));
@@ -72,6 +81,7 @@ void main() {
     expect(media.height, 256);
     expect(media.pageIndex, 3);
     expect(media.sha256, hasLength(64));
+    expect(source.registeredIds, isEmpty);
     final sanitized = await prepared.read(media);
     expect(image.decodeJpg(sanitized), isNotNull);
 
@@ -152,6 +162,30 @@ void main() {
       expect(prepared.deleted, prepared.written);
     },
   );
+
+  test('preparer wipes every owned source and encoded buffer', () async {
+    final original = image.Image(width: 24, height: 24);
+    image.fill(original, color: image.ColorRgb8(20, 40, 60));
+    final sourceBytes = Uint8List.fromList(image.encodePng(original));
+    final asset = _asset('captured', sourceBytes.length);
+    final source = _CapturingSourceReader(sourceBytes);
+    final prepared = _CapturingPreparedStore();
+    final preparer = SanitizingImageMediaPreparer(
+      sources: source,
+      prepared: prepared,
+    );
+
+    final batch = await preparer.prepare(
+      homeId: 'home-1',
+      purpose: AiExtractionKind.stockPhoto,
+      assets: <AiMediaAsset>[asset],
+    );
+
+    expect(source.released, <String>['captured']);
+    expect(source.issued.single, everyElement(0));
+    expect(prepared.writeInputs.single, everyElement(0));
+    expect(await prepared.read(batch.media.single), isNot(everyElement(0)));
+  });
 }
 
 AiMediaAsset _asset(String id, int byteLength, {int? pageIndex}) =>
@@ -199,5 +233,45 @@ final class _RecordingPreparedStore implements EphemeralPreparedMediaStore {
   Future<void> delete(String reference) async {
     deleted.add(reference);
     _bytes.remove(reference);
+  }
+}
+
+final class _CapturingSourceReader implements AiMediaSourceByteReader {
+  _CapturingSourceReader(this.bytes);
+
+  final Uint8List bytes;
+  final List<Uint8List> issued = <Uint8List>[];
+  final List<String> released = <String>[];
+
+  @override
+  Future<Uint8List> read(AiMediaAsset asset) async {
+    final copy = Uint8List.fromList(bytes);
+    issued.add(copy);
+    return copy;
+  }
+
+  @override
+  void release(AiMediaAsset asset) => released.add(asset.id);
+}
+
+final class _CapturingPreparedStore implements EphemeralPreparedMediaStore {
+  final Map<String, Uint8List> _stored = <String, Uint8List>{};
+  final List<Uint8List> writeInputs = <Uint8List>[];
+
+  @override
+  Future<String> write({required String id, required Uint8List bytes}) async {
+    final reference = 'ephemeral://$id';
+    writeInputs.add(bytes);
+    _stored[reference] = Uint8List.fromList(bytes);
+    return reference;
+  }
+
+  @override
+  Future<Uint8List> read(PreparedAiMedia media) async =>
+      Uint8List.fromList(_stored[media.ephemeralReference]!);
+
+  @override
+  Future<void> delete(String reference) async {
+    wipeEphemeralBytes(_stored.remove(reference));
   }
 }

@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:providentia/features/ai_integration/application/ai_ports.dart';
 import 'package:providentia/features/ai_integration/domain/ai_models.dart';
+import 'package:providentia/features/ai_integration/infrastructure/ephemeral_bytes.dart';
 import 'package:providentia_api_client/providentia_api_client.dart';
 
 abstract interface class PreparedMediaByteReader {
@@ -171,91 +172,108 @@ final class Api17AiGateway implements AiProviderGateway {
       );
     }
     final preparedBytes = <Uint8List>[];
-    for (final media in request.media.media) {
-      if (!const <String>{
-        'image/jpeg',
-        'image/png',
-        'image/webp',
-      }.contains(media.mimeType)) {
+    Uint8List? aggregateBytes;
+    try {
+      for (final media in request.media.media) {
+        if (!const <String>{
+          'image/jpeg',
+          'image/png',
+          'image/webp',
+        }.contains(media.mimeType)) {
+          throw const _Api17AiBoundaryException(
+            'unsupported_media_type',
+            'Prepare every selected image as JPEG, PNG, or WebP.',
+          );
+        }
+        final bytes = await _mediaReader.read(media);
+        preparedBytes.add(bytes);
+        if (bytes.length != media.byteLength ||
+            sha256.convert(bytes).toString() != media.sha256) {
+          throw const _Api17AiBoundaryException(
+            'prepared_media_changed',
+            'A prepared image changed after consent. Prepare the selection again.',
+          );
+        }
+      }
+      final aggregateByteCount = preparedBytes.fold<int>(
+        0,
+        (total, bytes) => total + bytes.length,
+      );
+      aggregateBytes = Uint8List(aggregateByteCount);
+      var aggregateOffset = 0;
+      for (final bytes in preparedBytes) {
+        aggregateBytes.setRange(
+          aggregateOffset,
+          aggregateOffset + bytes.length,
+          bytes,
+        );
+        aggregateOffset += bytes.length;
+      }
+      final aggregateSha256 = sha256.convert(aggregateBytes).toString();
+      final media = request.media.media.first;
+      final formFields = <String, String>{
+        'kind': request.kind == AiExtractionKind.receipt ? 'receipt' : 'stock',
+        'transmissionConsent': 'true',
+      };
+      final targetId = request.targetId?.trim();
+      if (targetId != null && targetId.isNotEmpty) {
+        formFields['targetId'] = targetId;
+      }
+      final created = (await _client.createAiExtraction(
+        homeId: request.homeId,
+        formFields: formFields,
+        files: List<http.MultipartFile>.generate(preparedBytes.length, (index) {
+          final item = request.media.media[index];
+          return http.MultipartFile.fromBytes(
+            index == 0 ? 'image' : 'images[]',
+            preparedBytes[index],
+            filename:
+                'prepared-${item.sha256.substring(0, 12)}.${_extension(item.mimeType)}',
+            contentType: MediaType.parse(item.mimeType),
+          );
+        }),
+      )).requireObject();
+      final extractionId = _string(created, 'id');
+      if (created['status'] != 'review_required') {
         throw const _Api17AiBoundaryException(
-          'unsupported_media_type',
-          'Prepare every selected image as JPEG, PNG, or WebP.',
+          'invalid_ai_response',
+          'The AI extraction did not enter mandatory review.',
         );
       }
-      final bytes = await _mediaReader.read(media);
-      if (bytes.length != media.byteLength ||
-          sha256.convert(bytes).toString() != media.sha256) {
-        throw const _Api17AiBoundaryException(
-          'prepared_media_changed',
-          'A prepared image changed after consent. Prepare the selection again.',
+      final createdCandidateCount = _integer(created, 'candidateCount');
+      final observationCount = _integer(created, 'observationCount');
+      if (createdCandidateCount < 0 || createdCandidateCount > 200) {
+        throw const FormatException('Invalid candidate count.');
+      }
+      if (observationCount != request.media.media.length) {
+        throw const FormatException('Invalid observation count.');
+      }
+      final extraction = (await _client.getAiExtraction(
+        homeId: request.homeId,
+        extractionId: extractionId,
+      )).requireObject();
+      if (extraction['status'] != 'review_required') {
+        throw _Api17AiBoundaryException(
+          'extraction_${extraction['status'] ?? 'unknown'}',
+          'The extraction did not reach mandatory human review.',
         );
       }
-      preparedBytes.add(bytes);
-    }
-    final aggregateBytes = preparedBytes.expand((bytes) => bytes).toList();
-    final aggregateSha256 = sha256.convert(aggregateBytes).toString();
-    final aggregateByteCount = preparedBytes.fold<int>(
-      0,
-      (total, bytes) => total + bytes.length,
-    );
-    final media = request.media.media.first;
-    final formFields = <String, String>{
-      'kind': request.kind == AiExtractionKind.receipt ? 'receipt' : 'stock',
-      'transmissionConsent': 'true',
-    };
-    final targetId = request.targetId?.trim();
-    if (targetId != null && targetId.isNotEmpty) {
-      formFields['targetId'] = targetId;
-    }
-    final created = (await _client.createAiExtraction(
-      homeId: request.homeId,
-      formFields: formFields,
-      files: List<http.MultipartFile>.generate(preparedBytes.length, (index) {
-        final item = request.media.media[index];
-        return http.MultipartFile.fromBytes(
-          index == 0 ? 'image' : 'images[]',
-          preparedBytes[index],
-          filename:
-              'prepared-${item.sha256.substring(0, 12)}.${_extension(item.mimeType)}',
-          contentType: MediaType.parse(item.mimeType),
-        );
-      }),
-    )).requireObject();
-    final extractionId = _string(created, 'id');
-    if (created['status'] != 'review_required') {
-      throw const _Api17AiBoundaryException(
-        'invalid_ai_response',
-        'The AI extraction did not enter mandatory review.',
+      _validateExtractionBinding(
+        request: request,
+        firstMedia: media,
+        aggregateSha256: aggregateSha256,
+        aggregateByteCount: aggregateByteCount,
+        extractionId: extractionId,
+        candidateCount: createdCandidateCount,
+        extraction: extraction,
       );
+      return extraction;
+    } finally {
+      for (final bytes in preparedBytes) {
+        wipeEphemeralBytes(bytes);
+      }
+      wipeEphemeralBytes(aggregateBytes);
     }
-    final createdCandidateCount = _integer(created, 'candidateCount');
-    final observationCount = _integer(created, 'observationCount');
-    if (createdCandidateCount < 0 || createdCandidateCount > 200) {
-      throw const FormatException('Invalid candidate count.');
-    }
-    if (observationCount != request.media.media.length) {
-      throw const FormatException('Invalid observation count.');
-    }
-    final extraction = (await _client.getAiExtraction(
-      homeId: request.homeId,
-      extractionId: extractionId,
-    )).requireObject();
-    if (extraction['status'] != 'review_required') {
-      throw _Api17AiBoundaryException(
-        'extraction_${extraction['status'] ?? 'unknown'}',
-        'The extraction did not reach mandatory human review.',
-      );
-    }
-    _validateExtractionBinding(
-      request: request,
-      firstMedia: media,
-      aggregateSha256: aggregateSha256,
-      aggregateByteCount: aggregateByteCount,
-      extractionId: extractionId,
-      candidateCount: createdCandidateCount,
-      extraction: extraction,
-    );
-    return extraction;
   }
 
   ReceiptProposal _receiptProposal(

@@ -7,9 +7,12 @@ import 'package:image/image.dart' as image;
 import 'package:providentia/features/ai_integration/application/ai_ports.dart';
 import 'package:providentia/features/ai_integration/domain/ai_models.dart';
 import 'package:providentia/features/ai_integration/infrastructure/api17_ai_gateway.dart';
+import 'package:providentia/features/ai_integration/infrastructure/ephemeral_bytes.dart';
 
 abstract interface class AiMediaSourceByteReader {
   Future<Uint8List> read(AiMediaAsset asset);
+
+  void release(AiMediaAsset asset);
 }
 
 abstract interface class EphemeralPreparedMediaStore
@@ -28,6 +31,7 @@ final class MemoryEphemeralPreparedMediaStore
   @override
   Future<String> write({required String id, required Uint8List bytes}) async {
     final reference = 'ephemeral://$id';
+    wipeEphemeralBytes(_bytes.remove(reference));
     _bytes[reference] = Uint8List.fromList(bytes);
     return reference;
   }
@@ -43,7 +47,14 @@ final class MemoryEphemeralPreparedMediaStore
 
   @override
   Future<void> delete(String reference) async {
-    _bytes.remove(reference);
+    wipeEphemeralBytes(_bytes.remove(reference));
+  }
+
+  void clear() {
+    for (final bytes in _bytes.values) {
+      wipeEphemeralBytes(bytes);
+    }
+    _bytes.clear();
   }
 }
 
@@ -95,31 +106,48 @@ final class SanitizingImageMediaPreparer implements AiMediaPreparationPort {
 
     final prepared = <PreparedAiMedia>[];
     try {
-      for (var index = 0; index < assets.length; index++) {
-        final asset = assets[index];
-        final sourceBytes = await _sources.read(asset);
-        if (sourceBytes.length != asset.byteLength) {
-          throw StateError('Selected media changed before preparation.');
+      try {
+        for (var index = 0; index < assets.length; index++) {
+          final asset = assets[index];
+          Uint8List? sourceBytes;
+          _EncodedImage? encoded;
+          try {
+            sourceBytes = await _sources.read(asset);
+            if (sourceBytes.length != asset.byteLength) {
+              throw StateError('Selected media changed before preparation.');
+            }
+            final sanitized = await Isolate.run(
+              () => _sanitize(sourceBytes!, maximumDimension, jpegQuality),
+            );
+            encoded = sanitized;
+            final hash = sha256.convert(sanitized.bytes).toString();
+            final id = '${asset.id}-${hash.substring(0, 16)}';
+            final reference = await _prepared.write(
+              id: id,
+              bytes: sanitized.bytes,
+            );
+            prepared.add(
+              PreparedAiMedia(
+                sourceMediaId: asset.id,
+                ephemeralReference: reference,
+                previewReference: reference,
+                sha256: hash,
+                mimeType: 'image/jpeg',
+                byteLength: sanitized.bytes.length,
+                width: sanitized.width,
+                height: sanitized.height,
+                pageIndex: asset.pageIndex ?? index,
+              ),
+            );
+          } finally {
+            wipeEphemeralBytes(sourceBytes);
+            wipeEphemeralBytes(encoded?.bytes);
+          }
         }
-        final encoded = await Isolate.run(
-          () => _sanitize(sourceBytes, maximumDimension, jpegQuality),
-        );
-        final hash = sha256.convert(encoded.bytes).toString();
-        final id = '${asset.id}-${hash.substring(0, 16)}';
-        final reference = await _prepared.write(id: id, bytes: encoded.bytes);
-        prepared.add(
-          PreparedAiMedia(
-            sourceMediaId: asset.id,
-            ephemeralReference: reference,
-            previewReference: reference,
-            sha256: hash,
-            mimeType: 'image/jpeg',
-            byteLength: encoded.bytes.length,
-            width: encoded.width,
-            height: encoded.height,
-            pageIndex: asset.pageIndex ?? index,
-          ),
-        );
+      } finally {
+        for (final asset in assets) {
+          _sources.release(asset);
+        }
       }
       final batchHash = sha256
           .convert(prepared.expand((item) => item.sha256.codeUnits).toList())
@@ -192,10 +220,21 @@ final class RegisteredMediaSourceReader implements AiMediaSourceByteReader {
     if (bytes.length != asset.byteLength) {
       throw ArgumentError('Registered media length does not match metadata.');
     }
+    wipeEphemeralBytes(_sources.remove(asset.id));
     _sources[asset.id] = Uint8List.fromList(bytes);
   }
 
-  void remove(String assetId) => _sources.remove(assetId);
+  void remove(String assetId) => wipeEphemeralBytes(_sources.remove(assetId));
+
+  void clear() {
+    for (final bytes in _sources.values) {
+      wipeEphemeralBytes(bytes);
+    }
+    _sources.clear();
+  }
+
+  @override
+  void release(AiMediaAsset asset) => remove(asset.id);
 
   @override
   Future<Uint8List> read(AiMediaAsset asset) async {

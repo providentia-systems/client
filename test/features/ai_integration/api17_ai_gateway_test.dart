@@ -110,6 +110,33 @@ void main() {
     expect(byteFailure.code, 'prepared_media_changed');
   });
 
+  test('server gateway wipes every reader-owned media buffer', () async {
+    final successReader = _CapturingMediaReader(_bytes);
+    final success = Api17AiGateway(
+      client: _extractionClient(documentType: 'receipt'),
+      mediaReader: successReader,
+    );
+
+    await success.extractReceipt(_request(AiExtractionKind.receipt));
+
+    expect(successReader.issued, hasLength(1));
+    expect(successReader.issued.single, everyElement(0));
+
+    final failureReader = _CapturingMediaReader(_bytes);
+    final failure = Api17AiGateway(
+      client: _client(
+        (_) async =>
+            _json(<String, Object?>{'type': 'rate-limit'}, statusCode: 429),
+      ),
+      mediaReader: failureReader,
+    );
+
+    await failure.extractReceipt(_request(AiExtractionKind.receipt));
+
+    expect(failureReader.issued, hasLength(1));
+    expect(failureReader.issued.single, everyElement(0));
+  });
+
   test(
     'readiness fails closed for encryption, provider, and network gaps',
     () async {
@@ -898,7 +925,8 @@ final class _MediaReader implements PreparedMediaByteReader {
   final Uint8List bytes;
 
   @override
-  Future<Uint8List> read(PreparedAiMedia media) async => bytes;
+  Future<Uint8List> read(PreparedAiMedia media) async =>
+      Uint8List.fromList(bytes);
 }
 
 final class _MappedMediaReader implements PreparedMediaByteReader {
@@ -908,5 +936,19 @@ final class _MappedMediaReader implements PreparedMediaByteReader {
 
   @override
   Future<Uint8List> read(PreparedAiMedia media) async =>
-      bytesBySource[media.sourceMediaId]!;
+      Uint8List.fromList(bytesBySource[media.sourceMediaId]!);
+}
+
+final class _CapturingMediaReader implements PreparedMediaByteReader {
+  _CapturingMediaReader(this.bytes);
+
+  final Uint8List bytes;
+  final List<Uint8List> issued = <Uint8List>[];
+
+  @override
+  Future<Uint8List> read(PreparedAiMedia media) async {
+    final copy = Uint8List.fromList(bytes);
+    issued.add(copy);
+    return copy;
+  }
 }
