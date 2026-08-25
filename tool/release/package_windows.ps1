@@ -112,6 +112,13 @@ $manifest = @"
       <uap:VisualElements DisplayName="Providentia" Description="Providentia household stock control client"
                           BackgroundColor="transparent" Square150x150Logo="Assets\Square150x150Logo.png"
                           Square44x44Logo="Assets\Square44x44Logo.png" />
+      <Extensions>
+        <uap:Extension Category="windows.protocol">
+          <uap:Protocol Name="providentia">
+            <uap:DisplayName>Providentia homeowner login</uap:DisplayName>
+          </uap:Protocol>
+        </uap:Extension>
+      </Extensions>
     </Application>
   </Applications>
   <Capabilities><rescap:Capability Name="runFullTrust" /></Capabilities>

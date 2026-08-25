@@ -62,10 +62,16 @@ import 'package:providentia/features/homes/presentation/home_selection_page.dart
 import 'package:providentia/features/homes/presentation/homes_controller.dart';
 import 'package:providentia/features/identity/application/identity_session_manager.dart';
 import 'package:providentia/features/identity/domain/identity_models.dart';
+import 'package:providentia/features/identity/domain/login_link_approval_models.dart';
 import 'package:providentia/features/identity/infrastructure/api11_identity_transport.dart';
+import 'package:providentia/features/identity/infrastructure/browser_fragment_scrubber.dart';
+import 'package:providentia/features/identity/infrastructure/generated_login_link_approval_transport.dart';
+import 'package:providentia/features/identity/infrastructure/homeowner_app_link_ingress.dart';
 import 'package:providentia/features/identity/infrastructure/secure_login_link_request_factory.dart';
 import 'package:providentia/features/identity/presentation/account_access_page.dart';
 import 'package:providentia/features/identity/presentation/identity_controller.dart';
+import 'package:providentia/features/identity/presentation/login_link_approval_controller.dart';
+import 'package:providentia/features/identity/presentation/login_link_approval_page.dart';
 import 'package:providentia/features/identity/presentation/login_link_sign_in_page.dart';
 import 'package:providentia/features/inventory/application/stock_camera_capture_session.dart';
 import 'package:providentia/features/inventory/application/stock_photo_count_controller.dart';
@@ -92,21 +98,28 @@ import 'package:providentia_api_client/providentia_api_client.dart';
 /// local-first household workspace. No home ID or bearer token is required at
 /// build time, and every server call is bound to the authenticated session.
 final class ProductionBootstrapApp extends StatefulWidget {
-  const ProductionBootstrapApp({required this.configuration, super.key});
+  const ProductionBootstrapApp({
+    required this.configuration,
+    this.initialAppLink,
+    super.key,
+  });
 
   final RuntimeConfiguration configuration;
+  final InitialHomeownerAppLink? initialAppLink;
 
   @override
   State<ProductionBootstrapApp> createState() => _ProductionBootstrapAppState();
 }
 
-final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp> {
+final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp>
+    with WidgetsBindingObserver {
   late final AppDatabase _database;
   late final String _deviceId;
   late final ProvidentiaApiClient _identityApi;
   late final ProvidentiaApiClient _authorizedApi;
   late final IdentitySessionManager _identityManager;
   late final IdentityController _identityController;
+  late final LoginLinkApprovalController _loginLinkApprovalController;
   late final HomesController _homesController;
   late final ProductionSessionSecurityBoundary _sessionSecurityBoundary;
   late final ProductionHomeRevocationBoundary _homeRevocationBoundary;
@@ -124,10 +137,15 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp> {
   final Map<String, Future<bool>> _revokedHomePurges = <String, Future<bool>>{};
   final HomeSyncRevocationGate _homeSyncRevocationGate =
       HomeSyncRevocationGate();
+  Uri? _pendingInitialAppLink;
+  bool _initialAppLinkScheduled = false;
+  bool _loginApprovalRouteActive = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _pendingInitialAppLink = widget.initialAppLink?.take();
     _database = AppDatabase.defaults();
     _homeRevocationBoundary = ProductionHomeRevocationBoundary(
       purge: (homeId) {
@@ -145,6 +163,10 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp> {
         : ClientSessionTransport.nativeBearer;
     _identityApi = const ApiClientFactory().create(
       configuration: widget.configuration,
+    );
+    _loginLinkApprovalController = LoginLinkApprovalController(
+      transport: GeneratedLoginLinkApprovalTransport(_identityApi),
+      expectedBaseUri: widget.configuration.homeownerAppLinkBaseUri,
     );
     final identityTransport = Api11IdentityTransport(
       _identityApi,
@@ -217,10 +239,12 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp> {
         if (snapshot.connectionState != ConnectionState.done) {
           return const _StartupProgressApp();
         }
+        _scheduleInitialAppLink();
         return MaterialApp(
           navigatorKey: _rootNavigatorKey,
           debugShowCheckedModeBanner: false,
           title: 'Providentia',
+          initialRoute: '/',
           theme: ProvidentiaTheme.light(),
           highContrastTheme: ProvidentiaTheme.light(highContrast: true),
           home: LoginLinkSignInPage(
@@ -291,14 +315,62 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp> {
     );
   }
 
+  void _scheduleInitialAppLink() {
+    if (_initialAppLinkScheduled) return;
+    final uri = _pendingInitialAppLink;
+    _pendingInitialAppLink = null;
+    _initialAppLinkScheduled = true;
+    if (uri == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_presentLoginLinkApproval(uri));
+    });
+  }
+
+  @override
+  Future<bool> didPushRouteInformation(RouteInformation routeInformation) {
+    final uri = routeInformation.uri;
+    if (!isHomeownerLoginLink(
+      uri,
+      widget.configuration.homeownerAppLinkBaseUri,
+    )) {
+      return Future<bool>.value(false);
+    }
+    scrubBrowserFragment();
+    unawaited(_presentLoginLinkApproval(uri));
+    return Future<bool>.value(true);
+  }
+
+  Future<void> _presentLoginLinkApproval(Uri uri) async {
+    if (_loginApprovalRouteActive) return;
+    await _initialization;
+    if (!mounted || _loginApprovalRouteActive) return;
+    _loginApprovalRouteActive = true;
+    unawaited(_loginLinkApprovalController.receive(uri));
+    try {
+      await _rootNavigatorKey.currentState?.push<void>(
+        MaterialPageRoute<void>(
+          settings: const RouteSettings(name: '/login-link-approval'),
+          builder: (_) =>
+              LoginLinkApprovalPage(controller: _loginLinkApprovalController),
+        ),
+      );
+    } finally {
+      _loginLinkApprovalController.cancel();
+      _loginApprovalRouteActive = false;
+    }
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _pendingInitialAppLink = null;
     unawaited(
       _initialization.then((_) async {
         await _identitySubscription?.cancel();
         _homesController.removeListener(_handleHomeSecurityState);
         _homesController.dispose();
         _identityController.dispose();
+        _loginLinkApprovalController.dispose();
         await _identityManager.dispose();
         _authorizedApi.close();
         _authorizedTransport?.close();

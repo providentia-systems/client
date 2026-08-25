@@ -124,6 +124,95 @@ void main() {
     expect(result.code, 'invalid_ai_response');
   });
 
+  test('schema-v2 quantity shapes fail closed on contract drift', () async {
+    Future<String> stockFailure(Map<String, Object?> extraction) async {
+      final gateway = Api17AiGateway(
+        client: _client(
+          (request) async => request.method == 'POST'
+              ? _json(_created(), statusCode: 201)
+              : _json(extraction),
+        ),
+        mediaReader: _MediaReader(_bytes),
+      );
+      final failure =
+          await gateway.extractStockPhoto(_request(AiExtractionKind.stockPhoto))
+              as AiExtractionFailure<StockPhotoProposal>;
+      return failure.code;
+    }
+
+    Map<String, Object?> changedStockPayload(
+      Map<String, Object?> changes, {
+      int schemaVersion = 2,
+    }) {
+      final extraction = _extraction('stock');
+      final candidate =
+          (extraction['candidates']! as List<Object?>).single!
+              as Map<String, Object?>;
+      final payload = candidate['payload']! as Map<String, Object?>;
+      return <String, Object?>{
+        ...extraction,
+        'schemaVersion': schemaVersion,
+        'candidates': <Object?>[
+          <String, Object?>{
+            ...candidate,
+            'payload': <String, Object?>{...payload, ...changes},
+          },
+        ],
+      };
+    }
+
+    expect(
+      await stockFailure(
+        changedStockPayload(<String, Object?>{
+          'quantityMinimum': '3',
+          'quantityMaximum': '2',
+        }),
+      ),
+      'invalid_ai_response',
+    );
+    expect(
+      await stockFailure(
+        changedStockPayload(<String, Object?>{'quantity': '2'}),
+      ),
+      'invalid_ai_response',
+    );
+    expect(
+      await stockFailure(
+        changedStockPayload(const <String, Object?>{}, schemaVersion: 1),
+      ),
+      'invalid_ai_response',
+    );
+
+    final receipt = _extraction('receipt');
+    final receiptCandidate =
+        (receipt['candidates']! as List<Object?>).single!
+            as Map<String, Object?>;
+    final receiptPayload = receiptCandidate['payload']! as Map<String, Object?>;
+    final receiptGateway = Api17AiGateway(
+      client: _client(
+        (request) async => request.method == 'POST'
+            ? _json(_created(), statusCode: 201)
+            : _json(<String, Object?>{
+                ...receipt,
+                'candidates': <Object?>[
+                  <String, Object?>{
+                    ...receiptCandidate,
+                    'payload': <String, Object?>{
+                      ...receiptPayload,
+                      'quantityMinimum': '1',
+                    },
+                  },
+                ],
+              }),
+      ),
+      mediaReader: _MediaReader(_bytes),
+    );
+    final receiptFailure =
+        await receiptGateway.extractReceipt(_request(AiExtractionKind.receipt))
+            as AiExtractionFailure<ReceiptProposal>;
+    expect(receiptFailure.code, 'invalid_ai_response');
+  });
+
   test('unsupported routes and changed prepared bytes fail closed', () async {
     final gateway = Api17AiGateway(
       client: _client((_) async => throw StateError('must not call server')),
@@ -632,9 +721,13 @@ void main() {
       'candidates': <Object?>[
         <String, Object?>{
           'position': 0,
+          'candidateType': 'receipt_line',
           'payload': <String, Object?>{
+            'candidateType': 'receipt_line',
             'description': 'Rice',
             'quantity': '1',
+            'quantityMinimum': null,
+            'quantityMaximum': null,
             'confidence': 0.5,
             'fieldConfidence': <String, Object?>{},
           },
@@ -680,11 +773,15 @@ void main() {
         'candidates': <Object?>[
           <String, Object?>{
             'position': 0,
+            'candidateType': 'stock_item',
             'revision': 1,
             'reviewStatus': 'pending',
             'payload': <String, Object?>{
+              'candidateType': 'stock_item',
               'description': 'Rice',
-              'quantity': 'not-a-number',
+              'quantity': null,
+              'quantityMinimum': '0',
+              'quantityMaximum': '0',
               'confidence': 0.5,
             },
           },
@@ -844,7 +941,7 @@ Map<String, Object?> _binding({
   'inputSha256':
       'be45cb2605bf36bebde684841a28f0fd43c69850a3dce5fedba69928ee3a8991',
   'inputByteCount': 16,
-  'schemaVersion': 1,
+  'schemaVersion': 2,
   'promptTemplateVersion': 1,
 };
 
@@ -867,16 +964,22 @@ Map<String, Object?> _extraction(String documentType) => <String, Object?>{
   'candidates': <Object?>[
     <String, Object?>{
       'position': 0,
+      'candidateType': documentType == 'stock' ? 'stock_item' : 'receipt_line',
       'revision': 1,
       'reviewStatus': 'pending',
       'payload': <String, Object?>{
+        'candidateType': documentType == 'stock'
+            ? 'stock_item'
+            : 'receipt_line',
         'rawText': 'Rice 2 x 10.00',
         'description': 'Rice',
         'brand': 'Providentia',
         'product': 'Rice',
         'variant': 'Long grain',
         'packText': '1 kg',
-        'quantity': '2',
+        'quantity': documentType == 'stock' ? null : '2',
+        'quantityMinimum': documentType == 'stock' ? '2' : null,
+        'quantityMaximum': documentType == 'stock' ? '2' : null,
         'unitPrice': '10.00',
         'lineTotal': '20.00',
         'discountAmount': '0.00',

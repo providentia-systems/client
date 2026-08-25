@@ -989,7 +989,7 @@ void main() {
       var operations = await database.select(database.clientOperations).get();
       expect(operations, hasLength(2));
       final linePayload = jsonDecode(operations.last.payload);
-      expect(linePayload, containsPair('source', 'photo'));
+      expect(linePayload, containsPair('source', 'photo-confirmed'));
       expect(
         await (database.select(
           database.localRecords,

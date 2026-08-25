@@ -1956,7 +1956,9 @@ final class DriftHouseholdRepository
           'homeProductId': line.itemId,
           'quantity': _decimal(line.observedQuantity!),
           'confidence': null,
-          'source': line.source == CountSource.photo ? 'photo' : 'manual',
+          'source': line.source == CountSource.photo
+              ? 'photo-confirmed'
+              : 'manual',
           'notes': '',
         },
         at: at,
@@ -2455,7 +2457,7 @@ final class DriftHouseholdRepository
     'homeProductId': line.itemId,
     'quantity': _decimal(line.observedQuantity!),
     'confidence': null,
-    'source': line.source == CountSource.photo ? 'photo' : 'manual',
+    'source': line.source == CountSource.photo ? 'photo-confirmed' : 'manual',
     'notes': '',
     'status': 'confirmed',
   };

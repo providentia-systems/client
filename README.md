@@ -97,11 +97,10 @@ Start the backend development stack first. It includes Mailpit and the
 notification worker needed to deliver login links. Then run Chrome on the
 fixed, backend-allowlisted `http://localhost:8081` origin:
 
-For the default loopback backend, its browser approval origin must also be in
-the runtime allowlist. Start the backend with
-`http://127.0.0.1:8080`, `http://localhost:8080`, and the Flutter web origins
-in `CORS_ALLOWED_ORIGINS`; the exact source and prebuilt commands plus a `303`
-capture smoke test are in [local development](docs/local-development.md).
+For the default loopback backend, put the Flutter web origins in
+`CORS_ALLOWED_ORIGINS` and configure `HOMEOWNER_APP_LINK_BASE` to the Flutter
+client route. The exact source and prebuilt commands are in
+[local development](docs/local-development.md).
 
 ```bash
 flutter run -d chrome \
@@ -110,19 +109,18 @@ flutter run -d chrome \
   --web-header=Cross-Origin-Opener-Policy=same-origin \
   --web-header=Cross-Origin-Embedder-Policy=require-corp \
   --dart-define=PROVIDENTIA_ENVIRONMENT=development \
-  --dart-define=PROVIDENTIA_API_BASE_URL=http://localhost:8080
+  --dart-define=PROVIDENTIA_API_BASE_URL=http://localhost:8080 \
+  --dart-define=PROVIDENTIA_HOMEOWNER_APP_LINK_BASE=http://localhost:8081/homeowner
 ```
 
-Enter an email in the client, open the delivered login link in Mailpit or the
-recipient mailbox, explicitly approve the request in the browser, and return to
-the originating client. With the loopback commands above, open Mailpit and the
-approval link on the same workstation (or an ADB-reversed device). A genuinely
-different device requires a reachable trusted HTTPS backend whose
-`PUBLIC_BASE_URL` matches the emailed origin. The originating client polls and
-exchanges its private PKCE proof, so a deep link is optional.
+Enter an email in the client, open the delivered link in the Providentia
+homeowner client, explicitly approve the reviewed device, and return to the
+originating client. A genuinely different device requires a reachable trusted
+HTTPS API and a configured client app-link base. The originating client polls
+and exchanges its private PKCE proof; the reviewing client receives no session.
 Use the newest **Approve your Providentia login** message after every retry;
-resending deliberately retires older links, and a browser capture that already
-removed its fragment cannot be recovered by refreshing the cleaned URL.
+resending deliberately retires older links, and a capability removed from the
+browser address cannot be recovered by refreshing the cleaned URL.
 Build-time bearer tokens and home IDs are not supported. Native refresh tokens
 are kept in platform secure storage, access tokens remain in memory, and web
 authentication uses credentialed HttpOnly cookies.

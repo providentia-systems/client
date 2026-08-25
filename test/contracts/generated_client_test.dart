@@ -133,8 +133,8 @@ void main() {
       );
     });
 
-    test('publishes only the API 1.15.0 homeowner operation registry', () {
-      expect(ProvidentiaApiClient.operations, hasLength(142));
+    test('publishes only the API 1.18.0 homeowner operation registry', () {
+      expect(ProvidentiaApiClient.operations, hasLength(145));
       expect(
         ProvidentiaApiClient.operations['createAiExtraction'],
         isA<ApiOperation>()
@@ -151,6 +151,9 @@ void main() {
         containsAll(<String>[
           'login',
           'startLoginLink',
+          'proveLoginLinkApproval',
+          'reviewLoginLinkApproval',
+          'decideLoginLinkApproval',
           'getLoginLinkStatus',
           'exchangeLoginLink',
           'refreshSession',
@@ -208,16 +211,20 @@ void main() {
             reason: operation.operationId,
           );
         }
-        for (final forbiddenModerationSegment in <String>[
-          '/decision',
-          '/image-preview',
-          '/image-publication',
-        ]) {
-          expect(
-            operation.pathTemplate.contains(forbiddenModerationSegment),
-            isFalse,
-            reason: operation.operationId,
-          );
+        if (operation.pathTemplate.startsWith(
+          '/api/v1/catalog-contributions/',
+        )) {
+          for (final forbiddenModerationSegment in <String>[
+            '/decision',
+            '/image-preview',
+            '/image-publication',
+          ]) {
+            expect(
+              operation.pathTemplate.contains(forbiddenModerationSegment),
+              isFalse,
+              reason: operation.operationId,
+            );
+          }
         }
       }
     });

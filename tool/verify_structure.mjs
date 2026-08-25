@@ -47,6 +47,7 @@ const requiredFiles = [
   'windows/CMakeLists.txt',
   'windows/runner/resources/app_icon.ico',
   'contracts/providentia-v1.json',
+  'contracts/source/providentia-v1.json.gz',
   'contracts/contract.lock.json',
   'contracts/design-tokens/providentia-v1.json',
   'contracts/design-tokens/contract.lock.json',
@@ -58,6 +59,7 @@ const requiredFiles = [
   'tools/install_node_linux.sh',
   'packaging/linux/APPIMAGE-RUNTIME.md',
   'tool/release/verify_linux_deb.sh',
+  'tool/materialize-openapi-contract.sh',
 ];
 
 for (const relativePath of requiredDirectories) {
@@ -132,6 +134,20 @@ for (const dependency of [
     `Linux camera runtime requirements are missing ${dependency}.`,
   );
 }
+for (const packageName of [
+  'dbus-x11',
+  'desktop-file-utils',
+  'dpkg-dev',
+  'libegl1',
+  'libgles2',
+  'xauth',
+  'xvfb',
+]) {
+  assert(
+    agentRequirements.linux?.aptPackages?.includes(packageName),
+    `Agent Linux prerequisites are missing ${packageName}.`,
+  );
+}
 for (const requiredHost of [
   'archive.ubuntu.com',
   'security.ubuntu.com',
@@ -159,6 +175,10 @@ for (const required of [
   'frameworkRevision',
   'ANALYZER_STATE_LOCATION_OVERRIDE',
   'flutter_revision',
+  'PROVIDENTIA_LINUX_PACKAGE_FORMATS=deb',
+  'PROVIDENTIA_LINUX_LAUNCH_SMOKE=true',
+  'dbus-run-session',
+  'verify_linux_deb.sh',
 ]) {
   assert(
     agentSetup.includes(required),
@@ -293,6 +313,7 @@ const generatedClientAdapters = new Set([
   'lib/features/homes/infrastructure/api11_home_transport.dart',
   'lib/features/household_sync/infrastructure/api17_callback_household_gateway.dart',
   'lib/features/identity/infrastructure/api11_identity_transport.dart',
+  'lib/features/identity/infrastructure/generated_login_link_approval_transport.dart',
   'lib/features/inventory/infrastructure/generated_home_item_master_source.dart',
   'lib/features/inventory/infrastructure/item_master_refreshing_synchronization.dart',
   'lib/features/reporting/infrastructure/generated_household_report_repository.dart',
@@ -407,8 +428,11 @@ const generatedManifest = JSON.parse(
 );
 assert(
   generatedManifest.clientProfile === 'homeowner' &&
-    generatedManifest.canonicalOperationCount === 174 &&
-    generatedManifest.generatedOperationCount === 142,
+    generatedManifest.contractVersion === '1.18.0' &&
+    generatedManifest.contractSha256 ===
+      'fb7f18cc8d2e0f7aaf3ec9f1bd3039316c6f44af0023110936778a8d616a6759' &&
+    generatedManifest.canonicalOperationCount === 177 &&
+    generatedManifest.generatedOperationCount === 145,
   'Generated client manifest must distinguish the canonical and homeowner surfaces.',
 );
 try {
@@ -426,6 +450,31 @@ const allTextFiles = (await walk(root)).filter(
     !file.includes(`${path.sep}docs${path.sep}phase0${path.sep}`) &&
     !/\.(png|ico|jpe?g|jar|wasm)$/u.test(file),
 );
+for (const relative of [
+  'README.md',
+  'docs/local-development.md',
+  'docs/release/phase-09-10-release-engineering.md',
+  '.github/workflows/browser-acceptance.yml',
+  'tool/release/verify_web_runtime.mjs',
+  'tool/release/login_link_acceptance_protocol.mjs',
+]) {
+  const source = await readFile(path.join(root, relative), 'utf8');
+  const stalePublicBaseName = ['PUBLIC', 'BASE', 'URL'].join('_');
+  assert(
+    !source.includes(stalePublicBaseName),
+    `${relative} still configures an interactive backend public-site origin.`,
+  );
+  const withoutJsonApiPaths = source.replaceAll(
+    '/api/v1/auth/login-links/',
+    '',
+  );
+  assert(
+    !/\/login-links\/(?:\{requestId\}|\$\{requestId\}|[0-9a-f]{8}-)/iu.test(
+      withoutJsonApiPaths,
+    ) && !source.includes('Approve this login?'),
+    `${relative} still targets the removed backend login-link HTML page.`,
+  );
+}
 const obsoleteNameViolations = [];
 const obsoletePattern = new RegExp(
   `${['Stock', 'Home'].join('')}|${['stock', 'home'].join('')}`,

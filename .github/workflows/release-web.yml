@@ -31,6 +31,7 @@ jobs:
       DEPLOY_HOOK: ${{ secrets.WEB_DEPLOY_WEBHOOK_URL }}
       DEPLOY_TOKEN: ${{ secrets.WEB_DEPLOY_WEBHOOK_TOKEN }}
       API_BASE_URL: ${{ vars.PRODUCTION_API_BASE_URL }}
+      HOMEOWNER_APP_LINK_BASE: ${{ vars.PRODUCTION_HOMEOWNER_APP_LINK_BASE }}
       REQUESTED_VERSION: ${{ inputs.version }}
       REQUESTED_PUBLISH: ${{ inputs.publish }}
     steps:
@@ -40,6 +41,16 @@ jobs:
           if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then version=$REQUESTED_VERSION; fi
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]] || exit 64
           [[ "$API_BASE_URL" == https://* ]] || { echo 'PRODUCTION_API_BASE_URL must be HTTPS.' >&2; exit 78; }
+          node -e '
+            const uri = new URL(process.argv[1]);
+            if (uri.protocol !== "https:" || uri.username !== "" || uri.password !== ""
+                || uri.pathname !== "/homeowner" || uri.search !== "" || uri.hash !== "") {
+              process.exit(1);
+            }
+          ' "$HOMEOWNER_APP_LINK_BASE" || {
+            echo 'PRODUCTION_HOMEOWNER_APP_LINK_BASE must be an HTTPS /homeowner route without query or fragment.' >&2
+            exit 78
+          }
           publish=$([[ "$GITHUB_EVENT_NAME" == push || "$REQUESTED_PUBLISH" == true ]] && echo true || echo false)
           if [[ "$publish" == true && ( -z "$DEPLOY_HOOK" || -z "$DEPLOY_TOKEN" ) ]]; then
             echo 'Hosted publication requested without WEB_DEPLOY_WEBHOOK_URL/TOKEN.' >&2
@@ -60,7 +71,8 @@ jobs:
           flutter build web --release --pwa-strategy=offline-first \
             --build-name "$RELEASE_VERSION" --build-number "$GITHUB_RUN_NUMBER" \
             --dart-define PROVIDENTIA_ENVIRONMENT=production \
-            --dart-define PROVIDENTIA_API_BASE_URL="$API_BASE_URL"
+            --dart-define PROVIDENTIA_API_BASE_URL="$API_BASE_URL" \
+            --dart-define PROVIDENTIA_HOMEOWNER_APP_LINK_BASE="$HOMEOWNER_APP_LINK_BASE"
           test -f build/web/flutter_service_worker.js
           test -f build/web/manifest.json
           mkdir -p build/release/web/artifacts

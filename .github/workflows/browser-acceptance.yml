@@ -28,7 +28,7 @@ jobs:
       TARGET_URL: ${{ inputs.target_url }}
       REQUIRE_AUTH: ${{ inputs.require_auth }}
       API_URL: ${{ vars.E2E_API_BASE_URL || secrets.E2E_API_BASE_URL }}
-      PUBLIC_URL: ${{ vars.E2E_PUBLIC_BASE_URL || secrets.E2E_PUBLIC_BASE_URL }}
+      HOMEOWNER_APP_LINK_BASE: ${{ vars.E2E_HOMEOWNER_APP_LINK_BASE }}
       EMAIL: ${{ secrets.E2E_USER_EMAIL }}
       IMAP_HOST: ${{ vars.E2E_MAILBOX_IMAP_HOST }}
       IMAP_PORT: ${{ vars.E2E_MAILBOX_IMAP_PORT || '993' }}
@@ -39,8 +39,8 @@ jobs:
       - run: |
           [[ "$TARGET_URL" == https://* ]] || { echo 'A deployed HTTPS PWA URL is required.' >&2; exit 78; }
           if [[ "$REQUIRE_AUTH" == true ]]; then
-            [[ "$API_URL" == https://* && "$PUBLIC_URL" == https://* && -n "$EMAIL" && -n "$IMAP_HOST" && -n "$IMAP_USER" && -n "$IMAP_PASSWORD" ]] || {
-              echo 'Authenticated acceptance requires HTTPS API/public URLs, a synthetic email and controlled IMAP mailbox settings.' >&2
+            [[ "$API_URL" == https://* && "$HOMEOWNER_APP_LINK_BASE" == https://* && -n "$EMAIL" && -n "$IMAP_HOST" && -n "$IMAP_USER" && -n "$IMAP_PASSWORD" ]] || {
+              echo 'Authenticated acceptance requires HTTPS API/homeowner app-link URLs, a synthetic email and controlled IMAP mailbox settings.' >&2
               exit 78
             }
             [[ "$IMAP_PORT" =~ ^[0-9]+$ && "$IMAP_PORT" -ge 1 && "$IMAP_PORT" -le 65535 && "$IMAP_SECURE" == true ]] || {
@@ -74,7 +74,7 @@ jobs:
       EVIDENCE_PATH: build/release/browser-evidence/${{ matrix.browser }}.json
       E2E_REQUIRE_AUTH: ${{ inputs.require_auth && matrix.authenticate && '1' || '0' }}
       E2E_API_BASE_URL: ${{ vars.E2E_API_BASE_URL || secrets.E2E_API_BASE_URL }}
-      E2E_PUBLIC_BASE_URL: ${{ vars.E2E_PUBLIC_BASE_URL || secrets.E2E_PUBLIC_BASE_URL }}
+      E2E_HOMEOWNER_APP_LINK_BASE: ${{ vars.E2E_HOMEOWNER_APP_LINK_BASE }}
       E2E_USER_EMAIL: ${{ secrets.E2E_USER_EMAIL }}
       E2E_MAILBOX_IMAP_HOST: ${{ vars.E2E_MAILBOX_IMAP_HOST }}
       E2E_MAILBOX_IMAP_PORT: ${{ vars.E2E_MAILBOX_IMAP_PORT || '993' }}

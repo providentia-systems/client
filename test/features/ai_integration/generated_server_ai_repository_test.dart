@@ -339,6 +339,58 @@ void main() {
       ),
     );
 
+    final invalidSchema = GeneratedServerAiRepository(
+      _client(
+        (_) async =>
+            _json(<String, Object?>{..._extraction(), 'schemaVersion': 1}),
+      ),
+    );
+    await expectLater(
+      invalidSchema.loadExtractionReview(
+        homeId: 'home-1',
+        extractionId: _extractionId,
+      ),
+      throwsA(
+        isA<AiServerException>().having(
+          (error) => error.kind,
+          'kind',
+          AiServerFailureKind.invalidResponse,
+        ),
+      ),
+    );
+
+    final extraction = _extraction();
+    final candidate =
+        (extraction['candidates']! as List<Object?>).single!
+            as Map<String, Object?>;
+    final payload = candidate['payload']! as Map<String, Object?>;
+    final invalidReceiptRange = GeneratedServerAiRepository(
+      _client(
+        (_) async => _json(<String, Object?>{
+          ...extraction,
+          'candidates': <Object?>[
+            <String, Object?>{
+              ...candidate,
+              'payload': <String, Object?>{...payload, 'quantityMinimum': '1'},
+            },
+          ],
+        }),
+      ),
+    );
+    await expectLater(
+      invalidReceiptRange.loadExtractionReview(
+        homeId: 'home-1',
+        extractionId: _extractionId,
+      ),
+      throwsA(
+        isA<AiServerException>().having(
+          (error) => error.kind,
+          'kind',
+          AiServerFailureKind.invalidResponse,
+        ),
+      ),
+    );
+
     for (final statusCode in <int>[403, 404]) {
       final forbidden = GeneratedServerAiRepository(
         _client(
@@ -455,7 +507,7 @@ Map<String, Object?> _extraction({
   'inputSha256':
       'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
   'inputByteCount': 100,
-  'schemaVersion': 1,
+  'schemaVersion': 2,
   'promptTemplateVersion': 1,
   'processingMs': 20,
   'candidates': <Object?>[
@@ -473,6 +525,8 @@ Map<String, Object?> _extraction({
         'product': 'Rice',
         'variant': null,
         'quantity': '1',
+        'quantityMinimum': null,
+        'quantityMaximum': null,
         'packText': '1 kg',
         'unitPrice': '20.00',
         'lineTotal': '20.00',

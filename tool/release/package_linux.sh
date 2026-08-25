@@ -31,6 +31,11 @@ done
   echo 'Flutter Linux release bundle is missing its executable.' >&2
   exit 66
 }
+command -v desktop-file-validate >/dev/null 2>&1 || {
+  echo 'desktop-file-utils is required to validate Linux launcher integration.' >&2
+  exit 69
+}
+desktop-file-validate packaging/linux/com.vastdevelopmentmethod.providentia.desktop
 if find "$bundle" -type f -name 'libdartjni.so' -print -quit | grep -q .; then
   echo 'Linux release bundle contains an Android-only JNI runtime.' >&2
   exit 66

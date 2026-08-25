@@ -6,6 +6,9 @@ packages, installs the repository's checksum-verified Flutter 3.44.7 SDK,
 installs the checksum-verified Node.js 22.14.0 Linux x64 runtime,
 uses a checkout-local Pub cache, regenerates guarded artifacts, runs every
 source, analysis, test, and coverage gate, and produces a Linux release build.
+It then packages that build as a Debian artifact, verifies its metadata and
+native dependencies, and launches the extracted production binary for a
+bounded smoke under an isolated D-Bus session and Xvfb.
 It also persists project-local XDG configuration, cache, and data directories
 and `CI=true` in `.agent-env`, preventing cloud metadata probes and writes to a
 runner's shared user configuration. The Flutter archive is kept in an atomic,
@@ -52,7 +55,7 @@ origin. The supported loopback defaults are `http://127.0.0.1:8080` and
 
 The canonical bootstrap supports Debian/Ubuntu x86-64 and validates the
 complete Dart/Flutter codebase and the Linux
-desktop release on Linux. GitHub Actions remains the executable cross-platform
+desktop release package on Linux. GitHub Actions remains the executable cross-platform
 matrix for Android, iOS, macOS, Windows, Linux, and web because Apple and
 Windows compilers require their native operating systems. Android device
 acceptance also requires an Android SDK/device or emulator; use the repository

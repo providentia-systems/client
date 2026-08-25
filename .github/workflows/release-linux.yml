@@ -36,6 +36,7 @@ jobs:
       APPIMAGETOOL_URL: ${{ vars.APPIMAGETOOL_URL }}
       APPIMAGETOOL_SHA256: ${{ vars.APPIMAGETOOL_SHA256 }}
       API_BASE_URL: ${{ vars.PRODUCTION_API_BASE_URL }}
+      HOMEOWNER_APP_LINK_BASE: ${{ vars.PRODUCTION_HOMEOWNER_APP_LINK_BASE }}
     steps:
       - id: gate
         env:
@@ -46,6 +47,11 @@ jobs:
           if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then version=$REQUESTED_VERSION; fi
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]] || exit 64
           [[ "$API_BASE_URL" == https://* ]] || missing="${missing:-} PRODUCTION_API_BASE_URL"
+          node -e '
+            const uri = new URL(process.argv[1]);
+            if (uri.protocol !== "https:" || uri.username !== "" || uri.password !== ""
+                || uri.pathname !== "/homeowner" || uri.search !== "" || uri.hash !== "") process.exit(1);
+          ' "$HOMEOWNER_APP_LINK_BASE" || missing="${missing:-} PRODUCTION_HOMEOWNER_APP_LINK_BASE"
           [[ "$APPIMAGETOOL_URL" == https://* ]] || missing="${missing:-} APPIMAGETOOL_URL"
           [[ "$APPIMAGETOOL_SHA256" =~ ^[0-9a-fA-F]{64}$ ]] || missing="${missing:-} APPIMAGETOOL_SHA256"
           for name in SIGNING_KEY SIGNING_KEY_ID SIGNING_PASSPHRASE; do
@@ -74,13 +80,14 @@ jobs:
       LINUX_SIGNING_KEY: ${{ secrets.LINUX_SIGNING_KEY_BASE64 }}
       LINUX_SIGNING_KEY_ID: ${{ secrets.LINUX_SIGNING_KEY_ID }}
       LINUX_SIGNING_PASSPHRASE: ${{ secrets.LINUX_SIGNING_PASSPHRASE }}
+      HOMEOWNER_APP_LINK_BASE: ${{ vars.PRODUCTION_HOMEOWNER_APP_LINK_BASE }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Install Linux build and package dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev \
+            clang cmake ninja-build pkg-config desktop-file-utils libgtk-3-dev liblzma-dev \
             libfuse2t64 dpkg-dev gnupg curl libgstreamer1.0-dev \
             libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-good
       - name: Install pinned Flutter
@@ -93,7 +100,8 @@ jobs:
           flutter build linux --release \
             --build-name "$RELEASE_VERSION" --build-number "$GITHUB_RUN_NUMBER" \
             --dart-define PROVIDENTIA_ENVIRONMENT=production \
-            --dart-define PROVIDENTIA_API_BASE_URL='${{ vars.PRODUCTION_API_BASE_URL }}'
+            --dart-define PROVIDENTIA_API_BASE_URL='${{ vars.PRODUCTION_API_BASE_URL }}' \
+            --dart-define PROVIDENTIA_HOMEOWNER_APP_LINK_BASE="$HOMEOWNER_APP_LINK_BASE"
           bash tool/release/package_linux.sh \
             build/linux/x64/release/bundle "$RELEASE_VERSION" \
             build/release/linux/artifacts
