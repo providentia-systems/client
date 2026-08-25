@@ -30,27 +30,37 @@ final class StockPhotoCandidateReview {
     required this.proposal,
     this.homeProductId,
     this.quantity,
+    this.serverCandidate,
     this.counted = false,
+    this.rejected = false,
   });
 
   final StockCandidateProposal proposal;
   final String? homeProductId;
   final double? quantity;
+  final AiReviewCandidate? serverCandidate;
   final bool counted;
+  final bool rejected;
+
+  bool get resolved => counted || rejected;
 
   StockPhotoCandidateReview copyWith({
     String? homeProductId,
     bool clearHomeProduct = false,
     double? quantity,
     bool clearQuantity = false,
+    AiReviewCandidate? serverCandidate,
     bool? counted,
+    bool? rejected,
   }) => StockPhotoCandidateReview(
     proposal: proposal,
     homeProductId: clearHomeProduct
         ? null
         : (homeProductId ?? this.homeProductId),
     quantity: clearQuantity ? null : (quantity ?? this.quantity),
+    serverCandidate: serverCandidate ?? this.serverCandidate,
     counted: counted ?? this.counted,
+    rejected: rejected ?? this.rejected,
   );
 }
 
@@ -93,14 +103,19 @@ final class StockPhotoCountState {
 
   List<StockPhotoCandidateReview> get uncountedFirst =>
       List<StockPhotoCandidateReview>.unmodifiable(<StockPhotoCandidateReview>[
-        ...candidates.where((candidate) => !candidate.counted),
-        ...candidates.where((candidate) => candidate.counted),
+        ...candidates.where((candidate) => !candidate.resolved),
+        ...candidates.where((candidate) => candidate.resolved),
       ]);
 }
 
 typedef StockPhotoAssetPicker = Future<List<AiMediaAsset>> Function();
 typedef StockPhotoProviderLoader = Future<AiProviderProfile> Function();
 typedef StockPhotoAiRouteLoader = Future<StockPhotoAiRoute> Function();
+typedef StockCandidateReviewer =
+    Future<AiExtractionReview> Function({
+      required AiReviewCandidate candidate,
+      required AiCandidateDecision decision,
+    });
 
 /// UI-independent acquisition ports for the three explicit stock-image
 /// sources. Every source is consumed by [StockPhotoCountController.selectAssets].
@@ -121,11 +136,13 @@ final class StockPhotoAiRoute {
     required this.profile,
     required this.gateway,
     required this.privacyMode,
+    this.reviewCandidate,
   });
 
   final AiProviderProfile profile;
   final AiProviderGateway gateway;
   final AiPrivacyMode privacyMode;
+  final StockCandidateReviewer? reviewCandidate;
 
   void validate() {
     final expected = switch (gateway.route) {
@@ -136,7 +153,10 @@ final class StockPhotoAiRoute {
         privacyMode == AiPrivacyMode.serverProxyCloud &&
             profile.transport != AiTransport.serverProxy ||
         privacyMode == AiPrivacyMode.strictLocal &&
-            profile.transport != AiTransport.directNative) {
+            profile.transport != AiTransport.directNative ||
+        privacyMode == AiPrivacyMode.serverProxyCloud &&
+            reviewCandidate == null ||
+        privacyMode == AiPrivacyMode.strictLocal && reviewCandidate != null) {
       throw const AiPolicyViolation(
         code: 'ai_route_mismatch',
         safeMessage: 'The selected AI privacy route is not configured safely.',
@@ -155,6 +175,7 @@ final class StockPhotoCountController extends ChangeNotifier {
     required AiMediaPreparationPort mediaPreparation,
     required PreparedMediaByteReader mediaReader,
     AiProviderGateway? gateway,
+    StockCandidateReviewer? reviewCandidate,
     required StockPhotoAssetPicker pickAssets,
     StockPhotoProviderLoader? loadProvider,
     StockPhotoAiRouteLoader? loadRoute,
@@ -174,6 +195,7 @@ final class StockPhotoCountController extends ChangeNotifier {
                     AiPrivacyMode.serverProxyCloud,
                   AiGatewayRoute.directStrictLocal => AiPrivacyMode.strictLocal,
                 },
+                reviewCandidate: reviewCandidate,
               )
             : null);
     if (effectiveLoader == null) {

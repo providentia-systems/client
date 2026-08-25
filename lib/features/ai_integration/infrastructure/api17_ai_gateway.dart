@@ -378,9 +378,10 @@ final class Api17AiGateway implements AiProviderGateway {
             final payload = _object(candidate['payload'], 'candidate payload');
             final confidence = _number(payload['confidence']);
             final quantity = double.tryParse(_string(payload, 'quantity')) ?? 0;
+            final extractionId = _string(extraction, 'id');
+            final position = _integer(candidate, 'position');
             return StockCandidateProposal(
-              candidateId:
-                  '${_string(extraction, 'id')}:${_integer(candidate, 'position')}',
+              candidateId: '$extractionId:$position',
               brand: _field(_optionalString(payload['brand']), confidence),
               productName: _field(
                 _optionalString(payload['product']) ??
@@ -400,6 +401,19 @@ final class Api17AiGateway implements AiProviderGateway {
                 ..._strings(payload['unresolvedValues']),
               ],
               region: _region(payload['boundingRegion']),
+              serverReview: StockCandidateServerReviewBinding(
+                extractionId: extractionId,
+                position: position,
+                revision: _integer(candidate, 'revision'),
+                status: switch (_string(candidate, 'reviewStatus')) {
+                  'pending' => StockCandidateServerReviewStatus.pending,
+                  'accepted' => StockCandidateServerReviewStatus.accepted,
+                  'rejected' => StockCandidateServerReviewStatus.rejected,
+                  _ => throw const FormatException(
+                    'Unknown stock candidate review status.',
+                  ),
+                },
+              ),
             );
           })
           .toList(growable: false),
