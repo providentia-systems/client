@@ -1,5 +1,10 @@
 # Phase 9–10 production integration status
 
+> Historical checkpoint (2026-08-11, API 1.13.2). Current release status is
+> defined by `README.md`, `docs/contracts.md`, and exact-head workflow results.
+> The homeowner client no longer contains platform administration or backend
+> HTML login approval.
+
 - Date: 2026-08-11
 - Flutter target: `1.0.0+10`
 - Authoritative backend review: `providentia-systems/backend` API `1.13.2`

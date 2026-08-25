@@ -1,5 +1,10 @@
 # Phases 04–06 testing-readiness report
 
+> Historical checkpoint (API 1.13.2). For the active API 1.18.0 contract,
+> homeowner facade, and release boundary, use `docs/contracts.md` and the
+> generated package manifest. This report is retained as implementation
+> history, not current release status.
+
 ## Outcome
 
 The Flutter application contains the client-owned capability required to test

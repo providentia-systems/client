@@ -11,6 +11,7 @@ final class AccountAccessPage extends StatelessWidget {
     required this.homesController,
     this.catalogSharingPageBuilder,
     this.catalogContributionPageBuilder,
+    this.catalogStorePriceContributionPageBuilder,
     this.householdReportsPageBuilder,
     this.householdAiPageBuilder,
     this.dataGovernancePageBuilder,
@@ -21,6 +22,7 @@ final class AccountAccessPage extends StatelessWidget {
   final HomesController homesController;
   final WidgetBuilder? catalogSharingPageBuilder;
   final WidgetBuilder? catalogContributionPageBuilder;
+  final WidgetBuilder? catalogStorePriceContributionPageBuilder;
   final WidgetBuilder? householdReportsPageBuilder;
   final WidgetBuilder? householdAiPageBuilder;
   final WidgetBuilder? dataGovernancePageBuilder;
@@ -169,6 +171,23 @@ final class AccountAccessPage extends StatelessWidget {
               onTap: () => Navigator.of(context).push<void>(
                 MaterialPageRoute<void>(
                   builder: catalogContributionPageBuilder!,
+                ),
+              ),
+            ),
+          if (home != null &&
+              catalogStorePriceContributionPageBuilder != null &&
+              mayContributeCatalogProduct(permissions))
+            ListTile(
+              key: const Key('open-catalog-store-price-contribution'),
+              leading: const Icon(Icons.price_check_outlined),
+              title: const Text('Share a store price'),
+              subtitle: const Text(
+                'Review one product, shop, price, currency, and date',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context).push<void>(
+                MaterialPageRoute<void>(
+                  builder: catalogStorePriceContributionPageBuilder!,
                 ),
               ),
             ),

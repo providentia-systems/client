@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
-import 'package:providentia/core/security/uuid_v4.dart';
 import 'package:providentia/features/catalog/application/catalog_proposal_service.dart';
+import 'package:providentia/features/catalog/application/catalog_submission_intent.dart';
 import 'package:providentia/features/catalog/domain/catalog_models.dart';
 
 enum CatalogProductContributionStatus {
@@ -29,6 +29,7 @@ final class CatalogProductContributionController extends ChangeNotifier {
     required String homeId,
     required String locale,
     required bool canContribute,
+    CatalogSubmissionIntentCoordinator? submissionIntents,
     String Function()? submissionIdGenerator,
     Future<void> Function()? onAuthorizationLost,
   }) => CatalogProductContributionController._(
@@ -37,7 +38,11 @@ final class CatalogProductContributionController extends ChangeNotifier {
     homeId,
     locale,
     canContribute,
-    submissionIdGenerator ?? UuidV4Generator().call,
+    submissionIntents ??
+        CatalogSubmissionIntentCoordinator(
+          store: MemoryCatalogSubmissionIntentStore(),
+          idGenerator: submissionIdGenerator,
+        ),
     onAuthorizationLost,
   );
 
@@ -47,7 +52,7 @@ final class CatalogProductContributionController extends ChangeNotifier {
     this.homeId,
     this.locale,
     this.canContribute,
-    this._submissionIdGenerator,
+    this._submissionIntents,
     this._onAuthorizationLost,
   );
 
@@ -56,7 +61,7 @@ final class CatalogProductContributionController extends ChangeNotifier {
   final String homeId;
   final String locale;
   final bool canContribute;
-  final String Function() _submissionIdGenerator;
+  final CatalogSubmissionIntentCoordinator _submissionIntents;
   final Future<void> Function()? _onAuthorizationLost;
 
   CatalogProductContributionStatus _status =
@@ -65,7 +70,7 @@ final class CatalogProductContributionController extends ChangeNotifier {
   PrivateProduct? _product;
   SanitizedCatalogProposal? _proposal;
   CatalogSubmissionLink? _submission;
-  String? _pendingSubmissionId;
+  CatalogSubmissionIntent? _pendingIntent;
   bool _explicitlyConsented = false;
   int _generation = 0;
   bool _disposed = false;
@@ -75,7 +80,7 @@ final class CatalogProductContributionController extends ChangeNotifier {
   PrivateProduct? get product => _product;
   SanitizedCatalogProposal? get proposal => _proposal;
   CatalogSubmissionLink? get submission => _submission;
-  String? get pendingSubmissionId => _pendingSubmissionId;
+  String? get pendingSubmissionId => _pendingIntent?.submissionId;
   bool get explicitlyConsented => _explicitlyConsented;
   bool get maySubmit =>
       _status == CatalogProductContributionStatus.ready &&
@@ -127,7 +132,7 @@ final class CatalogProductContributionController extends ChangeNotifier {
     }
     _product = product;
     _proposal = _proposalService.preview(product: product, locale: locale);
-    _pendingSubmissionId = null;
+    _pendingIntent = null;
     _explicitlyConsented = false;
     _submission = null;
     _notify();
@@ -152,27 +157,48 @@ final class CatalogProductContributionController extends ChangeNotifier {
   Future<void> submit() async {
     final product = _product;
     final proposal = _proposal;
-    if (!maySubmit || product == null || proposal == null) return;
+    final consentRevision = _serverConsent?.revision;
+    if (!maySubmit ||
+        product == null ||
+        proposal == null ||
+        consentRevision == null ||
+        consentRevision < 1) {
+      return;
+    }
     final generation = ++_generation;
-    final submissionId = _pendingSubmissionId ??= _submissionIdGenerator();
     _setStatus(CatalogProductContributionStatus.submitting);
     try {
+      var intent = _pendingIntent;
+      intent ??= await _submissionIntents.obtain(
+        CatalogSubmissionIntentKey.forPayload(
+          type: CatalogContributionIntentType.productIdentity,
+          homeId: product.homeId,
+          sourceEntityId: product.homeProductId,
+          expectedConsentRevision: consentRevision,
+          payload: proposal.toIdentityContributionJson(),
+        ),
+      );
+      if (!_isCurrent(generation)) return;
+      _pendingIntent = intent;
       final link = await _proposalService.submit(
-        submissionId: submissionId,
+        submissionId: intent.submissionId,
         product: product,
         preview: proposal,
+        expectedConsentRevision: consentRevision,
         explicitlyConsented: true,
       );
       if (!_isCurrent(generation)) return;
+      await _submissionIntents.retire(intent);
+      if (!_isCurrent(generation)) return;
       _submission = link;
-      _pendingSubmissionId = null;
+      _pendingIntent = null;
       _explicitlyConsented = false;
       _setStatus(CatalogProductContributionStatus.submitted);
     } on CatalogServerConsentRequiredException {
       if (!_isCurrent(generation)) return;
       _serverConsent = null;
       _explicitlyConsented = false;
-      _pendingSubmissionId = null;
+      await _retirePendingIntent();
       _setStatus(CatalogProductContributionStatus.consentRequired);
     } on CatalogContributionAuthenticationRequiredException {
       await _handleAuthorizationLoss(
@@ -185,12 +211,12 @@ final class CatalogProductContributionController extends ChangeNotifier {
         CatalogProductContributionStatus.forbidden,
       );
     } on CatalogContributionConflictException {
-      _pendingSubmissionId = null;
+      await _retirePendingIntent();
       _fail(generation, CatalogProductContributionStatus.conflict);
     } on CatalogContributionUnavailableException {
       _fail(generation, CatalogProductContributionStatus.offline);
     } on CatalogContributionValidationException {
-      _pendingSubmissionId = null;
+      await _retirePendingIntent();
       _fail(generation, CatalogProductContributionStatus.failure);
     } on Exception {
       _fail(generation, CatalogProductContributionStatus.failure);
@@ -212,7 +238,7 @@ final class CatalogProductContributionController extends ChangeNotifier {
     _product = null;
     _proposal = null;
     _submission = null;
-    _pendingSubmissionId = null;
+    _pendingIntent = null;
     _explicitlyConsented = false;
     _notify();
   }
@@ -223,7 +249,7 @@ final class CatalogProductContributionController extends ChangeNotifier {
     _product = null;
     _proposal = null;
     _submission = null;
-    _pendingSubmissionId = null;
+    _pendingIntent = null;
     _explicitlyConsented = false;
     _setStatus(CatalogProductContributionStatus.idle);
   }
@@ -243,13 +269,25 @@ final class CatalogProductContributionController extends ChangeNotifier {
     _product = null;
     _proposal = null;
     _submission = null;
-    _pendingSubmissionId = null;
+    await _retirePendingIntent();
     _explicitlyConsented = false;
     _setStatus(status);
     await _onAuthorizationLost?.call();
   }
 
   bool _isCurrent(int generation) => !_disposed && generation == _generation;
+
+  Future<void> _retirePendingIntent() async {
+    final intent = _pendingIntent;
+    _pendingIntent = null;
+    if (intent == null) return;
+    try {
+      await _submissionIntents.retire(intent);
+    } on CatalogContributionUnavailableException {
+      // A terminal server result remains authoritative. A stale UUID can only
+      // replay the same fingerprint and is never attached to changed data.
+    }
+  }
 
   void _setStatus(CatalogProductContributionStatus value) {
     _status = value;

@@ -199,7 +199,7 @@ function validateContract(document) {
     }
   }
   if (operationIds.size !== 177) {
-    throw new Error(`Expected the API 1.17 surface, found ${operationIds.size} operations.`);
+    throw new Error(`Expected the API 1.18 surface, found ${operationIds.size} operations.`);
   }
 
   for (const schema of [

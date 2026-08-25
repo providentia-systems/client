@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:providentia/app/production_bootstrap_app.dart';
 import 'package:providentia/features/catalog/application/catalog_product_contribution_controller.dart';
 import 'package:providentia/features/catalog/application/catalog_proposal_service.dart';
+import 'package:providentia/features/catalog/application/catalog_submission_intent.dart';
 import 'package:providentia/features/catalog/domain/catalog_models.dart';
 import 'package:providentia/features/catalog/presentation/catalog_product_contribution_page.dart';
 import 'package:providentia/features/inventory/application/inventory_repository.dart';
@@ -235,9 +237,60 @@ void main() {
     expect(controller.pendingSubmissionId, isNull);
   });
 
+  test(
+    'an identical retry after process death reuses its durable UUID',
+    () async {
+      final intentStore = MemoryCatalogSubmissionIntentStore();
+      final repository = _ContributionRepository(
+        submitFailure: const CatalogContributionUnavailableException(),
+      );
+      final first = CatalogProductContributionController(
+        consentRepository: repository,
+        proposalService: CatalogProposalService(repository),
+        homeId: _homeId,
+        locale: 'en-NA',
+        canContribute: true,
+        submissionIntents: CatalogSubmissionIntentCoordinator(
+          store: intentStore,
+          idGenerator: () => _submissionId,
+        ),
+      );
+      await first.loadConsent();
+      first.selectProduct(privateProductIdentityPreview(_inventoryItem()));
+      first.setExplicitConsent(true);
+      await first.submit();
+      first.dispose();
+
+      repository.submitFailure = null;
+      final restored = CatalogProductContributionController(
+        consentRepository: repository,
+        proposalService: CatalogProposalService(repository),
+        homeId: _homeId,
+        locale: 'en-NA',
+        canContribute: true,
+        submissionIntents: CatalogSubmissionIntentCoordinator(
+          store: intentStore,
+          idGenerator: () => _otherSubmissionId,
+        ),
+      );
+      addTearDown(restored.dispose);
+      await restored.loadConsent();
+      restored.selectProduct(privateProductIdentityPreview(_inventoryItem()));
+      restored.setExplicitConsent(true);
+      await restored.submit();
+
+      expect(repository.attemptedSubmissionIds, <String>[
+        _submissionId,
+        _submissionId,
+      ]);
+      expect(restored.status, CatalogProductContributionStatus.submitted);
+    },
+  );
+
   testWidgets(
     'production route requires checkbox and clears through registry',
     (tester) async {
+      FlutterSecureStorage.setMockInitialValues(<String, String>{});
       final repository = _ContributionRepository();
       final inventory = InventoryController(
         repository: _InventoryRepository(<InventoryItem>[
@@ -297,6 +350,7 @@ void main() {
 const String _homeId = 'home-a';
 const String _productId = 'product-a';
 const String _submissionId = '01912345-6789-4abc-8def-0123456789ab';
+const String _otherSubmissionId = '01912345-6789-4abc-8def-1123456789ab';
 
 InventoryItem _inventoryItem() => InventoryItem(
   id: _productId,
@@ -375,9 +429,11 @@ final class _ContributionRepository
     required String submissionId,
     required String homeId,
     required String homeProductId,
+    required int expectedConsentRevision,
     required SanitizedCatalogProposal proposal,
   }) async {
     attemptedSubmissionIds.add(submissionId);
+    expect(expectedConsentRevision, 3);
     final failure = submitFailure;
     if (failure != null) throw failure;
     submissions.add(
