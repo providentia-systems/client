@@ -7,9 +7,15 @@
     "node": "22.14.0",
     "nodeMinimum": "18.19.0"
   },
+  "nodeDistribution": {
+    "linuxX64": {
+      "url": "https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-x64.tar.xz",
+      "sha256": "69b09dba5c8dcb05c4e4273a4340db1005abeafe3927efda2bc5b249e80437ec"
+    }
+  },
   "supportedHosts": {
     "canonicalAgentHost": "debian-or-ubuntu-linux-x86_64",
-    "development": ["linux-x86_64", "linux-arm64", "macos", "windows"],
+    "development": ["linux-x86_64", "macos", "windows"],
     "releaseBuilds": ["android", "ios", "linux", "macos", "web", "windows"]
   },
   "linux": {
@@ -19,6 +25,7 @@
       "cmake",
       "curl",
       "git",
+      "gstreamer1.0-plugins-base",
       "gstreamer1.0-plugins-good",
       "libgstreamer1.0-dev",
       "libgstreamer-plugins-base1.0-dev",
@@ -28,11 +35,10 @@
       "libsecret-1-dev",
       "libstdc++-12-dev",
       "ninja-build",
-      "nodejs",
-      "npm",
       "pkg-config",
       "unzip",
-      "xz-utils"
+      "xz-utils",
+      "zip"
     ],
     "immutableRunner": {
       "sysrootEnvironmentVariable": "PROVIDENTIA_CLIENT_SYSROOT",
@@ -59,6 +65,7 @@
         "gtk+-3.0",
         "libsecret-1",
         "gstreamer-1.0",
+        "gstreamer-app-1.0",
         "gstreamer-video-1.0",
         "gstreamer-plugins-base-1.0"
       ],
@@ -66,7 +73,16 @@
         "libgtk-3.so",
         "libsecret-1.so",
         "libgstreamer-1.0.so",
+        "libgstapp-1.0.so",
         "libgstvideo-1.0.so"
+      ],
+      "appImageHostPackages": [
+        "libgtk-3-0",
+        "libsecret-1-0",
+        "libgstreamer1.0-0",
+        "libgstreamer-plugins-base1.0-0",
+        "gstreamer1.0-plugins-base",
+        "gstreamer1.0-plugins-good"
       ]
     }
   },
@@ -74,6 +90,7 @@
     "archive.ubuntu.com",
     "security.ubuntu.com",
     "storage.googleapis.com",
+    "nodejs.org",
     "pub.dev",
     "api.pub.dev",
     "github.com",

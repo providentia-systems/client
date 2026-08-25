@@ -33,3 +33,8 @@ Phase 1 CI uploads non-production build proofs only. Android local release
 configuration uses the debug key; other targets are not production-signed. CI
 does not claim notarization, installer quality, browser compatibility, Arm64
 coverage, or store acceptance.
+
+The first Linux release lane is x86-64. Its desktop camera plugin uses the
+host's GTK and GStreamer runtime; exact AppImage host packages and Debian
+dependencies are versioned in `tools/agent-requirements.json` and
+`packaging/linux/APPIMAGE-RUNTIME.md`.

@@ -184,10 +184,47 @@ jobs:
       - name: Build target
         run: ${{ matrix.command }}
 
+      - name: Package Linux Debian proof
+        if: matrix.target == 'linux'
+        run: |
+          PROVIDENTIA_LINUX_PACKAGE_FORMATS=deb \
+            bash tool/release/package_linux.sh \
+              build/linux/x64/release/bundle \
+              "0.0.0+$GITHUB_RUN_NUMBER" \
+              build/release/linux/pr
+          bash tool/release/verify_linux_deb.sh \
+            build/release/linux/pr/providentia_0.0.0_amd64.deb
+
+      - name: Verify Linux package on a clean Ubuntu host
+        if: matrix.target == 'linux'
+        run: |
+          docker run --rm \
+            --volume "$PWD/build/release/linux/pr:/artifacts:ro" \
+            --volume "$PWD:/source:ro" \
+            ubuntu:24.04 \
+            bash -euc '
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update
+              apt-get install -y --no-install-recommends \
+                /artifacts/providentia_0.0.0_amd64.deb xvfb
+              PROVIDENTIA_LINUX_LAUNCH_SMOKE=true \
+                bash /source/tool/release/verify_linux_deb.sh \
+                  /artifacts/providentia_0.0.0_amd64.deb
+            '
+
       - name: Upload non-production build proof
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: providentia-${{ matrix.target }}-build-proof
           path: ${{ matrix.artifact }}
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload unsigned Linux package proof
+        if: matrix.target == 'linux'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: providentia-linux-debian-package-proof
+          path: build/release/linux/pr/providentia_0.0.0_amd64.deb
           if-no-files-found: error
           retention-days: 7

@@ -68,9 +68,34 @@ test('platform signing is real and independently verified', async () => {
 
   const linuxCmake = await readFile(path.join(root, 'linux/CMakeLists.txt'), 'utf8');
   const linuxPackage = await readFile(path.join(root, 'tool/release/package_linux.sh'), 'utf8');
+  const linuxPackageVerification = await readFile(
+    path.join(root, 'tool/release/verify_linux_deb.sh'),
+    'utf8',
+  );
+  const flutterCi = await readFile(path.join(root, '.github/workflows/ci.yml'), 'utf8');
   const binaryName = linuxCmake.match(/set\(BINARY_NAME\s+"([^"]+)"\)/u)?.[1];
   assert(binaryName, 'Linux BINARY_NAME must remain explicit.');
   assert.match(linuxPackage, new RegExp(`bundle/${binaryName}`, 'u'));
+  assert.match(linuxPackage, /libcamera_desktop_plugin\.so/u);
+  assert.match(linuxPackage, /ldd "\$camera_plugin"/u);
+  for (const dependency of [
+    'libgstreamer1.0-0',
+    'libgstreamer-plugins-base1.0-0',
+    'gstreamer1.0-plugins-base',
+    'gstreamer1.0-plugins-good',
+  ]) {
+    assert.match(linuxPackage, new RegExp(dependency.replaceAll('.', '\\.'), 'u'));
+    assert.match(
+      linuxPackageVerification,
+      new RegExp(dependency.replaceAll('.', '\\.'), 'u'),
+    );
+  }
+  assert.match(linuxPackage, /PROVIDENTIA_LINUX_PACKAGE_FORMATS/u);
+  assert.match(linuxPackageVerification, /libcamera_desktop_plugin\.so/u);
+  assert.match(linuxPackageVerification, /PROVIDENTIA_LINUX_LAUNCH_SMOKE/u);
+  assert.match(flutterCi, /Package Linux Debian proof/u);
+  assert.match(flutterCi, /ubuntu:24\.04/u);
+  assert.match(flutterCi, /providentia-linux-debian-package-proof/u);
 
   const browser = await readFile(path.join(root, 'tool/release/verify_web_runtime.mjs'), 'utf8');
   const browserWorkflow = await readFile(
@@ -98,6 +123,43 @@ test('platform signing is real and independently verified', async () => {
     browserWorkflow,
     new RegExp(['E2E', 'USER', 'PASSWORD'].join('_'), 'u'),
   );
+});
+
+test('agent bootstrap repairs SDK corruption and pins its executable tools', async () => {
+  const setup = await readFile(path.join(root, 'tools/agent-setup.sh'), 'utf8');
+  const flutterInstaller = await readFile(
+    path.join(root, 'tool/install_flutter_linux.sh'),
+    'utf8',
+  );
+  const nodeInstaller = await readFile(
+    path.join(root, 'tools/install_node_linux.sh'),
+    'utf8',
+  );
+  const requirements = JSON.parse(
+    await readFile(path.join(root, 'tools/agent-requirements.json'), 'utf8'),
+  );
+  const lockWorkflow = await readFile(
+    path.join(root, '.github/workflows/bootstrap-lockfile.yml'),
+    'utf8',
+  );
+
+  assert.match(setup, /quarantine_tool/u);
+  assert.match(setup, /--version --machine/u);
+  assert.match(setup, /frameworkRevision/u);
+  assert.match(setup, /ANALYZER_STATE_LOCATION_OVERRIDE/u);
+  assert.match(flutterInstaller, /tar --no-same-owner/u);
+  assert.match(flutterInstaller, /ANALYZER_STATE_LOCATION_OVERRIDE/u);
+  assert.match(nodeInstaller, /--retry-all-errors/u);
+  assert.match(nodeInstaller, /--strip-components=1/u);
+  assert.match(
+    nodeInstaller,
+    new RegExp(requirements.nodeDistribution.linuxX64.sha256, 'u'),
+  );
+  assert.equal(requirements.runtime.node, '22.14.0');
+  assert.equal(requirements.supportedHosts.development.includes('linux-arm64'), false);
+  assert.match(lockWorkflow, /for attempt in 1 2 3/u);
+  assert.match(lockWorkflow, /\.\/gradlew --no-daemon :generateLockfiles/u);
+  assert.match(lockWorkflow, /failed after three bounded attempts/u);
 });
 
 test('browser dispatch input never enters a shell script by interpolation', async () => {

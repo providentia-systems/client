@@ -19,13 +19,21 @@ if [[ -e "$install_parent/flutter" ]]; then
 fi
 
 mkdir -p "$install_parent"
+installer_state="${PROVIDENTIA_INSTALLER_STATE_ROOT:-$install_parent/.installer-state}"
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$installer_state/xdg/config}"
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$installer_state/xdg/cache}"
+export XDG_DATA_HOME="${XDG_DATA_HOME:-$installer_state/xdg/data}"
+export ANALYZER_STATE_LOCATION_OVERRIDE="${ANALYZER_STATE_LOCATION_OVERRIDE:-$XDG_CACHE_HOME/dart-analysis}"
+mkdir -p "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME" \
+  "$ANALYZER_STATE_LOCATION_OVERRIDE"
 download_cache="${PROVIDENTIA_DOWNLOAD_CACHE:-$install_parent/.download-cache}"
 mkdir -p "$download_cache"
 archive_path="$download_cache/$ARCHIVE"
 if ! printf '%s  %s\n' "$SHA256" "$archive_path" | sha256sum --check --status 2>/dev/null; then
   pending_archive=$(mktemp "$download_cache/.flutter-download.XXXXXX")
   trap 'rm -f -- "${pending_archive:-}"' EXIT
-  curl --fail --location --retry 3 --output "$pending_archive" \
+  curl --fail --location --retry 5 --retry-all-errors --retry-delay 2 \
+    --output "$pending_archive" \
     "$BASE_URL/stable/linux/$ARCHIVE"
   printf '%s  %s\n' "$SHA256" "$pending_archive" | sha256sum --check --status
   mv -f -- "$pending_archive" "$archive_path"
