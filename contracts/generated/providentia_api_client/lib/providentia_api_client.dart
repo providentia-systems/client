@@ -467,12 +467,6 @@ final class ProvidentiaApiClient {
   final Map<String, String> _defaultHeaders;
 
   static const Map<String, ApiOperation> operations = <String, ApiOperation>{
-    "acceptBillingWebhook": ApiOperation(
-      operationId: "acceptBillingWebhook",
-      method: "POST",
-      pathTemplate: "/api/v1/billing/webhooks/{provider}",
-      multipart: false,
-    ),
     "acceptHomeInvitation": ApiOperation(
       operationId: "acceptHomeInvitation",
       method: "POST",
@@ -490,12 +484,6 @@ final class ProvidentiaApiClient {
       method: "POST",
       pathTemplate:
           "/api/v1/homes/{homeId}/ownership-transfers/{transferId}/accept",
-      multipart: false,
-    ),
-    "applyCatalogMerge": ApiOperation(
-      operationId: "applyCatalogMerge",
-      method: "POST",
-      pathTemplate: "/api/v1/catalog-admin/merges",
       multipart: false,
     ),
     "approveReceiptLine": ApiOperation(
@@ -579,24 +567,6 @@ final class ProvidentiaApiClient {
       pathTemplate: "/api/v1/homes/{homeId}/ai/profiles",
       multipart: false,
     ),
-    "createBillingPlan": ApiOperation(
-      operationId: "createBillingPlan",
-      method: "POST",
-      pathTemplate: "/api/v1/operator/billing/plans",
-      multipart: false,
-    ),
-    "createBillingPrice": ApiOperation(
-      operationId: "createBillingPrice",
-      method: "POST",
-      pathTemplate: "/api/v1/operator/billing/plans/{planId}/prices",
-      multipart: false,
-    ),
-    "createBillingPromotion": ApiOperation(
-      operationId: "createBillingPromotion",
-      method: "POST",
-      pathTemplate: "/api/v1/operator/billing/promotions",
-      multipart: false,
-    ),
     "createCatalogContribution": ApiOperation(
       operationId: "createCatalogContribution",
       method: "POST",
@@ -613,12 +583,6 @@ final class ProvidentiaApiClient {
       operationId: "createHome",
       method: "POST",
       pathTemplate: "/api/v1/homes",
-      multipart: false,
-    ),
-    "createHomeBillingOverride": ApiOperation(
-      operationId: "createHomeBillingOverride",
-      method: "POST",
-      pathTemplate: "/api/v1/operator/billing/homes/{homeId}/overrides",
       multipart: false,
     ),
     "createHomeCategory": ApiOperation(
@@ -706,18 +670,6 @@ final class ProvidentiaApiClient {
       pathTemplate: "/api/v1/homes/{homeId}/suggestion-backtests",
       multipart: false,
     ),
-    "decideCatalogContribution": ApiOperation(
-      operationId: "decideCatalogContribution",
-      method: "PUT",
-      pathTemplate: "/api/v1/catalog-contributions/{contributionId}/decision",
-      multipart: false,
-    ),
-    "decideCatalogProposal": ApiOperation(
-      operationId: "decideCatalogProposal",
-      method: "POST",
-      pathTemplate: "/api/v1/catalog-admin/proposals/{proposalId}/decision",
-      multipart: false,
-    ),
     "deleteAiProviderCredential": ApiOperation(
       operationId: "deleteAiProviderCredential",
       method: "DELETE",
@@ -790,19 +742,6 @@ final class ProvidentiaApiClient {
       pathTemplate: "/api/v1/catalog/products/{productId}",
       multipart: false,
     ),
-    "getCatalogProductImageContributionPreview": ApiOperation(
-      operationId: "getCatalogProductImageContributionPreview",
-      method: "GET",
-      pathTemplate:
-          "/api/v1/catalog-contributions/{contributionId}/image-preview",
-      multipart: false,
-    ),
-    "getCatalogWorkbench": ApiOperation(
-      operationId: "getCatalogWorkbench",
-      method: "GET",
-      pathTemplate: "/api/v1/catalog-admin/workbench",
-      multipart: false,
-    ),
     "getConsumptionReport": ApiOperation(
       operationId: "getConsumptionReport",
       method: "GET",
@@ -855,18 +794,6 @@ final class ProvidentiaApiClient {
       operationId: "getLoginLinkStatus",
       method: "POST",
       pathTemplate: "/api/v1/auth/login-links/{requestId}/status",
-      multipart: false,
-    ),
-    "getMetrics": ApiOperation(
-      operationId: "getMetrics",
-      method: "GET",
-      pathTemplate: "/metrics",
-      multipart: false,
-    ),
-    "getOperatorAccount": ApiOperation(
-      operationId: "getOperatorAccount",
-      method: "GET",
-      pathTemplate: "/api/v1/admin/accounts/{userId}",
       multipart: false,
     ),
     "getPublishedCatalogAsset": ApiOperation(
@@ -948,30 +875,11 @@ final class ProvidentiaApiClient {
       pathTemplate: "/api/v1/system/info",
       multipart: false,
     ),
-    "grantOperatorAccountRole": ApiOperation(
-      operationId: "grantOperatorAccountRole",
-      method: "PUT",
-      pathTemplate: "/api/v1/admin/accounts/{userId}/roles/{role}",
-      multipart: false,
-    ),
-    "grantPlatformAdministrator": ApiOperation(
-      operationId: "grantPlatformAdministrator",
-      method: "POST",
-      pathTemplate: "/api/v1/platform/administrators",
-      multipart: false,
-    ),
     "issueDataExportDownloadToken": ApiOperation(
       operationId: "issueDataExportDownloadToken",
       method: "POST",
       pathTemplate:
           "/api/v1/data-governance-requests/{requestId}/download-token",
-      multipart: false,
-    ),
-    "keepExistingCatalogConflict": ApiOperation(
-      operationId: "keepExistingCatalogConflict",
-      method: "POST",
-      pathTemplate:
-          "/api/v1/catalog-admin/conflicts/{conflictId}/keep-existing",
       multipart: false,
     ),
     "leaveHome": ApiOperation(
@@ -996,12 +904,6 @@ final class ProvidentiaApiClient {
       operationId: "listAvailableBillingPlans",
       method: "GET",
       pathTemplate: "/api/v1/billing/plans",
-      multipart: false,
-    ),
-    "listCatalogContributionReviewQueue": ApiOperation(
-      operationId: "listCatalogContributionReviewQueue",
-      method: "GET",
-      pathTemplate: "/api/v1/catalog-contributions/review",
       multipart: false,
     ),
     "listConsumptionEstimates": ApiOperation(
@@ -1088,28 +990,10 @@ final class ProvidentiaApiClient {
       pathTemplate: "/api/v1/homes/{homeId}/inventory-balances",
       multipart: false,
     ),
-    "listOperatorAccounts": ApiOperation(
-      operationId: "listOperatorAccounts",
-      method: "GET",
-      pathTemplate: "/api/v1/admin/accounts",
-      multipart: false,
-    ),
-    "listOperatorBillingPlans": ApiOperation(
-      operationId: "listOperatorBillingPlans",
-      method: "GET",
-      pathTemplate: "/api/v1/operator/billing/plans",
-      multipart: false,
-    ),
     "listPendingHomeInvitations": ApiOperation(
       operationId: "listPendingHomeInvitations",
       method: "GET",
       pathTemplate: "/api/v1/me/home-invitations",
-      multipart: false,
-    ),
-    "listPlatformAdministrators": ApiOperation(
-      operationId: "listPlatformAdministrators",
-      method: "GET",
-      pathTemplate: "/api/v1/platform/administrators",
       multipart: false,
     ),
     "listPriceComparisons": ApiOperation(
@@ -1178,12 +1062,6 @@ final class ProvidentiaApiClient {
       pathTemplate: "/api/v1/auth/logout",
       multipart: false,
     ),
-    "previewCatalogMerge": ApiOperation(
-      operationId: "previewCatalogMerge",
-      method: "POST",
-      pathTemplate: "/api/v1/catalog-admin/merges/preview",
-      multipart: false,
-    ),
     "proposeHomeOwnershipTransfer": ApiOperation(
       operationId: "proposeHomeOwnershipTransfer",
       method: "POST",
@@ -1220,43 +1098,10 @@ final class ProvidentiaApiClient {
       pathTemplate: "/api/v1/homes/{homeId}/ai/settings",
       multipart: false,
     ),
-    "putBillingEntitlement": ApiOperation(
-      operationId: "putBillingEntitlement",
-      method: "PUT",
-      pathTemplate:
-          "/api/v1/operator/billing/plans/{planId}/entitlements/{featureKey}",
-      multipart: false,
-    ),
-    "putBillingProviderPriceReference": ApiOperation(
-      operationId: "putBillingProviderPriceReference",
-      method: "PUT",
-      pathTemplate:
-          "/api/v1/operator/billing/prices/{priceId}/providers/{provider}",
-      multipart: false,
-    ),
     "putCatalogContributionConsent": ApiOperation(
       operationId: "putCatalogContributionConsent",
       method: "PUT",
       pathTemplate: "/api/v1/homes/{homeId}/catalog-contributions/consent",
-      multipart: false,
-    ),
-    "putCatalogContributionProposal": ApiOperation(
-      operationId: "putCatalogContributionProposal",
-      method: "PUT",
-      pathTemplate: "/api/v1/catalog-contributions/{contributionId}/proposal",
-      multipart: false,
-    ),
-    "putCatalogIcon": ApiOperation(
-      operationId: "putCatalogIcon",
-      method: "PUT",
-      pathTemplate: "/api/v1/catalog-admin/icons/{targetType}/{targetId}",
-      multipart: false,
-    ),
-    "putCatalogProductImageContributionPublication": ApiOperation(
-      operationId: "putCatalogProductImageContributionPublication",
-      method: "PUT",
-      pathTemplate:
-          "/api/v1/catalog-contributions/{contributionId}/image-publication",
       multipart: false,
     ),
     "putHomePermissionPolicy": ApiOperation(
@@ -1345,12 +1190,6 @@ final class ProvidentiaApiClient {
       pathTemplate: "/api/v1/auth/verify-email/resend",
       multipart: false,
     ),
-    "reverseCatalogMerge": ApiOperation(
-      operationId: "reverseCatalogMerge",
-      method: "POST",
-      pathTemplate: "/api/v1/catalog-admin/merges/{mergeId}/reverse",
-      multipart: false,
-    ),
     "reviewAiExtractionCandidate": ApiOperation(
       operationId: "reviewAiExtractionCandidate",
       method: "PUT",
@@ -1384,12 +1223,6 @@ final class ProvidentiaApiClient {
       pathTemplate: "/api/v1/auth/sessions/{sessionId}",
       multipart: false,
     ),
-    "revokeHomeBillingOverride": ApiOperation(
-      operationId: "revokeHomeBillingOverride",
-      method: "DELETE",
-      pathTemplate: "/api/v1/operator/billing/overrides/{overrideId}",
-      multipart: false,
-    ),
     "revokeHomeInvitation": ApiOperation(
       operationId: "revokeHomeInvitation",
       method: "POST",
@@ -1403,28 +1236,10 @@ final class ProvidentiaApiClient {
           "/api/v1/homes/{homeId}/ownership-transfers/{transferId}/revoke",
       multipart: false,
     ),
-    "revokeOperatorAccountRole": ApiOperation(
-      operationId: "revokeOperatorAccountRole",
-      method: "DELETE",
-      pathTemplate: "/api/v1/admin/accounts/{userId}/roles/{role}",
-      multipart: false,
-    ),
-    "revokePlatformAdministrator": ApiOperation(
-      operationId: "revokePlatformAdministrator",
-      method: "POST",
-      pathTemplate: "/api/v1/platform/administrators/{administratorId}/revoke",
-      multipart: false,
-    ),
     "searchCatalogProducts": ApiOperation(
       operationId: "searchCatalogProducts",
       method: "GET",
       pathTemplate: "/api/v1/catalog/products",
-      multipart: false,
-    ),
-    "setBillingPriceStatus": ApiOperation(
-      operationId: "setBillingPriceStatus",
-      method: "PUT",
-      pathTemplate: "/api/v1/operator/billing/prices/{priceId}/status",
       multipart: false,
     ),
     "setShoppingListLineChecked": ApiOperation(
@@ -1483,12 +1298,6 @@ final class ProvidentiaApiClient {
       pathTemplate: "/api/v1/homes/{homeId}/ai/profiles/{profileId}",
       multipart: false,
     ),
-    "updateBillingPlan": ApiOperation(
-      operationId: "updateBillingPlan",
-      method: "PUT",
-      pathTemplate: "/api/v1/operator/billing/plans/{planId}",
-      multipart: false,
-    ),
     "updateHome": ApiOperation(
       operationId: "updateHome",
       method: "PATCH",
@@ -1505,12 +1314,6 @@ final class ProvidentiaApiClient {
       operationId: "updateHomeProduct",
       method: "PATCH",
       pathTemplate: "/api/v1/homes/{homeId}/products/{homeProductId}",
-      multipart: false,
-    ),
-    "updateOperatorAccountStatus": ApiOperation(
-      operationId: "updateOperatorAccountStatus",
-      method: "PATCH",
-      pathTemplate: "/api/v1/admin/accounts/{userId}/status",
       multipart: false,
     ),
     "updatePrivateAiMediaRetention": ApiOperation(
@@ -1549,11 +1352,6 @@ final class ProvidentiaApiClient {
       accept: 'application/json',
     );
     return SystemInfo.fromJson(_decodeObject(response.body));
-  }
-
-  Future<String> getMetrics() async {
-    final response = await _get('/metrics', accept: 'text/plain');
-    return response.body;
   }
 
   Future<SyncPushResponse> pushHomeSynchronization({
@@ -1714,21 +1512,6 @@ final class ProvidentiaApiClient {
     );
   }
 
-  Future<ApiResponse> acceptBillingWebhook({
-    required String provider,
-    required Map<String, Object?> body,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "acceptBillingWebhook",
-      pathParameters: <String, String>{"provider": provider},
-      query: query,
-      headers: headers,
-      body: body,
-    );
-  }
-
   Future<ApiResponse> acceptHomeInvitation({
     required Map<String, Object?> body,
     Map<String, String>? query,
@@ -1771,20 +1554,6 @@ final class ProvidentiaApiClient {
         "homeId": homeId,
         "transferId": transferId,
       },
-      query: query,
-      headers: headers,
-      body: body,
-    );
-  }
-
-  Future<ApiResponse> applyCatalogMerge({
-    required Map<String, Object?> body,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "applyCatalogMerge",
-      pathParameters: const <String, String>{},
       query: query,
       headers: headers,
       body: body,
@@ -1992,49 +1761,6 @@ final class ProvidentiaApiClient {
     );
   }
 
-  Future<ApiResponse> createBillingPlan({
-    required Map<String, Object?> body,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "createBillingPlan",
-      pathParameters: const <String, String>{},
-      query: query,
-      headers: headers,
-      body: body,
-    );
-  }
-
-  Future<ApiResponse> createBillingPrice({
-    required String planId,
-    required Map<String, Object?> body,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "createBillingPrice",
-      pathParameters: <String, String>{"planId": planId},
-      query: query,
-      headers: headers,
-      body: body,
-    );
-  }
-
-  Future<ApiResponse> createBillingPromotion({
-    required Map<String, Object?> body,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "createBillingPromotion",
-      pathParameters: const <String, String>{},
-      query: query,
-      headers: headers,
-      body: body,
-    );
-  }
-
   Future<ApiResponse> createCatalogContribution({
     required String homeId,
     required Map<String, Object?> body,
@@ -2075,21 +1801,6 @@ final class ProvidentiaApiClient {
     return invokeOperation(
       operationId: "createHome",
       pathParameters: const <String, String>{},
-      query: query,
-      headers: headers,
-      body: body,
-    );
-  }
-
-  Future<ApiResponse> createHomeBillingOverride({
-    required String homeId,
-    required Map<String, Object?> body,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "createHomeBillingOverride",
-      pathParameters: <String, String>{"homeId": homeId},
       query: query,
       headers: headers,
       body: body,
@@ -2315,36 +2026,6 @@ final class ProvidentiaApiClient {
     );
   }
 
-  Future<ApiResponse> decideCatalogContribution({
-    required String contributionId,
-    required Map<String, Object?> body,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "decideCatalogContribution",
-      pathParameters: <String, String>{"contributionId": contributionId},
-      query: query,
-      headers: headers,
-      body: body,
-    );
-  }
-
-  Future<ApiResponse> decideCatalogProposal({
-    required String proposalId,
-    required Map<String, Object?> body,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "decideCatalogProposal",
-      pathParameters: <String, String>{"proposalId": proposalId},
-      query: query,
-      headers: headers,
-      body: body,
-    );
-  }
-
   Future<ApiResponse> deleteAiProviderCredential({
     required String homeId,
     required String providerId,
@@ -2521,31 +2202,6 @@ final class ProvidentiaApiClient {
     );
   }
 
-  Future<ApiResponse> getCatalogProductImageContributionPreview({
-    required String contributionId,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "getCatalogProductImageContributionPreview",
-      pathParameters: <String, String>{"contributionId": contributionId},
-      query: query,
-      headers: headers,
-    );
-  }
-
-  Future<ApiResponse> getCatalogWorkbench({
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "getCatalogWorkbench",
-      pathParameters: const <String, String>{},
-      query: query,
-      headers: headers,
-    );
-  }
-
   Future<ApiResponse> getConsumptionReport({
     required String homeId,
     Map<String, String>? query,
@@ -2649,19 +2305,6 @@ final class ProvidentiaApiClient {
       query: query,
       headers: headers,
       body: body,
-    );
-  }
-
-  Future<ApiResponse> getOperatorAccount({
-    required String userId,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "getOperatorAccount",
-      pathParameters: <String, String>{"userId": userId},
-      query: query,
-      headers: headers,
     );
   }
 
@@ -2831,36 +2474,6 @@ final class ProvidentiaApiClient {
     );
   }
 
-  Future<ApiResponse> grantOperatorAccountRole({
-    required String userId,
-    required String role,
-    required Map<String, Object?> body,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "grantOperatorAccountRole",
-      pathParameters: <String, String>{"userId": userId, "role": role},
-      query: query,
-      headers: headers,
-      body: body,
-    );
-  }
-
-  Future<ApiResponse> grantPlatformAdministrator({
-    required Map<String, Object?> body,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "grantPlatformAdministrator",
-      pathParameters: const <String, String>{},
-      query: query,
-      headers: headers,
-      body: body,
-    );
-  }
-
   Future<ApiResponse> issueDataExportDownloadToken({
     required String requestId,
     required Map<String, Object?> body,
@@ -2870,21 +2483,6 @@ final class ProvidentiaApiClient {
     return invokeOperation(
       operationId: "issueDataExportDownloadToken",
       pathParameters: <String, String>{"requestId": requestId},
-      query: query,
-      headers: headers,
-      body: body,
-    );
-  }
-
-  Future<ApiResponse> keepExistingCatalogConflict({
-    required String conflictId,
-    required Map<String, Object?> body,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "keepExistingCatalogConflict",
-      pathParameters: <String, String>{"conflictId": conflictId},
       query: query,
       headers: headers,
       body: body,
@@ -2935,18 +2533,6 @@ final class ProvidentiaApiClient {
   }) {
     return invokeOperation(
       operationId: "listAvailableBillingPlans",
-      pathParameters: const <String, String>{},
-      query: query,
-      headers: headers,
-    );
-  }
-
-  Future<ApiResponse> listCatalogContributionReviewQueue({
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "listCatalogContributionReviewQueue",
       pathParameters: const <String, String>{},
       query: query,
       headers: headers,
@@ -3133,48 +2719,12 @@ final class ProvidentiaApiClient {
     );
   }
 
-  Future<ApiResponse> listOperatorAccounts({
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "listOperatorAccounts",
-      pathParameters: const <String, String>{},
-      query: query,
-      headers: headers,
-    );
-  }
-
-  Future<ApiResponse> listOperatorBillingPlans({
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "listOperatorBillingPlans",
-      pathParameters: const <String, String>{},
-      query: query,
-      headers: headers,
-    );
-  }
-
   Future<ApiResponse> listPendingHomeInvitations({
     Map<String, String>? query,
     Map<String, String> headers = const <String, String>{},
   }) {
     return invokeOperation(
       operationId: "listPendingHomeInvitations",
-      pathParameters: const <String, String>{},
-      query: query,
-      headers: headers,
-    );
-  }
-
-  Future<ApiResponse> listPlatformAdministrators({
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "listPlatformAdministrators",
       pathParameters: const <String, String>{},
       query: query,
       headers: headers,
@@ -3324,20 +2874,6 @@ final class ProvidentiaApiClient {
     );
   }
 
-  Future<ApiResponse> previewCatalogMerge({
-    required Map<String, Object?> body,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "previewCatalogMerge",
-      pathParameters: const <String, String>{},
-      query: query,
-      headers: headers,
-      body: body,
-    );
-  }
-
   Future<ApiResponse> proposeHomeOwnershipTransfer({
     required String homeId,
     required Map<String, Object?> body,
@@ -3402,44 +2938,6 @@ final class ProvidentiaApiClient {
     );
   }
 
-  Future<ApiResponse> putBillingEntitlement({
-    required String planId,
-    required String featureKey,
-    required Map<String, Object?> body,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "putBillingEntitlement",
-      pathParameters: <String, String>{
-        "planId": planId,
-        "featureKey": featureKey,
-      },
-      query: query,
-      headers: headers,
-      body: body,
-    );
-  }
-
-  Future<ApiResponse> putBillingProviderPriceReference({
-    required String priceId,
-    required String provider,
-    required Map<String, Object?> body,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "putBillingProviderPriceReference",
-      pathParameters: <String, String>{
-        "priceId": priceId,
-        "provider": provider,
-      },
-      query: query,
-      headers: headers,
-      body: body,
-    );
-  }
-
   Future<ApiResponse> putCatalogContributionConsent({
     required String homeId,
     required Map<String, Object?> body,
@@ -3449,55 +2947,6 @@ final class ProvidentiaApiClient {
     return invokeOperation(
       operationId: "putCatalogContributionConsent",
       pathParameters: <String, String>{"homeId": homeId},
-      query: query,
-      headers: headers,
-      body: body,
-    );
-  }
-
-  Future<ApiResponse> putCatalogContributionProposal({
-    required String contributionId,
-    required Map<String, Object?> body,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "putCatalogContributionProposal",
-      pathParameters: <String, String>{"contributionId": contributionId},
-      query: query,
-      headers: headers,
-      body: body,
-    );
-  }
-
-  Future<ApiResponse> putCatalogIcon({
-    required String targetType,
-    required String targetId,
-    required Map<String, Object?> body,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "putCatalogIcon",
-      pathParameters: <String, String>{
-        "targetType": targetType,
-        "targetId": targetId,
-      },
-      query: query,
-      headers: headers,
-      body: body,
-    );
-  }
-
-  Future<ApiResponse> putCatalogProductImageContributionPublication({
-    required String contributionId,
-    required Map<String, Object?> body,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "putCatalogProductImageContributionPublication",
-      pathParameters: <String, String>{"contributionId": contributionId},
       query: query,
       headers: headers,
       body: body,
@@ -3712,21 +3161,6 @@ final class ProvidentiaApiClient {
     );
   }
 
-  Future<ApiResponse> reverseCatalogMerge({
-    required String mergeId,
-    required Map<String, Object?> body,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "reverseCatalogMerge",
-      pathParameters: <String, String>{"mergeId": mergeId},
-      query: query,
-      headers: headers,
-      body: body,
-    );
-  }
-
   Future<ApiResponse> reviewAiExtractionCandidate({
     required String homeId,
     required String extractionId,
@@ -3822,19 +3256,6 @@ final class ProvidentiaApiClient {
     );
   }
 
-  Future<ApiResponse> revokeHomeBillingOverride({
-    required String overrideId,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "revokeHomeBillingOverride",
-      pathParameters: <String, String>{"overrideId": overrideId},
-      query: query,
-      headers: headers,
-    );
-  }
-
   Future<ApiResponse> revokeHomeInvitation({
     required String homeId,
     required String invitationId,
@@ -3873,37 +3294,6 @@ final class ProvidentiaApiClient {
     );
   }
 
-  Future<ApiResponse> revokeOperatorAccountRole({
-    required String userId,
-    required String role,
-    required Map<String, Object?> body,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "revokeOperatorAccountRole",
-      pathParameters: <String, String>{"userId": userId, "role": role},
-      query: query,
-      headers: headers,
-      body: body,
-    );
-  }
-
-  Future<ApiResponse> revokePlatformAdministrator({
-    required String administratorId,
-    required Map<String, Object?> body,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "revokePlatformAdministrator",
-      pathParameters: <String, String>{"administratorId": administratorId},
-      query: query,
-      headers: headers,
-      body: body,
-    );
-  }
-
   Future<ApiResponse> searchCatalogProducts({
     Map<String, String>? query,
     Map<String, String> headers = const <String, String>{},
@@ -3913,21 +3303,6 @@ final class ProvidentiaApiClient {
       pathParameters: const <String, String>{},
       query: query,
       headers: headers,
-    );
-  }
-
-  Future<ApiResponse> setBillingPriceStatus({
-    required String priceId,
-    required Map<String, Object?> body,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "setBillingPriceStatus",
-      pathParameters: <String, String>{"priceId": priceId},
-      query: query,
-      headers: headers,
-      body: body,
     );
   }
 
@@ -4078,21 +3453,6 @@ final class ProvidentiaApiClient {
     );
   }
 
-  Future<ApiResponse> updateBillingPlan({
-    required String planId,
-    required Map<String, Object?> body,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "updateBillingPlan",
-      pathParameters: <String, String>{"planId": planId},
-      query: query,
-      headers: headers,
-      body: body,
-    );
-  }
-
   Future<ApiResponse> updateHome({
     required String homeId,
     required Map<String, Object?> body,
@@ -4140,21 +3500,6 @@ final class ProvidentiaApiClient {
         "homeId": homeId,
         "homeProductId": homeProductId,
       },
-      query: query,
-      headers: headers,
-      body: body,
-    );
-  }
-
-  Future<ApiResponse> updateOperatorAccountStatus({
-    required String userId,
-    required Map<String, Object?> body,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "updateOperatorAccountStatus",
-      pathParameters: <String, String>{"userId": userId},
       query: query,
       headers: headers,
       body: body,

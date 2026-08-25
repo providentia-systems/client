@@ -133,26 +133,8 @@ void main() {
       );
     });
 
-    test('returns metrics as text without JSON coercion', () async {
-      final client = ProvidentiaApiClient(
-        baseUri: Uri.parse('https://api.example.test'),
-        httpClient: MockClient((request) async {
-          expect(request.url.path, '/metrics');
-          return http.Response(
-            'providentia_up 1\n',
-            200,
-            headers: <String, String>{
-              'content-type': 'text/plain; version=0.0.4',
-            },
-          );
-        }),
-      );
-
-      expect(await client.getMetrics(), 'providentia_up 1\n');
-    });
-
-    test('publishes the complete API 1.15.0 operation registry', () {
-      expect(ProvidentiaApiClient.operations, hasLength(174));
+    test('publishes only the API 1.15.0 homeowner operation registry', () {
+      expect(ProvidentiaApiClient.operations, hasLength(142));
       expect(
         ProvidentiaApiClient.operations['createAiExtraction'],
         isA<ApiOperation>()
@@ -175,7 +157,6 @@ void main() {
           'getCurrentUser',
           'createHome',
           'listPendingHomeInvitations',
-          'listPlatformAdministrators',
           'listHomeStock',
           'cancelStockCountSession',
           'commitReceipt',
@@ -186,11 +167,59 @@ void main() {
           'listHomeCategories',
           'createCatalogContribution',
           'createCatalogProductImageContribution',
-          'listCatalogContributionReviewQueue',
-          'listOperatorAccounts',
-          'getOperatorAccount',
+          'listPublishedCatalogContributions',
+          'submitCatalogProposal',
         ]),
       );
+      for (final forbiddenOperation in <String>[
+        'getMetrics',
+        'listPlatformAdministrators',
+        'grantPlatformAdministrator',
+        'revokePlatformAdministrator',
+        'listCatalogContributionReviewQueue',
+        'decideCatalogContribution',
+        'putCatalogContributionProposal',
+        'getCatalogProductImageContributionPreview',
+        'putCatalogProductImageContributionPublication',
+        'getCatalogWorkbench',
+        'listOperatorAccounts',
+        'getOperatorAccount',
+        'acceptBillingWebhook',
+      ]) {
+        expect(
+          ProvidentiaApiClient.operations.containsKey(forbiddenOperation),
+          isFalse,
+          reason: forbiddenOperation,
+        );
+      }
+      for (final operation in ProvidentiaApiClient.operations.values) {
+        expect(operation.pathTemplate, isNot('/metrics'));
+        for (final forbiddenPrefix in <String>[
+          '/api/v1/admin/',
+          '/api/v1/catalog-admin/',
+          '/api/v1/operator/',
+          '/api/v1/platform/',
+          '/api/v1/billing/webhooks/',
+          '/api/v1/catalog-contributions/review',
+        ]) {
+          expect(
+            operation.pathTemplate.startsWith(forbiddenPrefix),
+            isFalse,
+            reason: operation.operationId,
+          );
+        }
+        for (final forbiddenModerationSegment in <String>[
+          '/decision',
+          '/image-preview',
+          '/image-publication',
+        ]) {
+          expect(
+            operation.pathTemplate.contains(forbiddenModerationSegment),
+            isFalse,
+            reason: operation.operationId,
+          );
+        }
+      }
     });
 
     test('sends JSON bodies through generated operation methods', () async {

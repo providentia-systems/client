@@ -1,10 +1,12 @@
 {
   "generator": "tool/generate_api_client.mjs",
-  "generatorVersion": 5,
+  "generatorVersion": 6,
+  "clientProfile": "homeowner",
   "contract": "../../providentia-v1.json",
   "contractVersion": "1.15.0",
   "contractSha256": "61d49a5b0c857b532e27cfc243a2701731f7b0f2c4d5f5ab39d3fb0636790cdd",
-  "operationCount": 174,
+  "canonicalOperationCount": 174,
+  "generatedOperationCount": 142,
   "generatedFiles": [
     "pubspec.yaml",
     "lib/providentia_api_client.dart"

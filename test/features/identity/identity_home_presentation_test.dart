@@ -172,6 +172,38 @@ void main() {
     expect(find.text('Test device · current device'), findsOneWidget);
   });
 
+  testWidgets('platform roles never expose administration in homeowner UI', (
+    tester,
+  ) async {
+    final identity = _AuthenticatedIdentityFixture(
+      platformRoles: const <PlatformRole>{
+        PlatformRole.platformAdministrator,
+        PlatformRole.catalogCurator,
+        PlatformRole.catalogReviewer,
+        PlatformRole.billingOperator,
+      },
+    );
+    final homes = _HomeFixture(existingHomes: 1);
+    addTearDown(identity.dispose);
+    addTearDown(homes.dispose);
+    await identity.controller.restore();
+    await homes.controller.load(sessionActiveHomeId: 'home-0');
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: AccountAccessPage(
+          identityController: identity.controller,
+          homesController: homes.controller,
+        ),
+      ),
+    );
+
+    expect(find.text('Catalog administration'), findsNothing);
+    expect(find.text('Platform administrators'), findsNothing);
+    expect(find.textContaining('operator', findRichText: true), findsNothing);
+    expect(find.byKey(const Key('open-signed-in-devices')), findsOneWidget);
+  });
+
   testWidgets(
     'data governance remains account-accessible without a selected home',
     (tester) async {
@@ -405,17 +437,19 @@ final class _IdentityFixture {
 }
 
 final class _AuthenticatedIdentityFixture {
-  _AuthenticatedIdentityFixture()
-    : transport = _AuthenticatedPresentationIdentityTransport(
-        DateTime.now().toUtc(),
-      ),
-      credentials = _StoredCredentialStore(
-        StoredNativeSession(
-          sessionId: _identitySessionId,
-          deviceId: _identityDeviceId,
-          refreshToken: 'saved-refresh-token',
-        ),
-      ) {
+  _AuthenticatedIdentityFixture({
+    Set<PlatformRole> platformRoles = const <PlatformRole>{},
+  }) : transport = _AuthenticatedPresentationIdentityTransport(
+         DateTime.now().toUtc(),
+         platformRoles,
+       ),
+       credentials = _StoredCredentialStore(
+         StoredNativeSession(
+           sessionId: _identitySessionId,
+           deviceId: _identityDeviceId,
+           refreshToken: 'saved-refresh-token',
+         ),
+       ) {
     manager = IdentitySessionManager(
       transport: transport,
       credentialStore: credentials,
@@ -521,7 +555,7 @@ final class _DevelopmentIdentityTransport extends _PresentationIdentityTransport
 
 final class _AuthenticatedPresentationIdentityTransport
     extends _PresentationIdentityTransport {
-  _AuthenticatedPresentationIdentityTransport(this.now)
+  _AuthenticatedPresentationIdentityTransport(this.now, this.platformRoles)
     : sessions = <DeviceSessionView>[
         _identityDeviceSession(
           now,
@@ -549,6 +583,7 @@ final class _AuthenticatedPresentationIdentityTransport
       ];
 
   final DateTime now;
+  final Set<PlatformRole> platformRoles;
   final List<DeviceSessionView> sessions;
   final List<String> revokedSessionIds = <String>[];
   IdentityTransportException? deviceListError;
@@ -567,7 +602,7 @@ final class _AuthenticatedPresentationIdentityTransport
     emailVerified: true,
     homes: const <CurrentUserHomeView>[],
     pendingInvitations: const <CurrentUserInvitationView>[],
-    platformRoles: const <PlatformRole>{},
+    platformRoles: platformRoles,
     currentSession: sessions.singleWhere((session) => session.current),
   );
 

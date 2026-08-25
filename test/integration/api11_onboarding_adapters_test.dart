@@ -6,9 +6,6 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:image/image.dart' as image;
 import 'package:providentia/core/networking/session_http_client.dart';
-import 'package:providentia/features/administration/application/platform_administration_controller.dart';
-import 'package:providentia/features/administration/domain/platform_administrator_models.dart';
-import 'package:providentia/features/administration/infrastructure/api11_platform_administration_transport.dart';
 import 'package:providentia/features/ai_integration/domain/ai_models.dart';
 import 'package:providentia/features/ai_integration/infrastructure/api17_server_credential_provisioning.dart';
 import 'package:providentia/features/ai_integration/infrastructure/sanitizing_image_media_preparer.dart';
@@ -473,57 +470,6 @@ void main() {
     expect(result.first.timezone, 'Africa/Windhoek');
   });
 
-  test('platform administrators list, grant, and revisioned revoke', () async {
-    final requests = <http.Request>[];
-    final transport = Api11PlatformAdministrationTransport(
-      _client((request) async {
-        requests.add(request);
-        if (request.method == 'GET') {
-          return _json(<String, Object?>{
-            'data': <Object?>[_administratorJson()],
-          }, 200);
-        }
-        if (request.url.path.endsWith('/revoke')) {
-          return http.Response('', 204);
-        }
-        return _json(_administratorJson(status: 'pending'), 201);
-      }),
-    );
-
-    final listed = await transport.listAdministrators();
-    final granted = await transport.grantAdministrator('next@example.com');
-    await transport.revokeAdministrator(
-      administratorId: _administratorId,
-      expectedRevision: 2,
-    );
-
-    expect(listed.single.status, PlatformAdministratorStatus.active);
-    expect(granted.status, PlatformAdministratorStatus.pending);
-    expect(jsonDecode(requests.last.body), <String, Object?>{
-      'expectedRevision': 2,
-    });
-  });
-
-  test('final platform administrator conflict is distinct', () async {
-    final transport = Api11PlatformAdministrationTransport(
-      _client((_) async => _problem(409, 'Final administrator.')),
-    );
-
-    await expectLater(
-      transport.revokeAdministrator(
-        administratorId: _administratorId,
-        expectedRevision: 2,
-      ),
-      throwsA(
-        isA<PlatformAdministrationException>().having(
-          (error) => error.safeMessage,
-          'message',
-          contains('final active'),
-        ),
-      ),
-    );
-  });
-
   test(
     'cloud credential is sent once to the home-scoped write-only vault',
     () async {
@@ -698,7 +644,6 @@ const _userId = '0198a0b1-c2d3-7e4f-8123-456789abcdec';
 const _homeId = '0198a0b1-c2d3-7e4f-8123-456789abcded';
 const _secondHomeId = '0198a0b1-c2d3-7e4f-8123-456789abcdee';
 const _invitationId = '0198a0b1-c2d3-7e4f-8123-456789abcdef';
-const _administratorId = '0198a0b1-c2d3-7e4f-8123-456789abcd01';
 const _pollToken = 'poll-token-000000000000000000000000000000000';
 const _verifier =
     'code-verifier-000000000000000000000000000000000000000000000000';
@@ -820,18 +765,6 @@ Map<String, Object?> _homeJson({
   'role': role,
   'revision': revision,
 };
-
-Map<String, Object?> _administratorJson({String status = 'active'}) =>
-    <String, Object?>{
-      'id': _administratorId,
-      'email': 'admin@example.com',
-      'userId': _userId,
-      'status': status,
-      'revision': 2,
-      'grantedByUserId': _userId,
-      'createdAt': '2026-08-01T12:00:00Z',
-      'activatedAt': status == 'active' ? '2026-08-01T12:01:00Z' : null,
-    };
 
 final class _MemoryCredentialStore implements SessionCredentialStore {
   StoredNativeSession? session = StoredNativeSession(

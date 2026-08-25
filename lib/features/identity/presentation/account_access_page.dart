@@ -1,10 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:providentia/features/administration/application/platform_administration_controller.dart';
-import 'package:providentia/features/administration/presentation/platform_administrators_page.dart';
 import 'package:providentia/features/homes/domain/home_models.dart';
 import 'package:providentia/features/homes/presentation/home_governance_page.dart';
 import 'package:providentia/features/homes/presentation/homes_controller.dart';
-import 'package:providentia/features/identity/domain/identity_models.dart';
 import 'package:providentia/features/identity/presentation/device_sessions_page.dart';
 import 'package:providentia/features/identity/presentation/identity_controller.dart';
 
@@ -12,10 +9,8 @@ final class AccountAccessPage extends StatelessWidget {
   const AccountAccessPage({
     required this.identityController,
     required this.homesController,
-    this.platformAdministrationController,
     this.catalogSharingPageBuilder,
     this.catalogContributionPageBuilder,
-    this.catalogAdministrationPageBuilder,
     this.householdReportsPageBuilder,
     this.householdAiPageBuilder,
     this.dataGovernancePageBuilder,
@@ -24,10 +19,8 @@ final class AccountAccessPage extends StatelessWidget {
 
   final IdentityController identityController;
   final HomesController homesController;
-  final PlatformAdministrationController? platformAdministrationController;
   final WidgetBuilder? catalogSharingPageBuilder;
   final WidgetBuilder? catalogContributionPageBuilder;
-  final WidgetBuilder? catalogAdministrationPageBuilder;
   final WidgetBuilder? householdReportsPageBuilder;
   final WidgetBuilder? householdAiPageBuilder;
   final WidgetBuilder? dataGovernancePageBuilder;
@@ -47,7 +40,6 @@ final class AccountAccessPage extends StatelessWidget {
     final user = identityController.snapshot.currentUser;
     final home = homesController.snapshot.activeHome;
     final permissions = homesController.snapshot.effectivePermissions;
-    final platformRoles = user?.platformRoles ?? const <PlatformRole>{};
     return Scaffold(
       appBar: AppBar(title: const Text('Account & access')),
       body: ListView(
@@ -180,39 +172,6 @@ final class AccountAccessPage extends StatelessWidget {
                 ),
               ),
             ),
-          if (catalogAdministrationPageBuilder != null &&
-              mayAccessCatalogAdministration(platformRoles))
-            ListTile(
-              key: const Key('open-catalog-administration'),
-              leading: const Icon(Icons.fact_check_outlined),
-              title: const Text('Catalog administration'),
-              subtitle: const Text(
-                'Review sanitized global records with your platform role',
-              ),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => Navigator.of(context).push<void>(
-                MaterialPageRoute<void>(
-                  builder: catalogAdministrationPageBuilder!,
-                ),
-              ),
-            ),
-          if (platformAdministrationController != null)
-            ListTile(
-              key: const Key('open-platform-administrators'),
-              leading: const Icon(Icons.admin_panel_settings_outlined),
-              title: const Text('Platform administrators'),
-              subtitle: const Text(
-                'Add, review, or revoke global administrators',
-              ),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => Navigator.of(context).push<void>(
-                MaterialPageRoute<void>(
-                  builder: (_) => PlatformAdministratorsPage(
-                    controller: platformAdministrationController!,
-                  ),
-                ),
-              ),
-            ),
         ],
       ),
     );
@@ -243,14 +202,3 @@ bool mayAccessCatalogSharing(Set<String> permissions) => permissions.any(
 bool mayContributeCatalogProduct(Set<String> permissions) =>
     permissions.contains(HomePermissions.catalogContribute) &&
     permissions.contains(HomePermissions.inventoryRead);
-
-/// Platform catalog access is deliberately unrelated to household roles or
-/// home permissions. A home owner cannot acquire a moderation capability.
-@visibleForTesting
-bool mayAccessCatalogAdministration(Set<PlatformRole> roles) => roles.any(
-  const <PlatformRole>{
-    PlatformRole.platformAdministrator,
-    PlatformRole.catalogCurator,
-    PlatformRole.catalogReviewer,
-  }.contains,
-);

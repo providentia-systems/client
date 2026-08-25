@@ -25,7 +25,6 @@ const requiredDirectories = [
   'lib/features/purchasing',
   'lib/features/shopping',
   'lib/features/ai_integration',
-  'lib/features/administration',
   'lib/features/data_governance',
   'lib/features/reporting',
 ];
@@ -52,6 +51,7 @@ const requiredFiles = [
   'contracts/design-tokens/providentia-v1.json',
   'contracts/design-tokens/contract.lock.json',
   'contracts/generated/providentia_api_client/lib/providentia_api_client.dart',
+  'contracts/generated/providentia_api_client/generation-manifest.json',
   'AGENTS.md',
   'tools/agent-requirements.json',
 ];
@@ -212,8 +212,6 @@ const generatedClientAdapters = new Set([
   'lib/features/ai_integration/infrastructure/api17_ai_gateway.dart',
   'lib/features/ai_integration/infrastructure/api17_server_credential_provisioning.dart',
   'lib/features/ai_integration/infrastructure/generated_server_ai_repository.dart',
-  'lib/features/administration/infrastructure/api11_platform_administration_transport.dart',
-  'lib/features/administration/infrastructure/generated_catalog_administration_repository.dart',
   'lib/features/catalog/infrastructure/generated_catalog_contribution_repository.dart',
   'lib/features/data_governance/infrastructure/generated_data_governance_repository.dart',
   'lib/features/homes/infrastructure/api11_home_transport.dart',
@@ -273,6 +271,78 @@ assert(
   dependencyViolations.length === 0,
   `Dependency inversion violations:\n${dependencyViolations.join('\\n')}`,
 );
+
+const homeownerBoundaryViolations = [];
+for (const file of dartFiles) {
+  const source = await readFile(file, 'utf8');
+  const relativePath = path.relative(root, file).split(path.sep).join('/');
+  for (const forbidden of [
+    'features/administration',
+    '/api/v1/admin/',
+    '/api/v1/catalog-admin/',
+    '/api/v1/operator/',
+    '/api/v1/platform/administrators',
+    'listOperatorAccounts',
+    'getOperatorAccount',
+    'listPlatformAdministrators',
+    'getCatalogWorkbench',
+  ]) {
+    if (source.includes(forbidden)) {
+      homeownerBoundaryViolations.push(`${relativePath}: ${forbidden}`);
+    }
+  }
+}
+assert(
+  homeownerBoundaryViolations.length === 0,
+  `Administrator capability leaked into homeowner lib:\n${homeownerBoundaryViolations.join('\n')}`,
+);
+const generatedHomeownerClient = await readFile(
+  path.join(
+    root,
+    'contracts/generated/providentia_api_client/lib/providentia_api_client.dart',
+  ),
+  'utf8',
+);
+for (const forbidden of [
+  '/metrics',
+  '/api/v1/admin/',
+  '/api/v1/catalog-admin/',
+  '/api/v1/operator/',
+  '/api/v1/platform/',
+  '/api/v1/billing/webhooks/',
+  '/api/v1/catalog-contributions/review',
+  'listPlatformAdministrators',
+  'listOperatorAccounts',
+  'getCatalogWorkbench',
+]) {
+  assert(
+    !generatedHomeownerClient.includes(forbidden),
+    `Generated homeowner client exposes administrator operation: ${forbidden}`,
+  );
+}
+const generatedManifest = JSON.parse(
+  await readFile(
+    path.join(
+      root,
+      'contracts/generated/providentia_api_client/generation-manifest.json',
+    ),
+    'utf8',
+  ),
+);
+assert(
+  generatedManifest.clientProfile === 'homeowner' &&
+    generatedManifest.canonicalOperationCount === 174 &&
+    generatedManifest.generatedOperationCount === 142,
+  'Generated client manifest must distinguish the canonical and homeowner surfaces.',
+);
+try {
+  await stat(path.join(root, 'lib/features/administration'));
+  throw new Error(
+    'lib/features/administration belongs only in providentia-systems/admin.',
+  );
+} catch (error) {
+  if (error?.code !== 'ENOENT') throw error;
+}
 
 const allTextFiles = (await walk(root)).filter(
   (file) =>
