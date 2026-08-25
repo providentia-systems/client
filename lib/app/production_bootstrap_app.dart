@@ -43,14 +43,20 @@ import 'package:providentia/features/ai_integration/presentation/receipt_ai_hand
 import 'package:providentia/features/ai_integration/presentation/server_ai_workspace_controller.dart';
 import 'package:providentia/features/ai_integration/presentation/server_ai_workspace_page.dart';
 import 'package:providentia/features/catalog/application/catalog_product_contribution_controller.dart';
+import 'package:providentia/features/catalog/application/catalog_product_image_contribution_controller.dart';
+import 'package:providentia/features/catalog/application/catalog_product_image_service.dart';
 import 'package:providentia/features/catalog/application/catalog_proposal_service.dart';
 import 'package:providentia/features/catalog/application/catalog_sharing_controller.dart';
 import 'package:providentia/features/catalog/application/catalog_store_price_contribution_controller.dart';
 import 'package:providentia/features/catalog/application/catalog_store_price_service.dart';
 import 'package:providentia/features/catalog/application/catalog_submission_intent.dart';
+import 'package:providentia/features/catalog/domain/catalog_product_image_models.dart';
+import 'package:providentia/features/catalog/infrastructure/catalog_product_image_acquisition.dart';
 import 'package:providentia/features/catalog/infrastructure/generated_catalog_contribution_repository.dart';
+import 'package:providentia/features/catalog/infrastructure/generated_catalog_product_image_repository.dart';
 import 'package:providentia/features/catalog/infrastructure/platform_catalog_submission_intent_store.dart';
 import 'package:providentia/features/catalog/presentation/catalog_product_contribution_page.dart';
+import 'package:providentia/features/catalog/presentation/catalog_product_image_contribution_page.dart';
 import 'package:providentia/features/catalog/presentation/catalog_sharing_page.dart';
 import 'package:providentia/features/catalog/presentation/catalog_store_price_contribution_page.dart';
 import 'package:providentia/features/data_governance/application/data_governance_service.dart';
@@ -939,6 +945,8 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
             homesController: widget.homesController,
             catalogSharingPageBuilder: widget.catalogSharingPageBuilder,
             catalogContributionPageBuilder: _catalogContributionPageBuilder,
+            catalogProductImageContributionPageBuilder:
+                _catalogProductImageContributionPageBuilder,
             catalogStorePriceContributionPageBuilder:
                 _catalogStorePriceContributionPageBuilder,
             householdReportsPageBuilder: widget.householdReportsPageBuilder,
@@ -976,6 +984,23 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
         inventoryController: _features.inventory,
         homeId: widget.home.id,
         defaultCurrency: widget.home.currency,
+        protectedRouteRegistry: widget.protectedRouteRegistry,
+        onAuthorizationLost: widget.onCatalogAuthorizationLost,
+      );
+    };
+  }
+
+  WidgetBuilder? get _catalogProductImageContributionPageBuilder {
+    if (!widget.canContributeCatalog) return null;
+    return (_) {
+      final consentRepository = GeneratedCatalogContributionRepository(
+        widget.api,
+      );
+      return ProductionCatalogProductImageContributionRoute(
+        consentRepository: consentRepository,
+        imageRepository: GeneratedCatalogProductImageRepository(widget.api),
+        inventoryController: _features.inventory,
+        homeId: widget.home.id,
         protectedRouteRegistry: widget.protectedRouteRegistry,
         onAuthorizationLost: widget.onCatalogAuthorizationLost,
       );
@@ -1281,6 +1306,92 @@ final class _ProductionCatalogProductContributionRouteState
   Widget build(BuildContext context) => CatalogProductContributionPage(
     controller: _controller,
     inventoryController: widget.inventoryController,
+  );
+
+  @override
+  void dispose() {
+    widget.protectedRouteRegistry.unregister(_clearSensitiveState);
+    _clearSensitiveState();
+    _controller.dispose();
+    super.dispose();
+  }
+}
+
+/// Route-owned bridge for one transient, explicit product-image submission.
+@visibleForTesting
+final class ProductionCatalogProductImageContributionRoute
+    extends StatefulWidget {
+  const ProductionCatalogProductImageContributionRoute({
+    required this.consentRepository,
+    required this.imageRepository,
+    required this.inventoryController,
+    required this.homeId,
+    required this.protectedRouteRegistry,
+    required this.onAuthorizationLost,
+    this.acquisition,
+    super.key,
+  });
+
+  final CatalogSharingConsentRepository consentRepository;
+  final CatalogProductImageRepository imageRepository;
+  final InventoryController inventoryController;
+  final String homeId;
+  final ProductionProtectedRouteRegistry protectedRouteRegistry;
+  final Future<void> Function() onAuthorizationLost;
+  final CatalogProductImageAcquisitionActions? acquisition;
+
+  @override
+  State<ProductionCatalogProductImageContributionRoute> createState() =>
+      _ProductionCatalogProductImageContributionRouteState();
+}
+
+final class _ProductionCatalogProductImageContributionRouteState
+    extends State<ProductionCatalogProductImageContributionRoute> {
+  late final CatalogProductImageContributionController _controller;
+  late final CatalogProductImageAcquirer _acquirer;
+  late final VoidCallback _clearSensitiveState;
+
+  @override
+  void initState() {
+    super.initState();
+    _acquirer = CatalogProductImageAcquirer();
+    _controller = CatalogProductImageContributionController(
+      consentRepository: widget.consentRepository,
+      service: CatalogProductImageService(widget.imageRepository),
+      homeId: widget.homeId,
+      canContribute: true,
+      submissionIntents: CatalogSubmissionIntentCoordinator(
+        store: PlatformCatalogSubmissionIntentStore(),
+      ),
+      onAuthorizationLost: widget.onAuthorizationLost,
+    );
+    _clearSensitiveState = _controller.clearSensitiveState;
+    widget.protectedRouteRegistry.register(_clearSensitiveState);
+  }
+
+  Future<CatalogProductImageDraft?> _takePhoto() async {
+    if (!mounted) return null;
+    final captured = await showCameraCapture(context);
+    if (captured == null) return null;
+    try {
+      if (!mounted) return null;
+      return await _acquirer.fromXFile(captured);
+    } finally {
+      await discardCapturedFile(captured.path);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => CatalogProductImageContributionPage(
+    controller: _controller,
+    inventoryController: widget.inventoryController,
+    acquisition:
+        widget.acquisition ??
+        CatalogProductImageAcquisitionActions(
+          takePhoto: _takePhoto,
+          chooseGallery: _acquirer.chooseGallery,
+          chooseFile: _acquirer.chooseFile,
+        ),
   );
 
   @override

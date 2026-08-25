@@ -31,7 +31,7 @@ Application-owned adapters compose:
 - active-home selection, editable home settings, recipient invitations,
   memberships, roles, and permission policies;
 - revisioned, home-scoped catalog sharing consent and consent-bound sanitized
-  product-identity and store-price contribution submission;
+  product-identity, product-image, and store-price contribution submission;
 - home-scoped inventory, purchasing, shopping, reporting, and account/home
   data-governance operations with exact permission checks; and
 - home-scoped AI settings, profiles, policy, sanitized extraction review, and
@@ -66,11 +66,14 @@ explicit Add to list. Suggestion feedback, existing-line quantity edits, and
 authoritative cross-device suggestion provenance remain deferred even where a
 generated method exists; generation is not a retry/idempotency guarantee.
 
-Direct product-identity and store-price contributions are distinct from
-receipt-driven catalog publication. Each requires revisioned server opt-in, an
-exact local review, a fresh per-submission confirmation, and a durable UUID
-bound to the payload and consent revision. Receipt matching does not submit a
-catalog contribution or publish a global alias.
+Direct product-identity, product-image, and store-price contributions are
+distinct from receipt-driven catalog publication. Each requires revisioned
+server opt-in, an exact local review, a fresh per-submission confirmation, and
+a durable UUID bound to the payload and consent revision. Product-image input
+is bounded to JPEG, PNG, or WebP detected from bytes; camera, gallery, and file
+paths share one transient preview and zeroization lifecycle. Receipt matching
+does not submit a catalog contribution or publish a global alias. Moderation
+and publication remain available only in the separate Admin client.
 
 The generated operation-status lookup is integrated into synchronization
 response-loss recovery. A known immutable result is applied once, an unknown

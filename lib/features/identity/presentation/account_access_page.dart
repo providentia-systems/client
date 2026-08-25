@@ -11,6 +11,7 @@ final class AccountAccessPage extends StatelessWidget {
     required this.homesController,
     this.catalogSharingPageBuilder,
     this.catalogContributionPageBuilder,
+    this.catalogProductImageContributionPageBuilder,
     this.catalogStorePriceContributionPageBuilder,
     this.householdReportsPageBuilder,
     this.householdAiPageBuilder,
@@ -22,6 +23,7 @@ final class AccountAccessPage extends StatelessWidget {
   final HomesController homesController;
   final WidgetBuilder? catalogSharingPageBuilder;
   final WidgetBuilder? catalogContributionPageBuilder;
+  final WidgetBuilder? catalogProductImageContributionPageBuilder;
   final WidgetBuilder? catalogStorePriceContributionPageBuilder;
   final WidgetBuilder? householdReportsPageBuilder;
   final WidgetBuilder? householdAiPageBuilder;
@@ -188,6 +190,23 @@ final class AccountAccessPage extends StatelessWidget {
               onTap: () => Navigator.of(context).push<void>(
                 MaterialPageRoute<void>(
                   builder: catalogStorePriceContributionPageBuilder!,
+                ),
+              ),
+            ),
+          if (home != null &&
+              catalogProductImageContributionPageBuilder != null &&
+              mayContributeCatalogProduct(permissions))
+            ListTile(
+              key: const Key('open-catalog-product-image-contribution'),
+              leading: const Icon(Icons.add_photo_alternate_outlined),
+              title: const Text('Contribute a product image'),
+              subtitle: const Text(
+                'Take or choose one image for explicit public review',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context).push<void>(
+                MaterialPageRoute<void>(
+                  builder: catalogProductImageContributionPageBuilder!,
                 ),
               ),
             ),

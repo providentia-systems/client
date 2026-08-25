@@ -64,11 +64,15 @@ launch. It does not reopen the owner-selected name.
 - Recipient invitations and home selection/settings/governance are composed
   homeowner workflows. Platform administration exists only in the separate
   Admin Flutter client.
-- Catalog sharing consent and explicit product-identity/store-price
-  contributions are production-composed behind home permissions. Consent and
-  selection do not submit; server opt-in, exact preview, and a fresh checkbox
-  are required. A durable submission UUID is bound to the exact payload and
-  consent revision before transport.
+- Catalog sharing consent and explicit product-identity, product-image, and
+  store-price contributions are production-composed behind home permissions.
+  Product-image input is reachable from camera, gallery, and file selection;
+  MIME type and dimensions are derived from bounded bytes, the local preview
+  requires rights plus exact-submission confirmation, and bytes are zeroized
+  on replacement, completion, revocation, or session loss. Consent and
+  selection do not submit. A durable submission UUID is bound to the exact
+  payload and consent revision before transport. Review/publication remains in
+  the separate Admin Flutter client.
 - Home roles (`owner`, `manager`, `member`, `viewer`) and platform roles are
   separate authorization domains. A platform role grants no private home
   access.
