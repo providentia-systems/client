@@ -4,7 +4,7 @@ import 'package:crypto/crypto.dart';
 import 'package:providentia/core/security/uuid_v4.dart';
 import 'package:providentia/features/catalog/application/catalog_proposal_service.dart';
 
-enum CatalogContributionIntentType { productIdentity, storePrice }
+enum CatalogContributionIntentType { productIdentity, productImage, storePrice }
 
 /// Non-reversible identity for one exact contribution request.
 ///

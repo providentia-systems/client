@@ -28,10 +28,14 @@ login page.
 
 Private home categories and products remain usable without contribution
 consent. Sharing is separately opt-in, field-scoped, active-home bound, and
-reviewable before submission. Product-identity contributions require current
-server consent, the exact household permission, an item selection, an exact
-wire preview, and a fresh per-item confirmation; changing consent never
-submits. Global publication and contribution moderation remain Admin concerns.
+reviewable before submission. Product identity, product image, and store-price
+contributions each require current server consent, the exact household
+permission, a private source item, and fresh review. Product images can be
+captured by camera or selected from gallery/file input; format and dimensions
+come from bounded decoded bytes, the preview remains local until two explicit
+confirmations, and transient bytes are zeroized on replacement, completion, or
+authorization loss. Changing consent never submits. Global publication and
+contribution moderation remain concerns of the separate Admin Flutter client.
 Current-contract home-report and data-governance adapters are composed from
 Account & access with exact active-home permission gates, account-only privacy
 actions, route-owned controller lifecycles, and a dual-navigator

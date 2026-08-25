@@ -36,7 +36,7 @@ contract update may not regress those semantics while adopting onboarding.
 | Invitations | Recipient pending invitations are visible and accepted by expected revision; owner/manager invitation controls are permission-gated |
 | Home governance | Editable name/locale/currency/timezone; owner/manager/member/viewer sections and actions derive from server permission policies |
 | Platform administration | Visible only for current users with the platform-administrator role; supports list/grant/confirmed revoke and handles the final-active-admin safeguard |
-| Catalog sharing and administration | Active-home permissions expose three independent, revision-bound consent choices without implicit submission. Product identity additionally requires server consent, an active-home item, exact allowlisted preview, and fresh per-item checkbox. Current-user reviewer/curator roles expose real proposal, contribution, conflict, validated icon metadata, merge, and reversal workflows with permission/role/session-loss dismissal. Live acceptance remains open |
+| Catalog sharing | Active-home permissions expose three independent, revision-bound consent choices without implicit submission. Product identity, product image, and store price each require server consent, an active-home item, exact local review, and fresh confirmation. Camera/gallery/file product images use bounded byte-derived metadata, local preview, and zeroization. All reviewer/curator administration is excluded from this homeowner runtime and belongs to the separate Admin Flutter client. Live acceptance remains open |
 | Household AI and assisted intake | Account & access exposes server AI only for exact active-home permissions. Receipt intake supports one to eight ordered local previews with rotate/crop, sanitization, digest-bound consent, review, and ordinary draft/match/explicit commit. Inventory stock-photo counting opens an ordinary session first, accepts one to eight images, and writes only reviewed count lines. A selected verified direct-local stock route is used on supported native platforms and fails closed when unavailable or invalid; server-proxy use requires an explicit switch. Receipt direct-local AI is not composed. Ephemeral bytes are route-owned and cleared |
 | Shopping suggestions | Verified online suggestion reads, explanations, offline cache, and explicit Add to list are composed. Add-time quantity selection is available; feedback, edits to existing-line quantity, and authoritative cross-device suggestion provenance remain deferred |
 | Browser/native platforms | Web, Android, iOS, Windows, macOS, and Linux share the same polling/exchange authority; platform return links are convenience only |
@@ -47,7 +47,7 @@ compatibility surfaces do not satisfy this acceptance boundary.
 
 ## Connected acceptance boundary
 
-Against the API `1.13.2` development stack, the production composition can:
+Against the pinned API `1.18.0` development stack, the production composition can:
 
 1. start and approve a neutral login-link request for a new or existing email;
 2. complete the private exchange in the originating client and bootstrap the

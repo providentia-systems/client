@@ -309,6 +309,7 @@ const generatedClientAdapters = new Set([
   'lib/features/ai_integration/infrastructure/api17_server_credential_provisioning.dart',
   'lib/features/ai_integration/infrastructure/generated_server_ai_repository.dart',
   'lib/features/catalog/infrastructure/generated_catalog_contribution_repository.dart',
+  'lib/features/catalog/infrastructure/generated_catalog_product_image_repository.dart',
   'lib/features/data_governance/infrastructure/generated_data_governance_repository.dart',
   'lib/features/homes/infrastructure/api11_home_transport.dart',
   'lib/features/household_sync/infrastructure/api17_callback_household_gateway.dart',

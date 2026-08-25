@@ -204,54 +204,61 @@ void main() {
     expect(find.byKey(const Key('open-signed-in-devices')), findsOneWidget);
   });
 
-  testWidgets('catalog contributors can reach product and store-price routes', (
-    tester,
-  ) async {
-    final identity = _AuthenticatedIdentityFixture();
-    final homes = _HomeFixture();
-    homes.transport.homes.add(
-      HomeSummary(
-        id: 'owner-home',
-        name: 'Owner home',
-        locale: 'en-NA',
-        currency: 'NAD',
-        timezone: 'Africa/Windhoek',
-        role: HomeRole.owner,
-        revision: 1,
-      ),
-    );
-    addTearDown(identity.dispose);
-    addTearDown(homes.dispose);
-    await identity.controller.restore();
-    await homes.controller.load(sessionActiveHomeId: 'owner-home');
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: AccountAccessPage(
-          identityController: identity.controller,
-          homesController: homes.controller,
-          catalogContributionPageBuilder: (_) =>
-              const Scaffold(body: Text('Product contribution route')),
-          catalogStorePriceContributionPageBuilder: (_) =>
-              const Scaffold(body: Text('Store price contribution route')),
+  testWidgets(
+    'catalog contributors can reach all homeowner contribution routes',
+    (tester) async {
+      final identity = _AuthenticatedIdentityFixture();
+      final homes = _HomeFixture();
+      homes.transport.homes.add(
+        HomeSummary(
+          id: 'owner-home',
+          name: 'Owner home',
+          locale: 'en-NA',
+          currency: 'NAD',
+          timezone: 'Africa/Windhoek',
+          role: HomeRole.owner,
+          revision: 1,
         ),
-      ),
-    );
+      );
+      addTearDown(identity.dispose);
+      addTearDown(homes.dispose);
+      await identity.controller.restore();
+      await homes.controller.load(sessionActiveHomeId: 'owner-home');
 
-    expect(
-      find.byKey(const Key('open-catalog-product-contribution')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(const Key('open-catalog-store-price-contribution')),
-      findsOneWidget,
-    );
-    await tester.tap(
-      find.byKey(const Key('open-catalog-store-price-contribution')),
-    );
-    await tester.pumpAndSettle();
-    expect(find.text('Store price contribution route'), findsOneWidget);
-  });
+      await tester.pumpWidget(
+        MaterialApp(
+          home: AccountAccessPage(
+            identityController: identity.controller,
+            homesController: homes.controller,
+            catalogContributionPageBuilder: (_) =>
+                const Scaffold(body: Text('Product contribution route')),
+            catalogProductImageContributionPageBuilder: (_) =>
+                const Scaffold(body: Text('Product image contribution route')),
+            catalogStorePriceContributionPageBuilder: (_) =>
+                const Scaffold(body: Text('Store price contribution route')),
+          ),
+        ),
+      );
+
+      expect(
+        find.byKey(const Key('open-catalog-product-contribution')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('open-catalog-product-image-contribution')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('open-catalog-store-price-contribution')),
+        findsOneWidget,
+      );
+      await tester.tap(
+        find.byKey(const Key('open-catalog-product-image-contribution')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Product image contribution route'), findsOneWidget);
+    },
+  );
 
   testWidgets(
     'data governance remains account-accessible without a selected home',

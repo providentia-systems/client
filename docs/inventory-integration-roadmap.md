@@ -81,12 +81,15 @@ cursor tests, lost-response retry tests, and two-device convergence tests pass.
 Outcome: the main household workflows and explicitly consented community
 features cross the same authenticated boundary.
 
-Client checkpoint (2026-08-11): the product-identity path is composed from the
-active-home inventory projection. It requires `catalog.contribute`, current
-server product-identity consent, an exact sanitized preview, and a fresh
-per-item checkbox. Neither selecting an item nor changing consent submits.
-This direct per-item contribution is not a receipt-generated sanitized catalog
-proposal and does not publish receipt aliases.
+Client checkpoint (2026-08-25): product identity, product image, and store
+price are separate runtime-reachable paths composed from the active-home
+inventory projection. Each requires `catalog.contribute`, its current server
+consent category, exact local review, and fresh per-submission confirmation.
+Product-image acquisition supports camera, gallery, and file input with
+magic-byte MIME detection, decoded dimension bounds, local-only preview, and
+byte zeroization at every ownership boundary. Neither selecting an item nor
+changing consent submits. These direct contributions are not receipt-generated
+catalog proposals; moderation/publication remains in the separate Admin client.
 
 - Project stores, receipts, receipt lines, shopping lists, and list lines from
   the authoritative feed; keep raw receipt descriptions private.
