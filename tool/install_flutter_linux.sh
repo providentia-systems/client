@@ -19,18 +19,29 @@ if [[ -e "$install_parent/flutter" ]]; then
 fi
 
 mkdir -p "$install_parent"
-download_directory=$(mktemp -d)
-trap 'rm -rf -- "$download_directory"' EXIT
-archive_path="$download_directory/$ARCHIVE"
+download_cache="${PROVIDENTIA_DOWNLOAD_CACHE:-$install_parent/.download-cache}"
+mkdir -p "$download_cache"
+archive_path="$download_cache/$ARCHIVE"
+if ! printf '%s  %s\n' "$SHA256" "$archive_path" | sha256sum --check --status 2>/dev/null; then
+  pending_archive=$(mktemp "$download_cache/.flutter-download.XXXXXX")
+  trap 'rm -f -- "${pending_archive:-}"' EXIT
+  curl --fail --location --retry 3 --output "$pending_archive" \
+    "$BASE_URL/stable/linux/$ARCHIVE"
+  printf '%s  %s\n' "$SHA256" "$pending_archive" | sha256sum --check --status
+  mv -f -- "$pending_archive" "$archive_path"
+  pending_archive=''
+fi
 
-curl --fail --location --retry 3 --output "$archive_path" \
-  "$BASE_URL/stable/linux/$ARCHIVE"
-printf '%s  %s\n' "$SHA256" "$archive_path" | sha256sum --check --status
-tar --no-same-owner --extract --xz --file "$archive_path" --directory "$install_parent"
+staging_directory=$(mktemp -d "$install_parent/.flutter-install.XXXXXX")
+trap 'rm -f -- "${pending_archive:-}"; rm -rf -- "${staging_directory:-}"' EXIT
+tar --no-same-owner --extract --xz --file "$archive_path" --directory "$staging_directory"
+
+export CI=true
+export DART_SUPPRESS_ANALYTICS=true
 
 version_json=$(
-  PUB_CACHE="$download_directory/pub-cache" \
-    "$install_parent/flutter/bin/flutter" --version --machine
+  PUB_CACHE="$staging_directory/pub-cache" \
+    "$staging_directory/flutter/bin/flutter" --version --machine
 )
 actual_version=$(
   node -e '
@@ -42,5 +53,7 @@ if [[ "$actual_version" != "$VERSION" ]]; then
   echo "Expected Flutter $VERSION, found $actual_version." >&2
   exit 65
 fi
+
+mv -- "$staging_directory/flutter" "$install_parent/flutter"
 
 echo "Installed verified Flutter $VERSION at $install_parent/flutter"

@@ -13,12 +13,14 @@ final class HouseholdFeatures {
     required this.purchasing,
     required this.shopping,
     this.stockPhotoCount,
+    this.stockPhotoAcquisition,
   });
 
   final InventoryController inventory;
   final PurchasingController purchasing;
   final ShoppingController shopping;
   final StockPhotoCountController? stockPhotoCount;
+  final StockPhotoAcquisitionActions? stockPhotoAcquisition;
 
   void start() {
     inventory.start();

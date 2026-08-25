@@ -358,6 +358,34 @@ void main() {
     expect(repository.inventoryOrPurchaseMutationCalls, 0);
   });
 
+  testWidgets('stock extraction exposes camera, gallery, and file sources', (
+    tester,
+  ) async {
+    final controller = _controller(repository: _ServerRepository(_workspace()));
+    addTearDown(controller.dispose);
+    await controller.load();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ServerAiWorkspacePage(
+          controller: controller,
+          pickSingleImage: (_) async => null,
+          captureSingleImage: (_) async => null,
+          pickFileImage: (_) async => null,
+        ),
+      ),
+    );
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('ai-capture-stock')),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+
+    expect(find.byKey(const Key('ai-capture-stock')), findsOneWidget);
+    expect(find.byKey(const Key('ai-pick-stock')), findsOneWidget);
+    expect(find.byKey(const Key('ai-upload-stock')), findsOneWidget);
+  });
+
   testWidgets(
     'receipt PDF pages show ordered local transforms then every sanitized preview',
     (tester) async {

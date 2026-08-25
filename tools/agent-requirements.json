@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "repositoryRole": "homeowner-client",
+  "runtime": {
+    "flutter": "3.44.7",
+    "dart": "3.12.2",
+    "node": "22.14.0",
+    "nodeMinimum": "18.19.0"
+  },
+  "supportedHosts": {
+    "canonicalAgentHost": "debian-or-ubuntu-linux-x86_64",
+    "development": ["linux-x86_64", "linux-arm64", "macos", "windows"],
+    "releaseBuilds": ["android", "ios", "linux", "macos", "web", "windows"]
+  },
+  "linux": {
+    "aptPackages": [
+      "ca-certificates",
+      "clang",
+      "cmake",
+      "curl",
+      "git",
+      "gstreamer1.0-plugins-good",
+      "libgstreamer1.0-dev",
+      "libgstreamer-plugins-base1.0-dev",
+      "libgtk-3-dev",
+      "liblzma-dev",
+      "libsecret-1-0",
+      "libsecret-1-dev",
+      "libstdc++-12-dev",
+      "ninja-build",
+      "nodejs",
+      "npm",
+      "pkg-config",
+      "unzip",
+      "xz-utils"
+    ],
+    "immutableRunner": {
+      "sysrootEnvironmentVariable": "PROVIDENTIA_CLIENT_SYSROOT",
+      "nativeLinkDirectoryEnvironmentVariable": "PROVIDENTIA_CLIENT_NATIVE_LINK_DIR",
+      "architecture": "x86_64",
+      "requiredNativeCommands": ["clang", "cmake", "ninja", "pkg-config"],
+      "requiredToolCommands": [
+        "bash",
+        "clang",
+        "cmake",
+        "curl",
+        "git",
+        "ldd",
+        "ninja",
+        "node",
+        "pkg-config",
+        "sha256sum",
+        "tar",
+        "unzip",
+        "xz",
+        "zip"
+      ],
+      "requiredPkgConfigModules": [
+        "gtk+-3.0",
+        "libsecret-1",
+        "gstreamer-1.0",
+        "gstreamer-video-1.0",
+        "gstreamer-plugins-base-1.0"
+      ],
+      "requiredLinkLibraries": [
+        "libgtk-3.so",
+        "libsecret-1.so",
+        "libgstreamer-1.0.so",
+        "libgstvideo-1.0.so"
+      ]
+    }
+  },
+  "networkAllowlist": [
+    "archive.ubuntu.com",
+    "security.ubuntu.com",
+    "storage.googleapis.com",
+    "pub.dev",
+    "api.pub.dev",
+    "github.com",
+    "api.github.com",
+    "objects.githubusercontent.com",
+    "codeload.github.com",
+    "github-releases.githubusercontent.com",
+    "release-assets.githubusercontent.com",
+    "services.gradle.org",
+    "plugins.gradle.org",
+    "repo.maven.apache.org",
+    "dl.google.com"
+  ],
+  "validation": [
+    "node tool/verify_toolchain.mjs",
+    "node tool/generate_api_client.mjs --check",
+    "node tool/verify_structure.mjs",
+    "node --test tool/*.test.mjs",
+    "dart format --output=none --set-exit-if-changed lib test contracts/generated/providentia_api_client/lib",
+    "flutter analyze --fatal-infos --fatal-warnings",
+    "flutter test --coverage",
+    "node tool/check_coverage.mjs coverage/lcov.info 80"
+  ],
+  "buildLanes": {
+    "linuxAgent": "flutter build linux --release",
+    "android": "flutter build appbundle --release",
+    "web": "flutter build web --release",
+    "nativeMatrix": ["ios", "linux", "macos", "windows"]
+  }
+}

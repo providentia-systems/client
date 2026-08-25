@@ -37,12 +37,14 @@ import 'package:providentia/features/ai_integration/domain/ai_models.dart';
 import 'package:providentia/features/ai_integration/domain/ai_policy.dart';
 import 'package:providentia/features/ai_integration/domain/server_ai_models.dart';
 import 'package:providentia/features/ai_integration/infrastructure/api17_ai_gateway.dart';
+import 'package:providentia/features/ai_integration/infrastructure/captured_file_cleanup.dart';
 import 'package:providentia/features/ai_integration/infrastructure/generated_server_ai_repository.dart';
 import 'package:providentia/features/ai_integration/infrastructure/media_acquisition_service.dart';
 import 'package:providentia/features/ai_integration/infrastructure/receipt_page_media_editor.dart';
 import 'package:providentia/features/ai_integration/infrastructure/receipt_pdf_rasterizer.dart';
 import 'package:providentia/features/ai_integration/infrastructure/sanitizing_image_media_preparer.dart';
 import 'package:providentia/features/ai_integration/infrastructure/strict_local_home_ai_composition.dart';
+import 'package:providentia/features/ai_integration/presentation/camera_capture_page.dart';
 import 'package:providentia/features/ai_integration/presentation/home_ai_hub_page.dart';
 import 'package:providentia/features/ai_integration/presentation/receipt_ai_handoff_page.dart';
 import 'package:providentia/features/ai_integration/presentation/server_ai_workspace_controller.dart';
@@ -72,6 +74,7 @@ import 'package:providentia/features/identity/infrastructure/secure_login_link_r
 import 'package:providentia/features/identity/presentation/account_access_page.dart';
 import 'package:providentia/features/identity/presentation/identity_controller.dart';
 import 'package:providentia/features/identity/presentation/login_link_sign_in_page.dart';
+import 'package:providentia/features/inventory/application/stock_camera_capture_session.dart';
 import 'package:providentia/features/inventory/application/stock_photo_count_controller.dart';
 import 'package:providentia/features/inventory/infrastructure/generated_home_item_master_source.dart';
 import 'package:providentia/features/inventory/infrastructure/item_master_refreshing_synchronization.dart';
@@ -755,6 +758,7 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
       );
     }
     StockPhotoCountController? stockPhotoCount;
+    StockPhotoAcquisitionActions? stockPhotoAcquisition;
     if (widget.access.inventoryWrite &&
         aiCapabilities.mayRead &&
         aiCapabilities.mayUse) {
@@ -805,19 +809,104 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
         );
       }
 
+      Future<List<AiMediaAsset>> takeStockPhoto() async {
+        Future<AiMediaAsset?> captureOne() async {
+          if (!mounted) return null;
+          final captured = await showCameraCapture(context);
+          if (captured == null) return null;
+          if (!mounted) {
+            await discardCapturedFile(captured.path);
+            return null;
+          }
+          return acquisition.registerCapturedPhoto(
+            captured,
+            homeId: widget.home.id,
+            purpose: AiExtractionKind.stockPhoto,
+          );
+        }
+
+        Future<StockCameraCaptureDecision> chooseNext(
+          List<AiMediaAsset> captured,
+        ) async {
+          if (!mounted) return StockCameraCaptureDecision.discard;
+          return await showDialog<StockCameraCaptureDecision>(
+                context: context,
+                barrierDismissible: false,
+                builder: (context) => AlertDialog(
+                  title: Text(
+                    'Review ${captured.length} stock photo${captured.length == 1 ? '' : 's'}',
+                  ),
+                  content: const Text(
+                    'Continue to sanitization and consent, or add another view of the storeroom. A maximum of eight images is accepted.',
+                  ),
+                  actions: <Widget>[
+                    TextButton(
+                      key: const Key('stock-camera-discard'),
+                      onPressed: () => Navigator.of(
+                        context,
+                      ).pop(StockCameraCaptureDecision.discard),
+                      child: const Text('Discard'),
+                    ),
+                    OutlinedButton(
+                      key: const Key('stock-camera-continue'),
+                      onPressed: () => Navigator.of(
+                        context,
+                      ).pop(StockCameraCaptureDecision.continueToReview),
+                      child: Text('Continue with ${captured.length}'),
+                    ),
+                    FilledButton(
+                      key: const Key('stock-camera-another'),
+                      onPressed: () => Navigator.of(
+                        context,
+                      ).pop(StockCameraCaptureDecision.takeAnother),
+                      child: const Text('Take another'),
+                    ),
+                  ],
+                ),
+              ) ??
+              StockCameraCaptureDecision.discard;
+        }
+
+        return collectStockCameraAssets(
+          homeId: widget.home.id,
+          capture: captureOne,
+          chooseNext: chooseNext,
+          discard: (assets) async {
+            for (final asset in assets) {
+              sources.remove(asset.id);
+            }
+          },
+        );
+      }
+
+      Future<List<AiMediaAsset>> chooseStockGallery() =>
+          acquisition.choosePhotos(
+            homeId: widget.home.id,
+            purpose: AiExtractionKind.stockPhoto,
+            limit: 8,
+          );
+
+      Future<List<AiMediaAsset>> uploadStockFiles() => acquisition.chooseFiles(
+        homeId: widget.home.id,
+        purpose: AiExtractionKind.stockPhoto,
+        imagesOnly: true,
+        limit: 8,
+      );
+
       stockPhotoCount = StockPhotoCountController(
         homeId: widget.home.id,
         inventory: inventory,
         mediaPreparation: mediaPreparation,
         mediaReader: preparedStore,
-        pickAssets: () => acquisition.choosePhotos(
-          homeId: widget.home.id,
-          purpose: AiExtractionKind.stockPhoto,
-          limit: 8,
-        ),
+        pickAssets: chooseStockGallery,
         loadRoute: loadPreferredRoute,
         idGenerator: UuidV4Generator().call,
         onAuthorizationDenied: _handleHomeAuthorizationLost,
+      );
+      stockPhotoAcquisition = StockPhotoAcquisitionActions(
+        takePhoto: takeStockPhoto,
+        chooseGallery: chooseStockGallery,
+        uploadFiles: uploadStockFiles,
       );
     }
     _features = HouseholdFeatures(
@@ -839,6 +928,7 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
         onAuthorizationDenied: _handleHomeAuthorizationLost,
       ),
       stockPhotoCount: stockPhotoCount,
+      stockPhotoAcquisition: stockPhotoAcquisition,
     );
   }
 
@@ -1436,6 +1526,8 @@ final class _ProductionServerAiRouteState
   Widget build(BuildContext context) => ServerAiWorkspacePage(
     controller: _controller,
     pickSingleImage: _pickSingleImage,
+    captureSingleImage: _captureSingleImage,
+    pickFileImage: _pickFileImage,
     pickMultipleImages: _pickMultipleImages,
     pickReceiptPdf: _pickReceiptPdf,
     readLocalImage: _receiptEditor.readPreview,
@@ -1444,6 +1536,37 @@ final class _ProductionServerAiRouteState
     readPreparedImage: _prepared.read,
     onReviewHandoff: _handleReviewHandoff,
   );
+
+  Future<AiMediaAsset?> _captureSingleImage(AiExtractionKind kind) async {
+    if (_picking || _sensitiveStateCleared) return null;
+    _picking = true;
+    _clearRegisteredSources();
+    try {
+      final captured = await showCameraCapture(context);
+      if (captured == null) return null;
+      if (!mounted || _sensitiveStateCleared) {
+        await discardCapturedFile(captured.path);
+        return null;
+      }
+      return await _acquisition.registerCapturedPhoto(
+        captured,
+        homeId: widget.homeId,
+        purpose: kind,
+      );
+    } on Object {
+      _clearRegisteredSources();
+      if (mounted && !_sensitiveStateCleared) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('The captured image could not be opened safely.'),
+          ),
+        );
+      }
+      return null;
+    } finally {
+      _picking = false;
+    }
+  }
 
   Future<AiMediaAsset?> _pickSingleImage(AiExtractionKind kind) async {
     if (_picking || _sensitiveStateCleared) return null;
@@ -1466,6 +1589,48 @@ final class _ProductionServerAiRouteState
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('The selected image could not be opened safely.'),
+          ),
+        );
+      }
+      return null;
+    } finally {
+      _picking = false;
+    }
+  }
+
+  Future<AiMediaAsset?> _pickFileImage(AiExtractionKind kind) async {
+    if (_picking || _sensitiveStateCleared) return null;
+    _picking = true;
+    _clearRegisteredSources();
+    try {
+      final selected = await _acquisition.chooseFiles(
+        homeId: widget.homeId,
+        purpose: kind,
+        allowMultiple: false,
+        imagesOnly: true,
+        limit: 1,
+      );
+      if (!mounted || _sensitiveStateCleared || selected.length != 1) {
+        _clearRegisteredSources();
+        return null;
+      }
+      return selected.single;
+    } on MediaAcquisitionException catch (error) {
+      _clearRegisteredSources();
+      if (mounted && !_sensitiveStateCleared) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.safeMessage)));
+      }
+      return null;
+    } catch (_) {
+      _clearRegisteredSources();
+      if (mounted && !_sensitiveStateCleared) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'The selected image file could not be opened safely.',
+            ),
           ),
         );
       }

@@ -6,9 +6,14 @@ import 'package:providentia/features/inventory/application/stock_photo_count_con
 import 'package:providentia/features/inventory/domain/inventory_models.dart';
 
 final class StockPhotoCountPanel extends StatelessWidget {
-  const StockPhotoCountPanel({required this.controller, super.key});
+  const StockPhotoCountPanel({
+    required this.controller,
+    this.acquisition,
+    super.key,
+  });
 
   final StockPhotoCountController controller;
+  final StockPhotoAcquisitionActions? acquisition;
 
   @override
   Widget build(BuildContext context) {
@@ -55,6 +60,36 @@ final class StockPhotoCountPanel extends StatelessWidget {
     switch (state.status) {
       case StockPhotoCountStatus.idle:
       case StockPhotoCountStatus.failed:
+        final actions = acquisition;
+        if (actions != null) {
+          return <Widget>[
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: <Widget>[
+                FilledButton.icon(
+                  key: const Key('stock-photo-camera'),
+                  onPressed: () => controller.selectAssets(actions.takePhoto),
+                  icon: const Icon(Icons.photo_camera_outlined),
+                  label: const Text('Take photo'),
+                ),
+                OutlinedButton.icon(
+                  key: const Key('stock-photo-gallery'),
+                  onPressed: () =>
+                      controller.selectAssets(actions.chooseGallery),
+                  icon: const Icon(Icons.photo_library_outlined),
+                  label: const Text('Choose from gallery'),
+                ),
+                OutlinedButton.icon(
+                  key: const Key('stock-photo-files'),
+                  onPressed: () => controller.selectAssets(actions.uploadFiles),
+                  icon: const Icon(Icons.upload_file_outlined),
+                  label: const Text('Upload image files'),
+                ),
+              ],
+            ),
+          ];
+        }
         return <Widget>[
           FilledButton.icon(
             key: const Key('stock-photo-select'),

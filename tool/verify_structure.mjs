@@ -52,6 +52,8 @@ const requiredFiles = [
   'contracts/design-tokens/providentia-v1.json',
   'contracts/design-tokens/contract.lock.json',
   'contracts/generated/providentia_api_client/lib/providentia_api_client.dart',
+  'AGENTS.md',
+  'tools/agent-requirements.json',
 ];
 
 for (const relativePath of requiredDirectories) {
@@ -61,6 +63,41 @@ for (const relativePath of requiredDirectories) {
 for (const relativePath of requiredFiles) {
   const info = await stat(path.join(root, relativePath));
   assert(info.isFile(), `${relativePath} must be a file.`);
+}
+
+const agentRequirements = JSON.parse(
+  await readFile(path.join(root, 'tools/agent-requirements.json'), 'utf8'),
+);
+assert(
+  agentRequirements.schemaVersion === 1 &&
+    agentRequirements.repositoryRole === 'homeowner-client' &&
+    agentRequirements.runtime?.flutter === '3.44.7' &&
+    agentRequirements.runtime?.dart === '3.12.2' &&
+    agentRequirements.runtime?.node === '22.14.0',
+  'Agent runtime requirements are missing or inconsistent.',
+);
+assert(
+  agentRequirements.linux?.immutableRunner?.sysrootEnvironmentVariable ===
+    'PROVIDENTIA_CLIENT_SYSROOT' &&
+    agentRequirements.linux?.immutableRunner
+      ?.nativeLinkDirectoryEnvironmentVariable ===
+      'PROVIDENTIA_CLIENT_NATIVE_LINK_DIR',
+  'Immutable Linux runner requirements are missing.',
+);
+for (const requiredHost of [
+  'archive.ubuntu.com',
+  'security.ubuntu.com',
+  'storage.googleapis.com',
+  'pub.dev',
+  'api.pub.dev',
+  'github.com',
+  'api.github.com',
+  'objects.githubusercontent.com',
+]) {
+  assert(
+    agentRequirements.networkAllowlist?.includes(requiredHost),
+    `Agent network allowlist is missing ${requiredHost}.`,
+  );
 }
 
 await assertContains(
@@ -271,6 +308,20 @@ process.stdout.write('Repository structure and architecture boundaries verified.
 async function walk(directory) {
   const files = [];
   for (const entry of await readdir(directory, {withFileTypes: true})) {
+    if (
+      entry.isDirectory() &&
+      new Set([
+        '.agent-tools',
+        '.dart_tool',
+        '.git',
+        '.pub-cache',
+        'build',
+        'coverage',
+        'node_modules',
+      ]).has(entry.name)
+    ) {
+      continue;
+    }
     const entryPath = path.join(directory, entry.name);
     if (entry.isDirectory()) {
       files.push(...(await walk(entryPath)));
