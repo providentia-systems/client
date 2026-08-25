@@ -213,7 +213,7 @@ final class Api17AiGateway implements AiProviderGateway {
       files: List<http.MultipartFile>.generate(preparedBytes.length, (index) {
         final item = request.media.media[index];
         return http.MultipartFile.fromBytes(
-          index == 0 ? 'image' : 'images',
+          index == 0 ? 'image' : 'images[]',
           preparedBytes[index],
           filename:
               'prepared-${item.sha256.substring(0, 12)}.${_extension(item.mimeType)}',
