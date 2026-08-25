@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:providentia/core/security/uuid_v4.dart';
 import 'package:providentia/features/catalog/application/catalog_proposal_service.dart';
 import 'package:providentia/features/catalog/domain/catalog_models.dart';
 
@@ -28,6 +29,7 @@ final class CatalogProductContributionController extends ChangeNotifier {
     required String homeId,
     required String locale,
     required bool canContribute,
+    String Function()? submissionIdGenerator,
     Future<void> Function()? onAuthorizationLost,
   }) => CatalogProductContributionController._(
     consentRepository,
@@ -35,6 +37,7 @@ final class CatalogProductContributionController extends ChangeNotifier {
     homeId,
     locale,
     canContribute,
+    submissionIdGenerator ?? UuidV4Generator().call,
     onAuthorizationLost,
   );
 
@@ -44,6 +47,7 @@ final class CatalogProductContributionController extends ChangeNotifier {
     this.homeId,
     this.locale,
     this.canContribute,
+    this._submissionIdGenerator,
     this._onAuthorizationLost,
   );
 
@@ -52,6 +56,7 @@ final class CatalogProductContributionController extends ChangeNotifier {
   final String homeId;
   final String locale;
   final bool canContribute;
+  final String Function() _submissionIdGenerator;
   final Future<void> Function()? _onAuthorizationLost;
 
   CatalogProductContributionStatus _status =
@@ -60,6 +65,7 @@ final class CatalogProductContributionController extends ChangeNotifier {
   PrivateProduct? _product;
   SanitizedCatalogProposal? _proposal;
   CatalogSubmissionLink? _submission;
+  String? _pendingSubmissionId;
   bool _explicitlyConsented = false;
   int _generation = 0;
   bool _disposed = false;
@@ -69,6 +75,7 @@ final class CatalogProductContributionController extends ChangeNotifier {
   PrivateProduct? get product => _product;
   SanitizedCatalogProposal? get proposal => _proposal;
   CatalogSubmissionLink? get submission => _submission;
+  String? get pendingSubmissionId => _pendingSubmissionId;
   bool get explicitlyConsented => _explicitlyConsented;
   bool get maySubmit =>
       _status == CatalogProductContributionStatus.ready &&
@@ -120,6 +127,7 @@ final class CatalogProductContributionController extends ChangeNotifier {
     }
     _product = product;
     _proposal = _proposalService.preview(product: product, locale: locale);
+    _pendingSubmissionId = null;
     _explicitlyConsented = false;
     _submission = null;
     _notify();
@@ -146,21 +154,25 @@ final class CatalogProductContributionController extends ChangeNotifier {
     final proposal = _proposal;
     if (!maySubmit || product == null || proposal == null) return;
     final generation = ++_generation;
+    final submissionId = _pendingSubmissionId ??= _submissionIdGenerator();
     _setStatus(CatalogProductContributionStatus.submitting);
     try {
       final link = await _proposalService.submit(
+        submissionId: submissionId,
         product: product,
         preview: proposal,
         explicitlyConsented: true,
       );
       if (!_isCurrent(generation)) return;
       _submission = link;
+      _pendingSubmissionId = null;
       _explicitlyConsented = false;
       _setStatus(CatalogProductContributionStatus.submitted);
     } on CatalogServerConsentRequiredException {
       if (!_isCurrent(generation)) return;
       _serverConsent = null;
       _explicitlyConsented = false;
+      _pendingSubmissionId = null;
       _setStatus(CatalogProductContributionStatus.consentRequired);
     } on CatalogContributionAuthenticationRequiredException {
       await _handleAuthorizationLoss(
@@ -173,10 +185,12 @@ final class CatalogProductContributionController extends ChangeNotifier {
         CatalogProductContributionStatus.forbidden,
       );
     } on CatalogContributionConflictException {
+      _pendingSubmissionId = null;
       _fail(generation, CatalogProductContributionStatus.conflict);
     } on CatalogContributionUnavailableException {
       _fail(generation, CatalogProductContributionStatus.offline);
     } on CatalogContributionValidationException {
+      _pendingSubmissionId = null;
       _fail(generation, CatalogProductContributionStatus.failure);
     } on Exception {
       _fail(generation, CatalogProductContributionStatus.failure);
@@ -198,6 +212,7 @@ final class CatalogProductContributionController extends ChangeNotifier {
     _product = null;
     _proposal = null;
     _submission = null;
+    _pendingSubmissionId = null;
     _explicitlyConsented = false;
     _notify();
   }
@@ -208,6 +223,7 @@ final class CatalogProductContributionController extends ChangeNotifier {
     _product = null;
     _proposal = null;
     _submission = null;
+    _pendingSubmissionId = null;
     _explicitlyConsented = false;
     _setStatus(CatalogProductContributionStatus.idle);
   }
@@ -227,6 +243,7 @@ final class CatalogProductContributionController extends ChangeNotifier {
     _product = null;
     _proposal = null;
     _submission = null;
+    _pendingSubmissionId = null;
     _explicitlyConsented = false;
     _setStatus(status);
     await _onAuthorizationLost?.call();
