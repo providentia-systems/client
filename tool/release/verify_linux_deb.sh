@@ -20,6 +20,20 @@ verify_linkage() {
   fi
 }
 
+verify_loader_library() {
+  local library=$1
+  local loader_cache
+  command -v ldconfig >/dev/null 2>&1 || {
+    echo 'ldconfig is required for the Linux launch smoke.' >&2
+    exit 69
+  }
+  loader_cache=$(ldconfig -p)
+  if ! grep -Fq "$library (" <<< "$loader_cache"; then
+    echo "Linux launch runtime is missing loader library: $library" >&2
+    exit 66
+  fi
+}
+
 verify_linux_deb() {
   if (( $# != 1 )); then
     echo 'Usage: verify_linux_deb.sh DEBIAN_PACKAGE' >&2
@@ -46,6 +60,7 @@ dependencies=$(dpkg-deb --field "$package" Depends)
 dependencies=${dependencies// /}
 for dependency in \
   libegl1 \
+  libgles2 \
   libgtk-3-0 \
   libsecret-1-0 \
   libgstreamer1.0-0 \
@@ -90,6 +105,8 @@ if [[ "${PROVIDENTIA_LINUX_LAUNCH_SMOKE:-false}" == true ]]; then
     echo 'xvfb-run is required for the Linux launch smoke.' >&2
     exit 69
   }
+  verify_loader_library 'libEGL.so.1'
+  verify_loader_library 'libGLESv2.so.2'
   set +e
   timeout --signal=TERM --kill-after=5s 15s xvfb-run -a "$binary"
   launch_status=$?
