@@ -2,6 +2,7 @@
 class RuntimeConfiguration {
   const RuntimeConfiguration._({
     required this.apiBaseUri,
+    required this.homeownerAppLinkBaseUri,
     required this.environment,
     required this.enableDevelopmentPasswordLogin,
   });
@@ -9,6 +10,7 @@ class RuntimeConfiguration {
   factory RuntimeConfiguration({
     required Uri apiBaseUri,
     required String environment,
+    Uri? homeownerAppLinkBaseUri,
     bool enableDevelopmentPasswordLogin = false,
   }) {
     final validatedEnvironment = environment.trim();
@@ -19,6 +21,11 @@ class RuntimeConfiguration {
       apiBaseUri.toString(),
       environment: validatedEnvironment,
     );
+    final validatedHomeownerAppLinkBaseUri = _validateAppLinkBaseUri(
+      homeownerAppLinkBaseUri ??
+          Uri.parse('providentia://login-link/homeowner'),
+      environment: validatedEnvironment,
+    );
     if (enableDevelopmentPasswordLogin &&
         validatedEnvironment != 'development') {
       throw const FormatException(
@@ -27,6 +34,7 @@ class RuntimeConfiguration {
     }
     return RuntimeConfiguration._(
       apiBaseUri: validatedApiBaseUri,
+      homeownerAppLinkBaseUri: validatedHomeownerAppLinkBaseUri,
       environment: validatedEnvironment,
       enableDevelopmentPasswordLogin: enableDevelopmentPasswordLogin,
     );
@@ -44,14 +52,20 @@ class RuntimeConfiguration {
     const enableDevelopmentPasswordLogin = bool.fromEnvironment(
       'PROVIDENTIA_ENABLE_DEVELOPMENT_PASSWORD_LOGIN',
     );
+    const rawHomeownerAppLinkBase = String.fromEnvironment(
+      'PROVIDENTIA_HOMEOWNER_APP_LINK_BASE',
+      defaultValue: 'providentia://login-link/homeowner',
+    );
     return RuntimeConfiguration(
       apiBaseUri: Uri.parse(rawApiBaseUrl),
+      homeownerAppLinkBaseUri: Uri.parse(rawHomeownerAppLinkBase),
       environment: environment,
       enableDevelopmentPasswordLogin: enableDevelopmentPasswordLogin,
     );
   }
 
   final Uri apiBaseUri;
+  final Uri homeownerAppLinkBaseUri;
   final String environment;
   final bool enableDevelopmentPasswordLogin;
 
@@ -82,6 +96,33 @@ class RuntimeConfiguration {
       );
     }
 
+    return uri;
+  }
+
+  static Uri _validateAppLinkBaseUri(Uri uri, {required String environment}) {
+    final isLoopback =
+        uri.host == 'localhost' || uri.host == '127.0.0.1' || uri.host == '::1';
+    final supportedScheme =
+        uri.scheme == 'providentia' ||
+        uri.scheme == 'https' ||
+        (uri.scheme == 'http' && isLoopback && environment == 'development');
+    if (!supportedScheme ||
+        !uri.hasAuthority ||
+        uri.host.isEmpty ||
+        uri.path != '/homeowner' ||
+        uri.hasQuery ||
+        uri.hasFragment ||
+        uri.userInfo.isNotEmpty) {
+      throw const FormatException(
+        'PROVIDENTIA_HOMEOWNER_APP_LINK_BASE must be HTTPS, Providentia, or '
+        'loopback HTTP in development, without credentials, query, or fragment.',
+      );
+    }
+    if (uri.scheme == 'providentia' && uri.host != 'login-link') {
+      throw const FormatException(
+        'The Providentia homeowner app-link host must be login-link.',
+      );
+    }
     return uri;
   }
 }

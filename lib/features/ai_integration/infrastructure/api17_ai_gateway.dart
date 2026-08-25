@@ -286,6 +286,7 @@ final class Api17AiGateway implements AiProviderGateway {
     final lines = <ReceiptLineProposal>[];
     for (final candidate in candidates) {
       final payload = _object(candidate['payload'], 'candidate payload');
+      _validateReceiptQuantityPayload(candidate, payload);
       final confidence = _number(payload['confidence']);
       final fields = _object(payload['fieldConfidence'], 'field confidence');
       lines.add(
@@ -308,7 +309,7 @@ final class Api17AiGateway implements AiProviderGateway {
             _confidence(fields['packText'], confidence),
           ),
           quantity: ExtractedField<double>(
-            value: double.tryParse(_string(payload, 'quantity')),
+            value: _decimalQuantity(payload, 'quantity', positive: true),
             confidence: _confidence(fields['quantity'], confidence),
           ),
           unitPrice: _field(
@@ -376,8 +377,8 @@ final class Api17AiGateway implements AiProviderGateway {
       candidates: candidates
           .map((candidate) {
             final payload = _object(candidate['payload'], 'candidate payload');
+            final quantity = _validateStockQuantityPayload(candidate, payload);
             final confidence = _number(payload['confidence']);
-            final quantity = double.tryParse(_string(payload, 'quantity')) ?? 0;
             final extractionId = _string(extraction, 'id');
             final position = _integer(candidate, 'position');
             return StockCandidateProposal(
@@ -393,8 +394,8 @@ final class Api17AiGateway implements AiProviderGateway {
                 _optionalString(payload['packText']),
                 confidence,
               ),
-              quantityMinimum: quantity,
-              quantityMaximum: quantity,
+              quantityMinimum: quantity.minimum,
+              quantityMaximum: quantity.maximum,
               confidence: confidence,
               warnings: <String>[
                 ..._strings(payload['warnings']),
@@ -467,7 +468,7 @@ void _validateExtractionBinding({
       _string(extraction, 'inputMimeType') != firstMedia.mimeType ||
       _string(extraction, 'inputSha256') != aggregateSha256 ||
       _integer(extraction, 'inputByteCount') != aggregateByteCount ||
-      _integer(extraction, 'schemaVersion') != 1 ||
+      _integer(extraction, 'schemaVersion') != 2 ||
       _integer(extraction, 'promptTemplateVersion') < 1 ||
       _string(extraction, 'provider').trim().isEmpty ||
       _string(extraction, 'model').trim().isEmpty ||
@@ -499,7 +500,8 @@ List<Map<String, Object?>> _deduplicateStockCandidates(
       normalized(payload['brand']),
       normalized(payload['variant']),
       normalized(payload['packText']),
-      normalized(payload['quantity']),
+      normalized(payload['quantityMinimum']),
+      normalized(payload['quantityMaximum']),
     ].join('|');
     final existingIndex = seen[key];
     if (existingIndex == null) {
@@ -522,6 +524,56 @@ List<Map<String, Object?>> _deduplicateStockCandidates(
     };
   }
   return unique;
+}
+
+void _validateReceiptQuantityPayload(
+  Map<String, Object?> candidate,
+  Map<String, Object?> payload,
+) {
+  if (_string(candidate, 'candidateType') != 'receipt_line' ||
+      _string(payload, 'candidateType') != 'receipt_line' ||
+      payload['quantityMinimum'] != null ||
+      payload['quantityMaximum'] != null) {
+    throw const FormatException('Receipt candidate quantity shape changed.');
+  }
+  _decimalQuantity(payload, 'quantity', positive: true);
+}
+
+({double minimum, double maximum}) _validateStockQuantityPayload(
+  Map<String, Object?> candidate,
+  Map<String, Object?> payload,
+) {
+  if (_string(candidate, 'candidateType') != 'stock_item' ||
+      _string(payload, 'candidateType') != 'stock_item' ||
+      payload['quantity'] != null) {
+    throw const FormatException('Stock candidate quantity shape changed.');
+  }
+  final minimum = _decimalQuantity(payload, 'quantityMinimum');
+  final maximum = _decimalQuantity(payload, 'quantityMaximum');
+  if (maximum < minimum) {
+    throw const FormatException('Stock candidate quantity range changed.');
+  }
+  return (minimum: minimum, maximum: maximum);
+}
+
+double _decimalQuantity(
+  Map<String, Object?> object,
+  String key, {
+  bool positive = false,
+}) {
+  final value = object[key];
+  if (value is! String ||
+      !RegExp(r'^(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,8})?$').hasMatch(value)) {
+    throw FormatException('Invalid $key.');
+  }
+  final parsed = double.tryParse(value);
+  if (parsed == null ||
+      !parsed.isFinite ||
+      parsed < 0 ||
+      (positive && parsed <= 0)) {
+    throw FormatException('Invalid $key.');
+  }
+  return parsed;
 }
 
 String _extension(String mimeType) => switch (mimeType) {

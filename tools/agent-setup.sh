@@ -39,11 +39,12 @@ install_linux_prerequisites() {
 
   "${elevate[@]}" apt-get update
   DEBIAN_FRONTEND=noninteractive "${elevate[@]}" apt-get install -y --no-install-recommends \
-    ca-certificates clang cmake curl git gstreamer1.0-plugins-base \
+    ca-certificates clang cmake curl dbus-x11 desktop-file-utils dpkg-dev git \
+    gstreamer1.0-plugins-base \
     gstreamer1.0-plugins-good \
-    libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libgtk-3-dev \
+    libegl1 libgles2 libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libgtk-3-dev \
     liblzma-dev libsecret-1-0 libsecret-1-dev libstdc++-12-dev \
-    ninja-build pkg-config unzip xz-utils zip
+    ninja-build pkg-config unzip xauth xz-utils xvfb zip
 }
 
 quarantine_tool() {
@@ -139,6 +140,7 @@ flutter pub get --enforce-lockfile
 dart run build_runner build --delete-conflicting-outputs
 
 node tool/verify_toolchain.mjs
+bash tool/materialize-openapi-contract.sh
 node tool/generate_api_client.mjs --check
 node tool/verify_structure.mjs
 node --test tool/*.test.mjs
@@ -148,6 +150,11 @@ flutter analyze --fatal-infos --fatal-warnings
 flutter test --coverage
 node tool/check_coverage.mjs coverage/lcov.info 80
 flutter build linux --release
+PROVIDENTIA_LINUX_PACKAGE_FORMATS=deb bash tool/release/package_linux.sh \
+  build/linux/x64/release/bundle 0.0.0-agent build/release/agent-linux
+dbus-run-session -- env PROVIDENTIA_LINUX_LAUNCH_SMOKE=true \
+  bash tool/release/verify_linux_deb.sh \
+    build/release/agent-linux/providentia_0.0.0-agent_amd64.deb
 
-echo "agent-setup: client toolchain, tests, coverage, and Linux release build are ready."
+echo "agent-setup: toolchain, tests, coverage, Linux package, and launch smoke are ready."
 echo "agent-setup: source $environment_file in subsequent shells."

@@ -47,6 +47,29 @@ test('release workflows are immutable, protected and artifact strict', async () 
   }
 });
 
+test('every production artifact compiles the reviewed homeowner app-link base', async () => {
+  for (const relative of workflows.filter(
+    (entry) => !entry.endsWith('browser-acceptance.yml'),
+  )) {
+    const source = await readFile(path.join(root, relative), 'utf8');
+    assert.match(
+      source,
+      /PRODUCTION_HOMEOWNER_APP_LINK_BASE/u,
+      `${relative} must require the protected production app-link variable.`,
+    );
+    assert.match(
+      source,
+      /PROVIDENTIA_HOMEOWNER_APP_LINK_BASE/u,
+      `${relative} must compile the reviewed app-link base into Flutter.`,
+    );
+    assert.match(
+      source,
+      /\/homeowner/u,
+      `${relative} must fail closed outside the homeowner route.`,
+    );
+  }
+});
+
 test('platform signing is real and independently verified', async () => {
   const android = await readFile(path.join(root, 'tool/release/sign_android.sh'), 'utf8');
   assert.match(android, /jarsigner -verify -strict/u);
@@ -78,6 +101,7 @@ test('platform signing is real and independently verified', async () => {
   assert(binaryName, 'Linux BINARY_NAME must remain explicit.');
   assert.match(linuxPackage, new RegExp(`bundle/${binaryName}`, 'u'));
   assert.match(linuxPackage, /libcamera_desktop_plugin\.so/u);
+  assert.match(linuxPackage, /desktop-file-validate/u);
   assert.match(linuxPackage, /ldd "\$camera_plugin"/u);
   for (const dependency of [
     'libegl1',
@@ -110,6 +134,10 @@ test('platform signing is real and independently verified', async () => {
   assert.match(browser, /auth\/login-links/u);
   assert.match(browser, /createLoginLinkProof/u);
   assert.match(browser, /extractApprovalLink/u);
+  assert.match(browser, /applicationKind:\s*'homeowner'/u);
+  assert.match(browser, /\/proof`/u);
+  assert.match(browser, /\/review`/u);
+  assert.match(browser, /\/decision`/u);
   assert.match(browser, /Approve login/u);
   assert.match(browser, /scannerSafeReview/u);
   assert.match(browser, /api\/v1\/me/u);
@@ -120,7 +148,9 @@ test('platform signing is real and independently verified', async () => {
   assert.match(browserWorkflow, /imapflow@1\.6\.6/u);
   assert.match(browserWorkflow, /npm install --ignore-scripts --no-save --no-package-lock/u);
   assert.match(browserWorkflow, /E2E_MAILBOX_IMAP_PASSWORD/u);
-  assert.match(browserWorkflow, /E2E_PUBLIC_BASE_URL/u);
+  assert.match(browserWorkflow, /E2E_HOMEOWNER_APP_LINK_BASE/u);
+  assert.doesNotMatch(browserWorkflow, /E2E_PUBLIC_BASE_URL/u);
+  assert.doesNotMatch(browser, /Approve this login\?/u);
   assert.match(browserWorkflow, /authenticate: true/u);
   assert.match(browserWorkflow, /authenticate: false/u);
   assert.doesNotMatch(browser, /auth\/login(?:['"/])/u);
@@ -128,6 +158,39 @@ test('platform signing is real and independently verified', async () => {
     browserWorkflow,
     new RegExp(['E2E', 'USER', 'PASSWORD'].join('_'), 'u'),
   );
+});
+
+test('every packaged client target registers the homeowner app-link scheme', async () => {
+  const android = await readFile(
+    path.join(root, 'android/app/src/main/AndroidManifest.xml'),
+    'utf8',
+  );
+  const ios = await readFile(path.join(root, 'ios/Runner/Info.plist'), 'utf8');
+  const macos = await readFile(path.join(root, 'macos/Runner/Info.plist'), 'utf8');
+  const desktop = await readFile(
+    path.join(root, 'packaging/linux/com.vastdevelopmentmethod.providentia.desktop'),
+    'utf8',
+  );
+  const windows = await readFile(
+    path.join(root, 'tool/release/package_windows.ps1'),
+    'utf8',
+  );
+  const production = await readFile(
+    path.join(root, 'lib/app/production_bootstrap_app.dart'),
+    'utf8',
+  );
+
+  assert.match(android, /android:scheme="providentia"/u);
+  assert.match(android, /android:host="login-link"/u);
+  assert.match(android, /android:path="\/homeowner"/u);
+  assert.match(ios, /<string>providentia<\/string>/u);
+  assert.match(macos, /<string>providentia<\/string>/u);
+  assert.match(desktop, /^Exec=providentia %u$/mu);
+  assert.match(desktop, /^MimeType=x-scheme-handler\/providentia;$/mu);
+  assert.match(windows, /<uap:Protocol Name="providentia">/u);
+  assert.match(production, /didPushRouteInformation/u);
+  assert.match(production, /scrubBrowserFragment/u);
+  assert.match(production, /GeneratedLoginLinkApprovalTransport/u);
 });
 
 test('agent bootstrap repairs SDK corruption and pins its executable tools', async () => {
@@ -162,6 +225,21 @@ test('agent bootstrap repairs SDK corruption and pins its executable tools', asy
   );
   assert.equal(requirements.runtime.node, '22.14.0');
   assert.equal(requirements.supportedHosts.development.includes('linux-arm64'), false);
+  for (const prerequisite of [
+    'dbus-x11',
+    'desktop-file-utils',
+    'dpkg-dev',
+    'libegl1',
+    'libgles2',
+    'xauth',
+    'xvfb',
+  ]) {
+    assert.equal(requirements.linux.aptPackages.includes(prerequisite), true);
+  }
+  assert.match(setup, /PROVIDENTIA_LINUX_PACKAGE_FORMATS=deb/u);
+  assert.match(setup, /PROVIDENTIA_LINUX_LAUNCH_SMOKE=true/u);
+  assert.match(setup, /dbus-run-session/u);
+  assert.match(setup, /verify_linux_deb\.sh/u);
   assert.match(lockWorkflow, /for attempt in 1 2 3/u);
   assert.match(lockWorkflow, /\.\/gradlew --no-daemon :generateLockfiles/u);
   assert.match(lockWorkflow, /failed after three bounded attempts/u);

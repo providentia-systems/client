@@ -22,6 +22,8 @@ Read `tools/agent-requirements.json`, `docs/agent-development.md`, and
 boundaries. The canonical setup runs generation, structure, formatting,
 analysis, tests, coverage, and the Linux release build. Do not describe an
 unrun check as passing and do not weaken a gate because a runner is restricted.
+It also creates a Debian package and launches its extracted production binary
+under an isolated D-Bus session and Xvfb for a bounded clean-host smoke.
 
 ## Architecture and privacy
 

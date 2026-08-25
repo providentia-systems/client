@@ -27,22 +27,29 @@ export function createLoginLinkProof() {
  * Extracts only the scanner-safe fragment link for the exact request. Error
  * messages deliberately exclude message content and approval capabilities.
  */
-export function extractApprovalLink(source, requestId, expectedOrigin) {
+export function extractApprovalLink(source, requestId, expectedBase) {
   if (!isUuid(requestId)) {
     throw new Error('The login-link request identifier is invalid.');
   }
-  let trustedOrigin;
+  let trustedBase;
   try {
-    const configured = new URL(expectedOrigin);
-    if (configured.protocol !== 'https:') throw new Error('HTTPS is required.');
-    trustedOrigin = configured.origin;
+    const configured = new URL(expectedBase);
+    if (
+      !['https:', 'providentia:'].includes(configured.protocol)
+      || configured.username !== ''
+      || configured.password !== ''
+      || configured.search !== ''
+      || configured.hash !== ''
+    ) {
+      throw new Error('Invalid homeowner app-link base.');
+    }
+    trustedBase = configured;
   } catch {
-    throw new Error('The configured login approval origin is invalid.');
+    throw new Error('The configured homeowner app-link base is invalid.');
   }
 
   const message = Buffer.isBuffer(source) ? source.toString('utf8') : String(source);
-  const expectedPath = `/login-links/${requestId.toLowerCase()}`;
-  const candidates = message.match(/https:\/\/[^\s<>"']+/gu) ?? [];
+  const candidates = message.match(/(?:https|providentia):\/\/[^\s<>"']+/gu) ?? [];
 
   for (const candidate of candidates) {
     let link;
@@ -52,16 +59,23 @@ export function extractApprovalLink(source, requestId, expectedOrigin) {
       continue;
     }
     if (
-      link.protocol !== 'https:'
-      || link.origin !== trustedOrigin
-      || link.pathname.toLowerCase() !== expectedPath
+      link.protocol !== trustedBase.protocol
+      || link.host !== trustedBase.host
+      || link.pathname !== trustedBase.pathname
+      || link.username !== ''
+      || link.password !== ''
       || link.search !== ''
     ) {
       continue;
     }
     const fragment = new URLSearchParams(link.hash.slice(1));
+    const linkedRequestId = fragment.get('requestId') ?? '';
     const approval = fragment.get('approval') ?? '';
-    if (fragment.size !== 1 || !APPROVAL_CAPABILITY.test(approval)) {
+    if (
+      fragment.size !== 2
+      || linkedRequestId.toLowerCase() !== requestId.toLowerCase()
+      || !APPROVAL_CAPABILITY.test(approval)
+    ) {
       continue;
     }
     return link.href;
@@ -95,7 +109,7 @@ export function redactSensitiveText(input, sensitiveValues = []) {
     message = message.replaceAll(value, '[redacted]');
   }
   return message
-    .replace(/#approval=[A-Za-z0-9_%~-]+/gu, '#approval=[redacted]')
+    .replace(/([#&]approval=)[A-Za-z0-9_%~-]+/gu, '$1[redacted]')
     .replace(/("?(?:pollToken|codeVerifier|state|csrfToken|refreshToken|accessToken)"?\s*[:=]\s*)[^\s,}]+/giu, '$1[redacted]');
 }
 

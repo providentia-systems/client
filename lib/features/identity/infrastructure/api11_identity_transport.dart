@@ -33,6 +33,7 @@ final class Api11IdentityTransport
         body: <String, Object?>{
           'requestId': command.requestId,
           'email': command.email,
+          'applicationKind': 'homeowner',
           'pollChallenge': command.pollChallenge,
           'codeChallenge': command.codeChallenge,
           'codeChallengeMethod': 'S256',
@@ -82,6 +83,9 @@ final class Api11IdentityTransport
         pathParameters: <String, String>{'requestId': requestId},
         body: <String, Object?>{'pollToken': pollToken},
       )).requireObject();
+      if (_string(object, 'applicationKind') != 'homeowner') {
+        throw const FormatException('Login application kind changed.');
+      }
       return LoginLinkStatusView(
         requestId: _string(object, 'requestId'),
         status: _loginStatus(_string(object, 'status')),

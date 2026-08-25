@@ -41,6 +41,7 @@ jobs:
       NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
       NOTARY_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
       API_BASE_URL: ${{ vars.PRODUCTION_API_BASE_URL }}
+      HOMEOWNER_APP_LINK_BASE: ${{ vars.PRODUCTION_HOMEOWNER_APP_LINK_BASE }}
     steps:
       - id: gate
         env:
@@ -51,6 +52,11 @@ jobs:
           if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then version=$REQUESTED_VERSION; fi
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]] || exit 64
           [[ "$API_BASE_URL" == https://* ]] || missing="${missing:-} PRODUCTION_API_BASE_URL"
+          node -e '
+            const uri = new URL(process.argv[1]);
+            if (uri.protocol !== "https:" || uri.username !== "" || uri.password !== ""
+                || uri.pathname !== "/homeowner" || uri.search !== "" || uri.hash !== "") process.exit(1);
+          ' "$HOMEOWNER_APP_LINK_BASE" || missing="${missing:-} PRODUCTION_HOMEOWNER_APP_LINK_BASE"
           for name in P12 P12_PASSWORD TEAM PROFILE IOS_IDENTITY MAC_IDENTITY INSTALLER_IDENTITY NOTARY_KEY NOTARY_KEY_ID NOTARY_ISSUER; do
             [[ -n "${!name}" ]] || missing="${missing:-} ${name}"
           done
@@ -76,6 +82,7 @@ jobs:
       APPLE_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_SIGNING_CERTIFICATE_PASSWORD }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+      HOMEOWNER_APP_LINK_BASE: ${{ vars.PRODUCTION_HOMEOWNER_APP_LINK_BASE }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Install pinned Flutter
@@ -108,7 +115,8 @@ jobs:
             --build-name "$RELEASE_VERSION" --build-number "$GITHUB_RUN_NUMBER" \
             --export-options-plist "$RUNNER_TEMP/ExportOptions.plist" \
             --dart-define PROVIDENTIA_ENVIRONMENT=production \
-            --dart-define PROVIDENTIA_API_BASE_URL='${{ vars.PRODUCTION_API_BASE_URL }}'
+            --dart-define PROVIDENTIA_API_BASE_URL='${{ vars.PRODUCTION_API_BASE_URL }}' \
+            --dart-define PROVIDENTIA_HOMEOWNER_APP_LINK_BASE="$HOMEOWNER_APP_LINK_BASE"
           mkdir -p build/release/apple/artifacts
           cp build/ios/ipa/*.ipa "build/release/apple/artifacts/Providentia-${RELEASE_VERSION}.ipa"
           ditto -c -k --keepParent build/ios/archive/Runner.xcarchive \
@@ -126,7 +134,8 @@ jobs:
           flutter build macos --release \
             --build-name "$RELEASE_VERSION" --build-number "$GITHUB_RUN_NUMBER" \
             --dart-define PROVIDENTIA_ENVIRONMENT=production \
-            --dart-define PROVIDENTIA_API_BASE_URL='${{ vars.PRODUCTION_API_BASE_URL }}'
+            --dart-define PROVIDENTIA_API_BASE_URL='${{ vars.PRODUCTION_API_BASE_URL }}' \
+            --dart-define PROVIDENTIA_HOMEOWNER_APP_LINK_BASE="$HOMEOWNER_APP_LINK_BASE"
           app=build/macos/Build/Products/Release/Providentia.app
           codesign --force --deep --options runtime --timestamp --sign "$MAC_IDENTITY" "$app"
           codesign --verify --deep --strict --verbose=2 "$app"

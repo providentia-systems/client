@@ -167,7 +167,7 @@ async function verifyLoginLinkAuthentication({
 }) {
   for (const name of [
     'E2E_API_BASE_URL',
-    'E2E_PUBLIC_BASE_URL',
+    'E2E_HOMEOWNER_APP_LINK_BASE',
     'E2E_USER_EMAIL',
     'E2E_MAILBOX_IMAP_HOST',
     'E2E_MAILBOX_IMAP_USER',
@@ -181,7 +181,14 @@ async function verifyLoginLinkAuthentication({
   );
 
   const apiBase = secureUrl(process.env.E2E_API_BASE_URL, 'API base URL');
-  const publicBase = secureUrl(process.env.E2E_PUBLIC_BASE_URL, 'login approval base URL');
+  const appLinkBase = secureUrl(
+    process.env.E2E_HOMEOWNER_APP_LINK_BASE,
+    'homeowner app-link base URL',
+  );
+  assert(
+    appLinkBase.origin === pwaTarget.origin,
+    'The homeowner app-link must open the deployed PWA origin.',
+  );
   const email = process.env.E2E_USER_EMAIL.trim().toLowerCase();
   assert(/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email), 'The synthetic acceptance email is invalid.');
   const mailboxTimeoutMs = boundedInteger(
@@ -200,6 +207,7 @@ async function verifyLoginLinkAuthentication({
     body: {
       requestId: proof.requestId,
       email,
+      applicationKind: 'homeowner',
       pollChallenge: proof.pollChallenge,
       codeChallenge: proof.codeChallenge,
       codeChallengeMethod: 'S256',
@@ -234,36 +242,64 @@ async function verifyLoginLinkAuthentication({
     email,
     startedAt: requestStartedAt,
     timeoutMs: mailboxTimeoutMs,
-    expectedApprovalOrigin: publicBase.origin,
+    expectedApprovalBase: appLinkBase.href,
   });
   secrets.add(approvalLink);
-  const approvalCapability = new URL(approvalLink).hash.slice('#approval='.length);
+  const approvalCapability = new URLSearchParams(
+    new URL(approvalLink).hash.slice(1),
+  ).get('approval') ?? '';
   if (approvalCapability !== '') secrets.add(decodeURIComponent(approvalCapability));
   record.checks.mailboxDelivery = true;
 
   const approvalContext = await browser.newContext({serviceWorkers: 'block'});
   try {
     const approvalPage = await approvalContext.newPage();
+    const proofResponse = approvalPage.waitForResponse((response) =>
+      response.request().method() === 'POST'
+      && response.url().endsWith(`/api/v1/auth/login-links/${proof.requestId}/proof`),
+    );
+    const reviewResponse = approvalPage.waitForResponse((response) =>
+      response.request().method() === 'POST'
+      && response.url().endsWith(`/api/v1/auth/login-links/${proof.requestId}/review`),
+    );
     await approvalPage.goto(approvalLink, {
       waitUntil: 'domcontentloaded',
       timeout: APPROVAL_PAGE_TIMEOUT_MS,
     });
-    await approvalPage.getByRole('heading', {name: 'Approve this login?'}).waitFor({
+    const [proofResult, reviewResult] = await Promise.all([
+      proofResponse,
+      reviewResponse,
+    ]);
+    assert(proofResult.status() === 200, `App-owned login proof returned HTTP ${proofResult.status()}.`);
+    assert(reviewResult.status() === 200, `App-owned login review returned HTTP ${reviewResult.status()}.`);
+    await approvalPage.getByText('A device wants to sign in', {exact: true}).waitFor({
       timeout: APPROVAL_PAGE_TIMEOUT_MS,
     });
     assert(
-      !approvalPage.url().includes('#approval='),
-      'The browser did not remove the approval capability from its address.',
+      new URL(approvalPage.url()).hash === '',
+      'The homeowner app did not remove the approval capability from browser history.',
     );
 
     const beforeDecision = await getLoginLinkStatus(page, apiBase, proof);
     assert(beforeDecision === 'pending', 'Opening the email link unexpectedly approved the request.');
     record.checks.scannerSafeReview = true;
 
+    const decisionResponse = approvalPage.waitForResponse((response) =>
+      response.request().method() === 'POST'
+      && response.url().endsWith(`/api/v1/auth/login-links/${proof.requestId}/decision`),
+    );
     await approvalPage.getByRole('button', {name: 'Approve login', exact: true}).click({
       timeout: APPROVAL_PAGE_TIMEOUT_MS,
     });
-    await approvalPage.getByRole('heading', {name: 'Login approved'}).waitFor({
+    const decisionResult = await decisionResponse;
+    assert(
+      decisionResult.status() === 202,
+      `App-owned login decision returned HTTP ${decisionResult.status()}.`,
+    );
+    await approvalPage.getByText(
+      'Login approved. Return to the requesting device.',
+      {exact: true},
+    ).waitFor({
       timeout: APPROVAL_PAGE_TIMEOUT_MS,
     });
     const browserBootstrap = await approvalContext.request.get(
@@ -274,7 +310,7 @@ async function verifyLoginLinkAuthentication({
       browserBootstrap.status() === 401 || browserBootstrap.status() === 403,
       'The approval browser received an authenticated session.',
     );
-    record.checks.explicitBrowserApproval = true;
+    record.checks.explicitAppOwnedApproval = true;
     record.checks.approvalBrowserUnauthenticated = true;
   } finally {
     await approvalContext.close();
@@ -408,7 +444,7 @@ async function waitForApprovalLink({
   email,
   startedAt,
   timeoutMs,
-  expectedApprovalOrigin,
+  expectedApprovalBase,
 }) {
   const port = boundedInteger(
     process.env.E2E_MAILBOX_IMAP_PORT ?? '993',
@@ -456,7 +492,7 @@ async function waitForApprovalLink({
         const message = await client.fetchOne(uid, {envelope: true, source: true}, {uid: true});
         if (!message?.source || !recipientMatches(message.envelope?.to, email)) continue;
         if (!message.source.includes(requestId)) continue;
-        return extractApprovalLink(message.source, requestId, expectedApprovalOrigin);
+        return extractApprovalLink(message.source, requestId, expectedApprovalBase);
       }
       await delay(Math.min(3000, Math.max(0, deadline - Date.now())));
     }
@@ -484,6 +520,7 @@ async function getLoginLinkStatus(page, apiBase, proof) {
   assert(result.status === 200, `Login-link status returned HTTP ${result.status}.`);
   assert(result.json, 'Login-link status did not return JSON.');
   assert(result.body?.requestId === proof.requestId, 'Login-link status returned another request identifier.');
+  assert(result.body?.applicationKind === 'homeowner', 'Login-link status crossed the application boundary.');
   assert(
     ['pending', 'approved', 'denied', 'exchanged', 'expired', 'cancelled'].includes(result.body?.status),
     'Login-link status returned an invalid state.',
@@ -501,6 +538,7 @@ async function waitForLoginLinkApproval({page, apiBase, proof, pollIntervalSecon
     );
     if (result.status === 200 && result.json) {
       assert(result.body?.requestId === proof.requestId, 'Login-link status returned another request identifier.');
+      assert(result.body?.applicationKind === 'homeowner', 'Login-link status crossed the application boundary.');
       const status = result.body?.status;
       assert(
         ['pending', 'approved', 'denied', 'exchanged', 'expired', 'cancelled'].includes(status),

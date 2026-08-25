@@ -149,20 +149,24 @@ void main() {
       const currentHomeId = '0198a0b1-c2d3-7e4f-8123-456789abcdab';
       final landed = <String>[];
       final aborted = <String>[];
+      final delayedRequestStarted = Completer<void>();
+      final delayedAbortObserved = Completer<void>();
       final client = MockClient.streaming((request, _) async {
         final homesSegment = request.url.pathSegments.indexOf('homes');
         final homeId = request.url.pathSegments[homesSegment + 1];
         if (homeId == delayedHomeId) {
+          delayedRequestStarted.complete();
           final abortTrigger = (request as http.Abortable).abortTrigger!;
           final outcome = await Future.any<String>(<Future<String>>[
             Future<String>.delayed(
-              const Duration(milliseconds: 80),
+              const Duration(seconds: 2),
               () => 'response',
             ),
             abortTrigger.then((_) => 'abort'),
           ]);
           if (outcome == 'abort') {
             aborted.add(homeId);
+            delayedAbortObserved.complete();
             throw http.RequestAbortedException(request.url);
           }
         }
@@ -174,11 +178,13 @@ void main() {
           baseUri: Uri.parse('https://api.example.test'),
           httpClient: client,
         ),
-        requestTimeout: const Duration(milliseconds: 10),
+        requestTimeout: const Duration(milliseconds: 250),
       );
 
+      final delayedSwitch = transport.switchActiveHome(delayedHomeId);
+      await delayedRequestStarted.future.timeout(const Duration(seconds: 1));
       await expectLater(
-        transport.switchActiveHome(delayedHomeId),
+        delayedSwitch,
         throwsA(
           isA<HomeTransportException>().having(
             (error) => error.kind,
@@ -187,8 +193,8 @@ void main() {
           ),
         ),
       );
+      await delayedAbortObserved.future.timeout(const Duration(seconds: 1));
       final selected = await transport.switchActiveHome(currentHomeId);
-      await Future<void>.delayed(const Duration(milliseconds: 100));
 
       expect(selected.id, currentHomeId);
       expect(aborted, <String>[delayedHomeId]);

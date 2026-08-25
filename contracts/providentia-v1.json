@@ -2,9 +2,9 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Providentia API",
-    "version": "1.15.0",
+    "version": "1.18.0",
     "summary": "Authoritative Providentia backend contract through the production-readiness programme",
-    "description": "Bounded identity, multi-home tenancy, published global catalog reads, and home-scoped offline synchronization.\n\nVersion 1.4 adds the Phase 5 inventory ledger, counts, purchasing review, shopping lists, and dashboard projections.\n\nVersion 1.5 adds privacy-controlled, human-reviewed AI extraction.\n\nVersion 1.6 adds sanitized catalog proposals, role-separated moderation, icon metadata, redirects, and reversible product merges.\n\nVersion 1.8 adds email-only login-link authentication and durable encrypted notification delivery.\n\nVersion 1.9 adds revisioned household permissions, revocable invitations, and accepted ownership transfer with step-up confirmation.\n\nVersion 1.10 adds typed pantry synchronization, catalog sharing/imports, data rights, commercial controls, multi-provider AI orchestration, encrypted private media, and production acceptance surfaces.\n\nVersion 1.11 adds cross-device login-link approval with origin-client polling and PKCE exchange, current-user bootstrap, recipient invitation acceptance, platform-administrator management, and explicit sliding-session metadata.\n\nVersion 1.11.1 exposes the installation UUID separately from the account-scoped device UUID so clients can validate login-link session binding without rejecting valid sessions.\n\nVersion 1.12 publishes only moderator-approved, consent-bound catalog contribution facts through a bounded attribution-free global projection.\n\nVersion 1.13 adds revision-bound, idempotent stock-count cancellation to the online API and protocol-v2 synchronization command set, publishes a precise AI media-handling disclosure that distinguishes transient direct extraction from explicit encrypted private-media storage, and provides a typed, deterministic, paged home item master for offline caching.\n\nVersion 1.13.1 documents the non-disclosing 404 response used when a home is revoked or foreign, allowing clients to purge stale private projections instead of retrying indefinitely.\n\nVersion 1.13.2 exhaustively documents non-disclosing home authorization for AI and shopping operations and adds a revisioned receipt-line unresolved decision across ordinary HTTP and protocol-v2 synchronization; receipt commit processes approved lines while retaining unresolved raw lines without price or stock effects.\n\nVersion 1.14 adds revision-bound home-private categories and products to the local-first inventory protocol, plus a privacy-safe Linux administrator control plane for account lifecycle and platform roles. Billing enforcement remains disabled by configuration during the free stabilization phase.\n\nVersion 1.15 adds consent-bound product-image contributions with server-side sanitization, encrypted moderation quarantine, reviewer-only no-store previews, explicit curator publication, immutable content-addressed public assets, and typed published catalog search results."
+    "description": "Bounded identity, multi-home tenancy, published global catalog reads, and home-scoped offline synchronization.\n\nVersion 1.4 adds the Phase 5 inventory ledger, counts, purchasing review, shopping lists, and dashboard projections.\n\nVersion 1.5 adds privacy-controlled, human-reviewed AI extraction.\n\nVersion 1.6 adds sanitized catalog proposals, role-separated moderation, icon metadata, redirects, and reversible product merges.\n\nVersion 1.8 adds email-only login-link authentication and durable encrypted notification delivery.\n\nVersion 1.9 adds revisioned household permissions, revocable invitations, and accepted ownership transfer with step-up confirmation.\n\nVersion 1.10 adds typed pantry synchronization, catalog sharing/imports, data rights, commercial controls, multi-provider AI orchestration, encrypted private media, and production acceptance surfaces.\n\nVersion 1.11 adds cross-device login-link approval with origin-client polling and PKCE exchange, current-user bootstrap, recipient invitation acceptance, platform-administrator management, and explicit sliding-session metadata.\n\nVersion 1.11.1 exposes the installation UUID separately from the account-scoped device UUID so clients can validate login-link session binding without rejecting valid sessions.\n\nVersion 1.12 publishes only moderator-approved, consent-bound catalog contribution facts through a bounded attribution-free global projection.\n\nVersion 1.13 adds revision-bound, idempotent stock-count cancellation to the online API and protocol-v2 synchronization command set, publishes a precise AI media-handling disclosure that distinguishes transient direct extraction from explicit encrypted private-media storage, and provides a typed, deterministic, paged home item master for offline caching.\n\nVersion 1.13.1 documents the non-disclosing 404 response used when a home is revoked or foreign, allowing clients to purge stale private projections instead of retrying indefinitely.\n\nVersion 1.13.2 exhaustively documents non-disclosing home authorization for AI and shopping operations and adds a revisioned receipt-line unresolved decision across ordinary HTTP and protocol-v2 synchronization; receipt commit processes approved lines while retaining unresolved raw lines without price or stock effects.\n\nVersion 1.14 adds revision-bound home-private categories and products to the local-first inventory protocol, plus a privacy-safe Linux administrator control plane for account lifecycle and platform roles. Billing enforcement remains disabled by configuration during the free stabilization phase.\n\nVersion 1.15 adds consent-bound product-image contributions with server-side sanitization, encrypted moderation quarantine, reviewer-only no-store previews, explicit curator publication, immutable content-addressed public assets, and typed published catalog search results.\n\nVersion 1.16 removes every interactive backend page, binds each login-link request to either the homeowner or administrator application, and exposes single-use approval proof, review, and decision JSON operations for client-owned deep-link handling. Metrics are disabled by default and require a dedicated bearer credential when explicitly enabled.\n\nVersion 1.17 binds verification, password-reset, and step-up credentials to the originating application, moves every emailed account capability into configured Client/Admin URI fragments, and separates receipt quantities from validated stock-count minimum/maximum ranges in extraction schema v2.\n\nVersion 1.18 makes stock-count line writes usable as compare-and-swap operations: revision 0 creates a line, a matching positive revision updates it, and successful writes return the complete line representation."
   },
   "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
   "servers": [
@@ -90,7 +90,11 @@
     "/metrics": {
       "get": {
         "operationId": "getMetrics",
-        "security": [],
+        "security": [
+          {
+            "metricsBearerAuth": []
+          }
+        ],
         "tags": [
           "Operations"
         ],
@@ -104,6 +108,9 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "Metrics are disabled or the dedicated credential is absent or invalid"
           }
         }
       }
@@ -177,6 +184,156 @@
           },
           "409": {
             "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/login-links/{requestId}/proof": {
+      "post": {
+        "operationId": "proveLoginLinkApproval",
+        "summary": "Validate an application-bound login-link approval credential",
+        "description": "The client receives the credential from its deep or universal link fragment, clears the fragment immediately, and submits the credential only in this JSON body. A successful proof does not consume or extend the credential and discloses no account identity.",
+        "security": [],
+        "tags": [
+          "Identity"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/LoginLinkRequestId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginLinkApprovalProof"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The credential belongs to this request and application",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginLinkApprovalValidity"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "410": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/login-links/{requestId}/review": {
+      "post": {
+        "operationId": "reviewLoginLinkApproval",
+        "summary": "Review the device request inside the bound client application",
+        "description": "Returns only the device, platform, and request times needed for a human approval decision. It never returns an email address, user identifier, account state, or credential.",
+        "security": [],
+        "tags": [
+          "Identity"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/LoginLinkRequestId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginLinkApprovalProof"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Human-readable login request review",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginLinkApprovalReview"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "410": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/login-links/{requestId}/decision": {
+      "post": {
+        "operationId": "decideLoginLinkApproval",
+        "summary": "Consume an application-bound approval credential",
+        "description": "Atomically approves or denies the request and consumes the single-use credential. The generic accepted response is identical for successful, replayed, expired, unavailable, and account-inactive capabilities; the originating client learns terminal state only through its private poll proof.",
+        "security": [],
+        "tags": [
+          "Identity"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/LoginLinkRequestId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginLinkDecisionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Decision received without disclosing request or account state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginLinkDecisionReceived"
+                }
+              }
+            }
           },
           "422": {
             "$ref": "#/components/responses/Problem"
@@ -368,7 +525,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/TokenRequest"
+                "$ref": "#/components/schemas/ApplicationTokenRequest"
               }
             }
           }
@@ -395,7 +552,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/EmailRequest"
+                "$ref": "#/components/schemas/ApplicationEmailRequest"
               }
             }
           }
@@ -527,7 +684,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/EmailRequest"
+                "$ref": "#/components/schemas/ApplicationEmailRequest"
               }
             }
           }
@@ -551,22 +708,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "token",
-                  "password"
-                ],
-                "properties": {
-                  "token": {
-                    "type": "string"
-                  },
-                  "password": {
-                    "type": "string",
-                    "minLength": 12,
-                    "maxLength": 1024
-                  }
-                }
+                "$ref": "#/components/schemas/PasswordResetCompleteRequest"
               }
             }
           }
@@ -4202,6 +4344,7 @@
     "/api/v1/homes/{homeId}/stock-count-sessions/{sessionId}/lines/{lineId}": {
       "put": {
         "operationId": "putStockCountLine",
+        "description": "Creates a line when expectedRevision is 0, or updates the same line when expectedRevision matches its current positive revision. A stale revision returns 409.",
         "tags": [
           "Inventory"
         ],
@@ -4256,6 +4399,9 @@
             "$ref": "#/components/responses/Problem"
           },
           "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
             "$ref": "#/components/responses/Problem"
           }
         }
@@ -8103,6 +8249,12 @@
         "scheme": "bearer",
         "bearerFormat": "opaque"
       },
+      "metricsBearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "dedicated-operations-token",
+        "description": "Independent metrics credential; never an account access or refresh token."
+      },
       "cookieAuth": {
         "type": "apiKey",
         "in": "cookie",
@@ -8401,12 +8553,21 @@
           }
         }
       },
+      "LoginApplicationKind": {
+        "type": "string",
+        "enum": [
+          "homeowner",
+          "admin"
+        ],
+        "description": "The only client application allowed to open and decide this login request."
+      },
       "LoginLinkStartRequest": {
         "type": "object",
         "additionalProperties": false,
         "required": [
           "requestId",
           "email",
+          "applicationKind",
           "pollChallenge",
           "codeChallenge",
           "codeChallengeMethod",
@@ -8425,6 +8586,9 @@
           "email": {
             "type": "string",
             "format": "email"
+          },
+          "applicationKind": {
+            "$ref": "#/components/schemas/LoginApplicationKind"
           },
           "pollChallenge": {
             "type": "string",
@@ -8520,11 +8684,147 @@
           }
         }
       },
+      "LoginLinkApprovalProof": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "applicationKind",
+          "approvalToken"
+        ],
+        "properties": {
+          "applicationKind": {
+            "$ref": "#/components/schemas/LoginApplicationKind"
+          },
+          "approvalToken": {
+            "type": "string",
+            "minLength": 40,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "writeOnly": true,
+            "description": "Single-use capability received in an application-link URI fragment and submitted only in a JSON body."
+          }
+        }
+      },
+      "LoginLinkApprovalValidity": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "valid",
+          "requestId",
+          "applicationKind",
+          "expiresAt"
+        ],
+        "properties": {
+          "valid": {
+            "const": true
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "applicationKind": {
+            "$ref": "#/components/schemas/LoginApplicationKind"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "LoginLinkApprovalReview": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "requestId",
+          "applicationKind",
+          "deviceName",
+          "platform",
+          "createdAt",
+          "expiresAt"
+        ],
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "applicationKind": {
+            "$ref": "#/components/schemas/LoginApplicationKind"
+          },
+          "deviceName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "platform": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "LoginLinkDecisionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "applicationKind",
+          "approvalToken",
+          "decision"
+        ],
+        "properties": {
+          "applicationKind": {
+            "$ref": "#/components/schemas/LoginApplicationKind"
+          },
+          "approvalToken": {
+            "type": "string",
+            "minLength": 40,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "writeOnly": true
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "approve",
+              "deny"
+            ]
+          }
+        }
+      },
+      "LoginLinkDecisionReceived": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "requestId",
+          "applicationKind",
+          "status"
+        ],
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "applicationKind": {
+            "$ref": "#/components/schemas/LoginApplicationKind"
+          },
+          "status": {
+            "const": "received"
+          }
+        }
+      },
       "LoginLinkStatus": {
         "type": "object",
         "additionalProperties": false,
         "required": [
           "requestId",
+          "applicationKind",
           "status",
           "expiresAt"
         ],
@@ -8532,6 +8832,9 @@
           "requestId": {
             "type": "string",
             "format": "uuid"
+          },
+          "applicationKind": {
+            "$ref": "#/components/schemas/LoginApplicationKind"
           },
           "status": {
             "type": "string",
@@ -8608,9 +8911,13 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
+          "applicationKind",
           "action"
         ],
         "properties": {
+          "applicationKind": {
+            "$ref": "#/components/schemas/LoginApplicationKind"
+          },
           "action": {
             "const": "ownership-transfer"
           }
@@ -8639,6 +8946,70 @@
           "token": {
             "type": "string",
             "minLength": 40
+          }
+        }
+      },
+      "ApplicationEmailRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "applicationKind",
+          "email"
+        ],
+        "properties": {
+          "applicationKind": {
+            "$ref": "#/components/schemas/LoginApplicationKind"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          }
+        }
+      },
+      "ApplicationTokenRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "applicationKind",
+          "token"
+        ],
+        "properties": {
+          "applicationKind": {
+            "$ref": "#/components/schemas/LoginApplicationKind"
+          },
+          "token": {
+            "type": "string",
+            "minLength": 40,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "writeOnly": true
+          }
+        }
+      },
+      "PasswordResetCompleteRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "applicationKind",
+          "token",
+          "password"
+        ],
+        "properties": {
+          "applicationKind": {
+            "$ref": "#/components/schemas/LoginApplicationKind"
+          },
+          "token": {
+            "type": "string",
+            "minLength": 40,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "writeOnly": true
+          },
+          "password": {
+            "type": "string",
+            "minLength": 12,
+            "maxLength": 1024,
+            "writeOnly": true
           }
         }
       },
@@ -13271,7 +13642,8 @@
           },
           "expectedRevision": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 0,
+            "description": "Use 0 to create the line. Use the current positive line revision to update it."
           }
         }
       },
@@ -13869,7 +14241,7 @@
           "schemaVersion": {
             "type": "integer",
             "enum": [
-              1
+              2
             ]
           },
           "promptTemplateVersion": {
@@ -14649,6 +15021,8 @@
           "product",
           "variant",
           "quantity",
+          "quantityMinimum",
+          "quantityMaximum",
           "packText",
           "unitPrice",
           "lineTotal",
@@ -14714,7 +15088,40 @@
             ]
           },
           "quantity": {
-            "type": "string"
+            "description": "Purchased receipt quantity. Required as a positive decimal string for receipt_line and null for stock_item.",
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^(?:0|[1-9][0-9]{0,11})(?:\\.[0-9]{1,8})?$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "quantityMinimum": {
+            "description": "Lower bound of the visible stock count. Required as a nonnegative decimal string for stock_item and null for receipt_line.",
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^(?:0|[1-9][0-9]{0,11})(?:\\.[0-9]{1,8})?$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "quantityMaximum": {
+            "description": "Upper bound of the visible stock count. It is greater than or equal to quantityMinimum; equal bounds represent an exact count. Required for stock_item and null for receipt_line.",
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^(?:0|[1-9][0-9]{0,11})(?:\\.[0-9]{1,8})?$"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "packText": {
             "oneOf": [

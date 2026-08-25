@@ -74,7 +74,7 @@ const outputs = new Map([
     path.join(generatedDirectory, 'generation-manifest.json'),
     json({
       generator: 'tool/generate_api_client.mjs',
-      generatorVersion: 6,
+      generatorVersion: 7,
       clientProfile: 'homeowner',
       contract: '../../providentia-v1.json',
       contractVersion: contract.info.version,
@@ -131,7 +131,7 @@ function validateContract(document) {
   }
   if (
     document.info?.title !== 'Providentia API' ||
-    document.info?.version !== '1.15.0'
+    document.info?.version !== '1.18.0'
   ) {
     throw new Error('Unexpected API identity or version.');
   }
@@ -145,11 +145,19 @@ function validateContract(document) {
     ['get', '/api/v1/homes/{homeId}/sync/bootstrap', 'bootstrapHomeSynchronization'],
     ['post', '/api/v1/auth/login', 'login'],
     ['post', '/api/v1/auth/login-links', 'startLoginLink'],
+    ['post', '/api/v1/auth/login-links/{requestId}/proof', 'proveLoginLinkApproval'],
+    ['post', '/api/v1/auth/login-links/{requestId}/review', 'reviewLoginLinkApproval'],
+    ['post', '/api/v1/auth/login-links/{requestId}/decision', 'decideLoginLinkApproval'],
     ['post', '/api/v1/auth/login-links/{requestId}/status', 'getLoginLinkStatus'],
     ['post', '/api/v1/auth/login-links/{requestId}/exchange', 'exchangeLoginLink'],
     ['post', '/api/v1/auth/login-links/{requestId}/cancel', 'cancelLoginLink'],
     ['post', '/api/v1/auth/refresh', 'refreshSession'],
     ['post', '/api/v1/auth/logout', 'logout'],
+    ['post', '/api/v1/auth/verify-email', 'verifyEmail'],
+    ['post', '/api/v1/auth/verify-email/resend', 'resendEmailVerification'],
+    ['post', '/api/v1/auth/password-reset/request', 'requestPasswordReset'],
+    ['post', '/api/v1/auth/password-reset/complete', 'completePasswordReset'],
+    ['post', '/api/v1/auth/step-up-links', 'requestStepUpLink'],
     ['get', '/api/v1/me', 'getCurrentUser'],
     ['get', '/api/v1/me/home-invitations', 'listPendingHomeInvitations'],
     ['get', '/api/v1/platform/administrators', 'listPlatformAdministrators'],
@@ -190,8 +198,8 @@ function validateContract(document) {
       operationIds.add(operation.operationId);
     }
   }
-  if (operationIds.size < 150) {
-    throw new Error(`Expected the API 1.15 surface, found ${operationIds.size} operations.`);
+  if (operationIds.size !== 177) {
+    throw new Error(`Expected the API 1.17 surface, found ${operationIds.size} operations.`);
   }
 
   for (const schema of [
@@ -211,6 +219,16 @@ function validateContract(document) {
     'LoginLinkStartRequest',
     'LoginLinkStarted',
     'LoginLinkStatus',
+    'LoginApplicationKind',
+    'LoginLinkApprovalProof',
+    'LoginLinkApprovalValidity',
+    'LoginLinkApprovalReview',
+    'LoginLinkDecisionRequest',
+    'LoginLinkDecisionReceived',
+    'ApplicationEmailRequest',
+    'ApplicationTokenRequest',
+    'PasswordResetCompleteRequest',
+    'StepUpRequest',
     'LoginLinkExchangeRequest',
     'CurrentUserBootstrap',
     'PlatformRole',
@@ -313,6 +331,7 @@ function validateContract(document) {
   assertRequiredFields(document, 'LoginLinkStartRequest', [
     'requestId',
     'email',
+    'applicationKind',
     'pollChallenge',
     'codeChallenge',
     'codeChallengeMethod',
@@ -330,9 +349,42 @@ function validateContract(document) {
   ]);
   assertRequiredFields(document, 'LoginLinkStatus', [
     'requestId',
+    'applicationKind',
     'status',
     'expiresAt',
   ]);
+  assertRequiredFields(document, 'LoginLinkApprovalProof', [
+    'applicationKind',
+    'approvalToken',
+  ]);
+  assertRequiredFields(document, 'LoginLinkApprovalReview', [
+    'requestId',
+    'applicationKind',
+    'deviceName',
+    'platform',
+    'createdAt',
+    'expiresAt',
+  ]);
+  assertRequiredFields(document, 'LoginLinkDecisionRequest', [
+    'applicationKind',
+    'approvalToken',
+    'decision',
+  ]);
+  const applicationKinds = document.components.schemas.LoginApplicationKind.enum;
+  if (JSON.stringify(applicationKinds) !== JSON.stringify(['homeowner', 'admin'])) {
+    throw new Error('LoginApplicationKind must distinguish both client applications.');
+  }
+  const candidatePayload = document.components.schemas.AiExtractionCandidatePayload;
+  const candidateRequired = candidatePayload.required ?? [];
+  if (
+    document.components.schemas.AiExtraction.properties?.schemaVersion?.enum?.[0] !== 2 ||
+    candidatePayload.additionalProperties !== false ||
+    !['candidateType', 'quantity', 'quantityMinimum', 'quantityMaximum'].every(
+      (field) => candidateRequired.includes(field),
+    )
+  ) {
+    throw new Error('AI extraction schema v2 and its bounded quantity payload are required.');
+  }
   assertRequiredFields(document, 'LoginLinkExchangeRequest', [
     'pollToken',
     'codeVerifier',

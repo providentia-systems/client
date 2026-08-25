@@ -1,6 +1,6 @@
 // GENERATED FILE - DO NOT EDIT.
 // Source: contracts/providentia-v1.json
-// Contract SHA-256: 61d49a5b0c857b532e27cfc243a2701731f7b0f2c4d5f5ab39d3fb0636790cdd
+// Contract SHA-256: fb7f18cc8d2e0f7aaf3ec9f1bd3039316c6f44af0023110936778a8d616a6759
 // ignore_for_file: use_null_aware_elements
 
 library;
@@ -670,6 +670,12 @@ final class ProvidentiaApiClient {
       pathTemplate: "/api/v1/homes/{homeId}/suggestion-backtests",
       multipart: false,
     ),
+    "decideLoginLinkApproval": ApiOperation(
+      operationId: "decideLoginLinkApproval",
+      method: "POST",
+      pathTemplate: "/api/v1/auth/login-links/{requestId}/decision",
+      multipart: false,
+    ),
     "deleteAiProviderCredential": ApiOperation(
       operationId: "deleteAiProviderCredential",
       method: "DELETE",
@@ -1068,6 +1074,12 @@ final class ProvidentiaApiClient {
       pathTemplate: "/api/v1/homes/{homeId}/ownership-transfers",
       multipart: false,
     ),
+    "proveLoginLinkApproval": ApiOperation(
+      operationId: "proveLoginLinkApproval",
+      method: "POST",
+      pathTemplate: "/api/v1/auth/login-links/{requestId}/proof",
+      multipart: false,
+    ),
     "pullHomeSynchronization": ApiOperation(
       operationId: "pullHomeSynchronization",
       method: "GET",
@@ -1209,6 +1221,12 @@ final class ProvidentiaApiClient {
       method: "PUT",
       pathTemplate:
           "/api/v1/homes/{homeId}/ai/extractions/{extractionId}/observations/{decisionId}",
+      multipart: false,
+    ),
+    "reviewLoginLinkApproval": ApiOperation(
+      operationId: "reviewLoginLinkApproval",
+      method: "POST",
+      pathTemplate: "/api/v1/auth/login-links/{requestId}/review",
       multipart: false,
     ),
     "revokeAiProviderProfileCredential": ApiOperation(
@@ -2020,6 +2038,21 @@ final class ProvidentiaApiClient {
     return invokeOperation(
       operationId: "createSuggestionBacktest",
       pathParameters: <String, String>{"homeId": homeId},
+      query: query,
+      headers: headers,
+      body: body,
+    );
+  }
+
+  Future<ApiResponse> decideLoginLinkApproval({
+    required String requestId,
+    required Map<String, Object?> body,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "decideLoginLinkApproval",
+      pathParameters: <String, String>{"requestId": requestId},
       query: query,
       headers: headers,
       body: body,
@@ -2889,6 +2922,21 @@ final class ProvidentiaApiClient {
     );
   }
 
+  Future<ApiResponse> proveLoginLinkApproval({
+    required String requestId,
+    required Map<String, Object?> body,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "proveLoginLinkApproval",
+      pathParameters: <String, String>{"requestId": requestId},
+      query: query,
+      headers: headers,
+      body: body,
+    );
+  }
+
   Future<ApiResponse> putAiOrchestrationPolicy({
     required String homeId,
     required Map<String, Object?> body,
@@ -3218,6 +3266,21 @@ final class ProvidentiaApiClient {
         "extractionId": extractionId,
         "decisionId": decisionId,
       },
+      query: query,
+      headers: headers,
+      body: body,
+    );
+  }
+
+  Future<ApiResponse> reviewLoginLinkApproval({
+    required String requestId,
+    required Map<String, Object?> body,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "reviewLoginLinkApproval",
+      pathParameters: <String, String>{"requestId": requestId},
       query: query,
       headers: headers,
       body: body,

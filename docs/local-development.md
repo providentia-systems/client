@@ -1,10 +1,8 @@
 # Local backend and client testing
 
-This is the supported developer handoff for the API `1.13.2` client, pinned to
-SHA-256
-`1b6b7f09240ace0ba6b7e7279259687569dfbacb112ea7dbd4094fe27ccd0108`. It tests
+This is the supported developer handoff for the pinned API contract. It tests
 the production-shaped login-link flow, session restoration, homes,
-invitations, roles, and account administration against one local Providentia
+invitations, roles, and homeowner account management against one local Providentia
 backend. The backend's canonical
 [client/user testing runbook](https://github.com/providentia-systems/backend/blob/main/docs/deployment/client-user-testing.md)
 contains the complete security and cross-device acceptance matrix.
@@ -12,26 +10,28 @@ contains the complete security and cross-device acceptance matrix.
 ## 1. Start the backend and email delivery
 
 From the backend checkout, either start the published stack or build from the
-verified handover. The browser approval page is served by the backend and
-submits its token back to that same public origin. Keep that origin in the
-backend CORS list as well as the Flutter web origins. For the default loopback
-ports, start the chosen stack with the complete explicit allowlist:
+verified handover. Approval links open this Flutter homeowner client; the
+backend exposes JSON proof, review, and decision endpoints but no approval
+page. Keep the Flutter web origin in the backend CORS list. For the default
+loopback ports, start the chosen stack with the explicit allowlist and
+homeowner app-link base:
 
 ```bash
-CORS_ALLOWED_ORIGINS='http://127.0.0.1:8080,http://localhost:8080,http://127.0.0.1:3000,http://localhost:3000,http://127.0.0.1:8081,http://localhost:8081' \
+CORS_ALLOWED_ORIGINS='http://127.0.0.1:3000,http://localhost:3000,http://127.0.0.1:8081,http://localhost:8081' \
+HOMEOWNER_APP_LINK_BASE='http://localhost:8081/homeowner' \
   bash scripts/setup-prebuilt.sh
 ```
 
 ```bash
-CORS_ALLOWED_ORIGINS='http://127.0.0.1:8080,http://localhost:8080,http://127.0.0.1:3000,http://localhost:3000,http://127.0.0.1:8081,http://localhost:8081' \
+CORS_ALLOWED_ORIGINS='http://127.0.0.1:3000,http://localhost:3000,http://127.0.0.1:8081,http://localhost:8081' \
+HOMEOWNER_APP_LINK_BASE='http://localhost:8081/homeowner' \
   bash scripts/setup-development.sh \
     --handover /absolute/path/Pantry_Stock_Project_Handover_2026-07-29.zip
 ```
 
-The backend also derives its configured `PUBLIC_BASE_URL` origin into the
-runtime allowlist. Supplying the complete list explicitly makes the local
-handoff independent of a stale generated environment or previously created
-container. If an installation already has `.env.prebuilt.local` or
+Supplying the complete list explicitly makes the local handoff independent of
+a stale generated environment or previously created container. If an
+installation already has `.env.prebuilt.local` or
 `.env.development.local`, add the same `CORS_ALLOWED_ORIGINS=...` line there
 and rerun the corresponding setup command so Docker recreates the API service.
 
@@ -48,24 +48,10 @@ curl --fail-with-body http://127.0.0.1:8080/api/v1/system/info
 Open Mailpit at `http://127.0.0.1:8025`. An accepted API request without a
 delivered message is not a successful onboarding test.
 
-Before requesting a login link, verify that a same-origin browser form POST is
-accepted by the running backend. `303` is the expected result; the deliberately
-invalid request identifier is never approved or stored:
-
-```bash
-curl --silent --show-error --output /dev/null --write-out '%{http_code}\n' \
-  -H 'Origin: http://127.0.0.1:8080' \
-  -H 'Content-Type: application/x-www-form-urlencoded' \
-  -X POST \
-  --data 'approval=invalid' \
-  http://127.0.0.1:8080/login-links/00000000-0000-0000-0000-000000000000/capture
-```
-
-If this returns `403 Origin forbidden`, the API container is still using an
-allowlist that omits `http://127.0.0.1:8080`; apply the explicit allowlist
-above and recreate it before testing Flutter. If it returns `404`, first
-confirm that the running backend contains the `/login-links/{requestId}`
-browser routes and refresh the backend checkout or prebuilt image.
+Before requesting a login link, confirm that the running backend contract
+contains the JSON operations `proveLoginLinkApproval`,
+`reviewLoginLinkApproval`, and `decideLoginLinkApproval`. No HTML route or form
+POST is part of the supported backend surface.
 
 ## 2. Prepare the client
 
@@ -137,7 +123,7 @@ node --test tool/*.test.mjs
 ```
 
 The client contract must remain byte-for-byte aligned with the reviewed
-backend API `1.13.2` artifact. Do not hand-edit generated Dart.
+backend artifact and its recorded SHA-256. Do not hand-edit generated Dart.
 
 ## 3. Run the client
 
@@ -151,7 +137,8 @@ flutter run -d chrome \
   --web-header=Cross-Origin-Opener-Policy=same-origin \
   --web-header=Cross-Origin-Embedder-Policy=require-corp \
   --dart-define=PROVIDENTIA_ENVIRONMENT=development \
-  --dart-define=PROVIDENTIA_API_BASE_URL=http://localhost:8080
+  --dart-define=PROVIDENTIA_API_BASE_URL=http://localhost:8080 \
+  --dart-define=PROVIDENTIA_HOMEOWNER_APP_LINK_BASE=http://localhost:8081/homeowner
 ```
 
 For a desktop target on the backend workstation:
@@ -159,7 +146,8 @@ For a desktop target on the backend workstation:
 ```bash
 flutter run -d linux \
   --dart-define=PROVIDENTIA_ENVIRONMENT=development \
-  --dart-define=PROVIDENTIA_API_BASE_URL=http://127.0.0.1:8080
+  --dart-define=PROVIDENTIA_API_BASE_URL=http://127.0.0.1:8080 \
+  --dart-define=PROVIDENTIA_HOMEOWNER_APP_LINK_BASE=providentia://login-link/homeowner
 ```
 
 Replace `linux` with an available `windows`, `macos`, or iOS simulator/device
@@ -176,10 +164,11 @@ flutter run -d <android-device-id> \
 ```
 
 The loopback golden path is same-workstation (or ADB-reversed) testing. To
-open the approval link on a genuinely different device, expose the backend
-through a trusted reachable HTTPS endpoint, set backend `PUBLIC_BASE_URL` to
-that exact origin, allow the client origin in CORS, and point Flutter at the
-same reachable API. Never expose the loopback development secrets publicly.
+open the approval link on a genuinely different device, expose the API through
+a trusted reachable HTTPS endpoint, configure the backend's homeowner app-link
+base for the installed client (or its HTTPS PWA route), allow that client origin
+in CORS, and point Flutter at the same reachable API. Never expose loopback
+development secrets publicly.
 
 ## 4. Verify the login-link flow
 
@@ -189,12 +178,11 @@ from another installation.
 1. Enter the email in the originating client and choose **Send login link**.
 2. Confirm the client shows its waiting screen and Mailpit receives one neutral
    message without revealing whether the address already exists.
-3. Open the login link in any browser. For the loopback commands above, use the
-   same workstation or ADB-reversed device. A browser on another device works
-   only with the reachable trusted HTTPS setup described in section 3.
-   Opening the link must show a review page; it must not approve the request by
-   itself.
-4. Choose **Approve**. The browser should say it can be closed. It must not
+3. Open the login link with the Providentia homeowner app. The link capability
+   remains in the URI fragment, is cleared from browser history on web, and is
+   held only in memory until the decision. Opening it must show a review page;
+   it must not approve the request by itself.
+4. Choose **Approve login**. The reviewing client must not
    receive the originating client's application session.
 5. Return to the originating client. It polls the backend and exchanges its
    private poll token, state, and PKCE verifier. A deep link may return focus as
@@ -209,13 +197,9 @@ response is single-use and requires a new login-link request.
 
 Use only the newest message with subject **Approve your Providentia login**.
 Sending a new link retires the previous request, so an older link correctly
-becomes unavailable. The launch page also removes the `#approval=...` fragment
-before posting it into a protected cookie; after a failed capture, refreshing
-the cleaned browser URL cannot reconstruct that credential and may return
-`404`. Fix the backend origin first, request one new link, and open that fresh
-message once. Legacy **Verify your Providentia account** messages belong to the
-development password-registration flow and are not part of login-link
-onboarding.
+becomes unavailable. The client removes the `approval` fragment before review
+and never places it in a cookie, persistent store, log, or route name. After a
+failed proof, request a new link and open that fresh message once.
 
 ## 5. Verify homes, invitations, and roles
 

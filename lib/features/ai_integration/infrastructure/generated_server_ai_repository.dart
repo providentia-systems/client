@@ -509,6 +509,7 @@ AiExtractionReview _extractionReview(
       _string(object, 'status') != 'review_required') {
     throw const FormatException('AI extraction identity or state changed.');
   }
+  _integer(object, 'schemaVersion', minimum: 2, maximum: 2);
   final kind = switch (_string(object, 'kind')) {
     'receipt' => AiExtractionKind.receipt,
     'stock' => AiExtractionKind.stockPhoto,
@@ -520,12 +521,12 @@ AiExtractionReview _extractionReview(
   final candidates = _objectList(object, 'candidates')
       .map((candidate) {
         final payload = _object(candidate['payload'], 'candidate payload');
-        _validateCandidatePayload(payload);
         final candidateType = switch (_string(candidate, 'candidateType')) {
           'receipt_line' => AiCandidateType.receiptLine,
           'stock_item' => AiCandidateType.stockItem,
           _ => throw const FormatException('Unknown AI candidate type.'),
         };
+        _validateCandidatePayload(payload, candidateType);
         if (_string(payload, 'candidateType') !=
                 switch (candidateType) {
                   AiCandidateType.receiptLine => 'receipt_line',
@@ -608,13 +609,36 @@ AiReceiptCandidatePayload _receiptCandidatePayload(
   header: header,
 );
 
-void _validateCandidatePayload(Map<String, Object?> payload) {
+void _validateCandidatePayload(
+  Map<String, Object?> payload,
+  AiCandidateType candidateType,
+) {
   _requireExactKeys(payload, _candidatePayloadKeys, 'AI candidate payload');
   _boundedString(payload, 'description', 500);
   for (final field in <String>['rawText', 'brand', 'product', 'variant']) {
     _nullableBoundedText(payload, field, 500);
   }
-  _nonNegativeDecimal(payload, 'quantity');
+  switch (candidateType) {
+    case AiCandidateType.receiptLine:
+      if (_string(payload, 'candidateType') != 'receipt_line') {
+        throw const FormatException('AI candidate kind mismatch.');
+      }
+      _positiveDecimal(payload, 'quantity');
+      _requireNull(payload, 'quantityMinimum');
+      _requireNull(payload, 'quantityMaximum');
+      break;
+    case AiCandidateType.stockItem:
+      if (_string(payload, 'candidateType') != 'stock_item') {
+        throw const FormatException('AI candidate kind mismatch.');
+      }
+      _requireNull(payload, 'quantity');
+      final minimum = _nonNegativeDecimal(payload, 'quantityMinimum');
+      final maximum = _nonNegativeDecimal(payload, 'quantityMaximum');
+      if (maximum < minimum) {
+        throw const FormatException('Invalid stock quantity range.');
+      }
+      break;
+  }
   _nullableBoundedText(payload, 'packText', 191);
   for (final field in <String>[
     'unitPrice',
@@ -804,6 +828,12 @@ double _nonNegativeDecimal(Map<String, Object?> object, String key) {
   return parsed;
 }
 
+void _requireNull(Map<String, Object?> object, String key) {
+  if (!object.containsKey(key) || object[key] != null) {
+    throw FormatException('Invalid $key.');
+  }
+}
+
 int? _nullableMinorUnits(Map<String, Object?> object, String key) {
   if (!object.containsKey(key)) throw FormatException('Missing $key.');
   final value = object[key];
@@ -905,7 +935,9 @@ const Set<String> _serverProviderIds = <String>{
   'ollama',
 };
 final RegExp _profileIdPattern = RegExp(r'^[A-Za-z0-9-]{1,36}$');
-final RegExp _decimalPattern = RegExp(r'^[0-9]+(?:\.[0-9]+)?$');
+final RegExp _decimalPattern = RegExp(
+  r'^(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,8})?$',
+);
 final RegExp _decimalPartsPattern = RegExp(r'^([0-9]+)(?:\.([0-9]+))?$');
 final RegExp _datePattern = RegExp(r'^(\d{4})-(\d{2})-(\d{2})$');
 final RegExp _currencyPattern = RegExp(r'^[A-Z]{3}$');
@@ -917,6 +949,8 @@ const Set<String> _candidatePayloadKeys = <String>{
   'product',
   'variant',
   'quantity',
+  'quantityMinimum',
+  'quantityMaximum',
   'packText',
   'unitPrice',
   'lineTotal',

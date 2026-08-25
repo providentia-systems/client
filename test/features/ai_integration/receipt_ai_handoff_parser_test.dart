@@ -82,6 +82,7 @@ Map<String, Object?> _extraction() => <String, Object?>{
   'id': 'extract-1',
   'kind': 'receipt',
   'status': 'review_required',
+  'schemaVersion': 2,
   'result': <String, Object?>{
     'documentType': 'receipt',
     'merchant': 'Home Market',
@@ -108,6 +109,8 @@ Map<String, Object?> _extraction() => <String, Object?>{
         'product': 'Rice',
         'variant': null,
         'quantity': '2',
+        'quantityMinimum': null,
+        'quantityMaximum': null,
         'packText': '1 kg',
         'unitPrice': '12.99',
         'lineTotal': '25.98',

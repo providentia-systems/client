@@ -33,6 +33,10 @@ public tool digests; credentials and private keys must remain secrets.
 ### Shared
 
 - Variable `PRODUCTION_API_BASE_URL`: absolute HTTPS Laminas API origin.
+- Variable `PRODUCTION_HOMEOWNER_APP_LINK_BASE`: absolute HTTPS Flutter-client
+  route ending in `/homeowner`, without query or fragment. Every production
+  artifact compiles this same public boundary value; backend email delivery and
+  `E2E_HOMEOWNER_APP_LINK_BASE` must match it exactly.
 
 ### Android
 
@@ -105,10 +109,9 @@ desktop camera plugin is missing or has an unresolved native link dependency.
 - Variable `E2E_API_BASE_URL`: absolute HTTPS API origin. The legacy secret of
   the same name is accepted temporarily while deployments migrate it to a
   variable.
-- Variable `E2E_PUBLIC_BASE_URL`: the exact HTTPS backend origin configured as
-  `PUBLIC_BASE_URL`. The harness rejects approval links from every other
-  origin. The legacy secret of the same name is accepted temporarily while
-  deployments migrate it to a variable.
+- Variable `E2E_HOMEOWNER_APP_LINK_BASE`: the exact HTTPS route of the deployed
+  Flutter homeowner client configured in backend email delivery. The harness
+  rejects links for every other origin or path.
 - Secret `E2E_USER_EMAIL`: dedicated synthetic account address. Do not use a
   person's mailbox or an account with production household information.
 - Variable `E2E_MAILBOX_IMAP_HOST`
@@ -132,19 +135,21 @@ persistence checks without requesting another email, keeping a workflow retry
 inside the backend's five-attempt per-address window.
 
 Authenticated browser acceptance uses the production login-link protocol; it
-must never enable or call the development password-login route. For the
+must never enable or call the development password-login route, and it never
+opens an HTML route on the backend. For the
 authenticated Chrome entry the harness:
 
 1. generates a fresh request ID, installation ID, private polling token, PKCE
    verifier and state in memory;
-2. sends only the SHA-256 polling and PKCE challenges when starting the login
-   request;
+2. sends `applicationKind=homeowner` and only the SHA-256 polling and PKCE
+   challenges when starting the login request;
 3. reads the controlled mailbox over certificate-verified TLS IMAP and selects
    only a message addressed to the synthetic account that contains that exact
    request ID;
-4. opens the scanner-safe fragment link in a separate, isolated browser
-   context, confirms the request is still pending, and deliberately presses
-   **Approve login**;
+4. opens the scanner-safe fragment link in the deployed Flutter client in a
+   separate, isolated browser context, verifies its JSON proof and review calls,
+   confirms the request is still pending, and deliberately presses **Approve
+   login** through the app-owned page;
 5. verifies that the approval browser did not receive a session;
 6. polls and exchanges from the original PWA context, then verifies `/api/v1/me`,
    the authorized home list, current-session identity, 30-day web idle policy,
@@ -154,8 +159,8 @@ authenticated Chrome entry the harness:
 
 Mailbox and protocol waits are bounded. The workflow fails closed when the
 message is absent, malformed, delivered to another recipient, uses HTTP,
-comes from an origin other than `E2E_PUBLIC_BASE_URL`, places its capability in
-a query string, or refers to another request. The
+comes from a route other than `E2E_HOMEOWNER_APP_LINK_BASE`, places its
+capability in a query string, or refers to another request. The
 harness neither deletes mail nor writes mailbox contents, email addresses,
 approval URLs, poll tokens, PKCE values, CSRF proofs or session-cookie values
 to its JSON evidence. Known credentials and capability-shaped fragments are

@@ -24,11 +24,16 @@
       "clang",
       "cmake",
       "curl",
+      "dbus-x11",
+      "desktop-file-utils",
+      "dpkg-dev",
       "git",
       "gstreamer1.0-plugins-base",
       "gstreamer1.0-plugins-good",
       "libgstreamer1.0-dev",
       "libgstreamer-plugins-base1.0-dev",
+      "libegl1",
+      "libgles2",
       "libgtk-3-dev",
       "liblzma-dev",
       "libsecret-1-0",
@@ -37,7 +42,9 @@
       "ninja-build",
       "pkg-config",
       "unzip",
+      "xauth",
       "xz-utils",
+      "xvfb",
       "zip"
     ],
     "immutableRunner": {
@@ -50,7 +57,10 @@
         "clang",
         "cmake",
         "curl",
+        "dbus-run-session",
+        "dpkg-deb",
         "git",
+        "ldconfig",
         "ldd",
         "ninja",
         "node",
@@ -59,6 +69,7 @@
         "tar",
         "unzip",
         "xz",
+        "xvfb-run",
         "zip"
       ],
       "requiredPkgConfigModules": [
@@ -118,6 +129,8 @@
   ],
   "buildLanes": {
     "linuxAgent": "flutter build linux --release",
+    "linuxAgentPackage": "PROVIDENTIA_LINUX_PACKAGE_FORMATS=deb bash tool/release/package_linux.sh build/linux/x64/release/bundle 0.0.0-agent build/release/agent-linux",
+    "linuxAgentLaunchSmoke": "dbus-run-session -- env PROVIDENTIA_LINUX_LAUNCH_SMOKE=true bash tool/release/verify_linux_deb.sh build/release/agent-linux/providentia_0.0.0-agent_amd64.deb",
     "android": "flutter build appbundle --release",
     "web": "flutter build web --release",
     "nativeMatrix": ["ios", "linux", "macos", "windows"]
