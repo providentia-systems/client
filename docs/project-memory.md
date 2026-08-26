@@ -17,8 +17,8 @@
   authenticated web.
 - The permanent application/distribution identifier is
   `com.vastdevelopmentmethod.providentia`.
-- The project is proprietary. No distribution licence is selected yet and no
-  public redistribution permission is implied.
+- The project is proprietary. At this date no distribution licence had been
+  selected; the 2026-08-26 licensing decision below supersedes that deferral.
 - The preferred production backend database is MySQL.
 - Redis is the preferred production queue/cache profile. The shared
   Redis-compatible port and Valkey verification remain architecture safeguards.
@@ -90,3 +90,12 @@ launch. It does not reopen the owner-selected name.
 - Local Drift storage is not application-encrypted. Encryption and key
   lifecycle remain an explicit release decision and must not be claimed as a
   completed control.
+
+## Owner licensing decision — 2026-08-26
+
+- The earlier licensing deferral is superseded. Providentia is proprietary
+  software under `LicenseRef-Proprietary`, as stated in the root
+  [LICENSE](../LICENSE) file.
+- Copyright (c) 2026 Vast Development Method Trading Pty Ltd. All rights
+  reserved. No licence is granted except as expressly authorised in writing.
+  Viewing or forking the GitHub repository does not grant a licence.
