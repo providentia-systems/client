@@ -4,6 +4,8 @@ import 'package:providentia/features/ai_integration/domain/ai_models.dart';
 AiProviderProfile serverProvider({
   int revision = 1,
   AiProviderAvailability availability = AiProviderAvailability.available,
+  AiProfileOwnerScope ownerScope = AiProfileOwnerScope.private,
+  Uri? endpoint,
 }) => AiProviderProfile(
   id: 'provider-1',
   homeId: 'home-1',
@@ -11,6 +13,8 @@ AiProviderProfile serverProvider({
   kind: AiProviderKind.openAi,
   transport: AiTransport.serverProxy,
   protocol: AiEndpointProtocol.openAiResponses,
+  ownerScope: ownerScope,
+  endpoint: endpoint,
   model: 'gpt-5-mini',
   capabilities: <AiCapability>{
     AiCapability.vision,

@@ -91,6 +91,65 @@ final class HomesController extends ChangeNotifier {
     }
   }
 
+  Future<void> removeMembership(HomeMembership membership) async {
+    try {
+      await _manager.removeMembership(membership);
+    } on StateError catch (error) {
+      _localFailure(error.message.toString());
+    }
+  }
+
+  Future<StepUpLinkReceipt?> requestOwnershipTransferStepUp() async {
+    try {
+      return await _manager.requestOwnershipTransferStepUp();
+    } on StateError {
+      _localFailure('Select a home before transferring its ownership.');
+      return null;
+    }
+  }
+
+  Future<void> proposeOwnershipTransfer({
+    required HomeMembership target,
+    required String stepUpToken,
+  }) async {
+    try {
+      await _manager.proposeOwnershipTransfer(
+        target: target,
+        stepUpToken: stepUpToken,
+      );
+    } on ArgumentError {
+      _localFailure(
+        'Enter the complete confirmation code from the ownership email.',
+      );
+    } on StateError catch (error) {
+      _localFailure(error.message.toString());
+    }
+  }
+
+  Future<void> acceptOwnershipTransfer(HomeOwnershipTransfer transfer) async {
+    try {
+      await _manager.acceptOwnershipTransfer(transfer);
+    } on StateError catch (error) {
+      _localFailure(error.message.toString());
+    }
+  }
+
+  Future<void> rejectOwnershipTransfer(HomeOwnershipTransfer transfer) async {
+    try {
+      await _manager.rejectOwnershipTransfer(transfer);
+    } on StateError catch (error) {
+      _localFailure(error.message.toString());
+    }
+  }
+
+  Future<void> revokeOwnershipTransfer(HomeOwnershipTransfer transfer) async {
+    try {
+      await _manager.revokeOwnershipTransfer(transfer);
+    } on StateError catch (error) {
+      _localFailure(error.message.toString());
+    }
+  }
+
   Future<void> updateActiveHome({
     required String name,
     required String locale,

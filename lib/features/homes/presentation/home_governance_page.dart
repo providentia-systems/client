@@ -26,6 +26,7 @@ final class _HomeGovernancePageState extends State<HomeGovernancePage> {
 
   final TextEditingController _inviteEmail = TextEditingController();
   HomeRole _inviteRole = HomeRole.member;
+  String? _transferTargetUserId;
 
   @override
   void initState() {
@@ -59,6 +60,12 @@ final class _HomeGovernancePageState extends State<HomeGovernancePage> {
           final canManagePolicies = permissions.contains(
             HomePermissions.permissionsManage,
           );
+          final canTransferOwnership = permissions.contains(
+            HomePermissions.ownershipTransfer,
+          );
+          final ownershipOffers = snapshot.ownershipTransfers
+              .where((transfer) => transfer.isOfferedTo(widget.currentUserId))
+              .toList(growable: false);
           return RefreshIndicator(
             onRefresh: widget.controller.refreshGovernance,
             child: ListView(
@@ -88,6 +95,16 @@ final class _HomeGovernancePageState extends State<HomeGovernancePage> {
                     key: const Key('governance-message'),
                   ),
                 ],
+                if (ownershipOffers.isNotEmpty) ...<Widget>[
+                  const SizedBox(height: 24),
+                  Text(
+                    'Ownership transfer for you',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  ...ownershipOffers.map(
+                    (transfer) => _ownershipOffer(transfer, home),
+                  ),
+                ],
                 if (snapshot.pendingInvitations.isNotEmpty) ...<Widget>[
                   const SizedBox(height: 24),
                   Text(
@@ -107,6 +124,7 @@ final class _HomeGovernancePageState extends State<HomeGovernancePage> {
                   ...snapshot.memberships.map(
                     (membership) => _membership(
                       membership,
+                      home: home,
                       canManageMembers: canManageMembers,
                     ),
                   ),
@@ -182,6 +200,7 @@ final class _HomeGovernancePageState extends State<HomeGovernancePage> {
                   ),
                   ...snapshot.permissionPolicies.map(_policy),
                 ],
+                if (canTransferOwnership) ..._ownershipSection(snapshot),
                 if (home.role != HomeRole.owner) ...<Widget>[
                   const SizedBox(height: 32),
                   OutlinedButton.icon(
@@ -215,8 +234,11 @@ final class _HomeGovernancePageState extends State<HomeGovernancePage> {
 
   Widget _membership(
     HomeMembership membership, {
+    required HomeSummary home,
     required bool canManageMembers,
   }) {
+    // The caller's own row ends through Leave and the owner row changes only
+    // through an accepted ownership transfer, so neither is editable here.
     final editable =
         canManageMembers &&
         membership.role != HomeRole.owner &&
@@ -232,35 +254,283 @@ final class _HomeGovernancePageState extends State<HomeGovernancePage> {
         title: Text(membership.displayName),
         subtitle: Text(membership.email ?? membership.role.name),
         trailing: editable
-            ? DropdownButton<HomeRole>(
-                value: membership.role,
-                items:
-                    const <HomeRole>[
-                          HomeRole.manager,
-                          HomeRole.member,
-                          HomeRole.viewer,
-                        ]
-                        .map(
-                          (role) => DropdownMenuItem<HomeRole>(
-                            value: role,
-                            child: Text(role.name),
+            ? Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  DropdownButton<HomeRole>(
+                    value: membership.role,
+                    items:
+                        const <HomeRole>[
+                              HomeRole.manager,
+                              HomeRole.member,
+                              HomeRole.viewer,
+                            ]
+                            .map(
+                              (role) => DropdownMenuItem<HomeRole>(
+                                value: role,
+                                child: Text(role.name),
+                              ),
+                            )
+                            .toList(growable: false),
+                    onChanged: (role) {
+                      if (role != null) {
+                        unawaited(
+                          widget.controller.changeMembershipRole(
+                            membership: membership,
+                            role: role,
                           ),
-                        )
-                        .toList(growable: false),
-                onChanged: (role) {
-                  if (role != null) {
-                    unawaited(
-                      widget.controller.changeMembershipRole(
-                        membership: membership,
-                        role: role,
-                      ),
-                    );
-                  }
-                },
+                        );
+                      }
+                    },
+                  ),
+                  IconButton(
+                    key: Key('remove-home-membership-${membership.userId}'),
+                    tooltip: 'Remove ${membership.displayName}',
+                    onPressed: () =>
+                        unawaited(_confirmRemoval(membership, home)),
+                    icon: const Icon(Icons.person_remove_outlined),
+                  ),
+                ],
               )
             : Chip(label: Text(membership.role.name)),
       ),
     );
+  }
+
+  Future<void> _confirmRemoval(
+    HomeMembership membership,
+    HomeSummary home,
+  ) async {
+    final removed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Remove ${membership.displayName}?'),
+        content: Text(
+          'This immediately ends the ${membership.role.name} access of '
+          '${membership.displayName} to ${home.name}. They can only return '
+          'through a new invitation.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const Key('confirm-remove-membership'),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (removed ?? false) {
+      await widget.controller.removeMembership(membership);
+    }
+  }
+
+  Widget _ownershipOffer(HomeOwnershipTransfer transfer, HomeSummary home) =>
+      Card(
+        color: Theme.of(context).colorScheme.secondaryContainer,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            key: Key('ownership-transfer-offer-${transfer.id}'),
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                'Become the owner of ${home.name}?',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'The current owner proposed transferring ownership to you. '
+                'Accepting makes you responsible for this home immediately.',
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 12,
+                runSpacing: 8,
+                children: <Widget>[
+                  FilledButton(
+                    key: Key('accept-ownership-transfer-${transfer.id}'),
+                    onPressed: () => unawaited(
+                      widget.controller.acceptOwnershipTransfer(transfer),
+                    ),
+                    child: const Text('Accept ownership'),
+                  ),
+                  OutlinedButton(
+                    key: Key('reject-ownership-transfer-${transfer.id}'),
+                    onPressed: () => unawaited(
+                      widget.controller.rejectOwnershipTransfer(transfer),
+                    ),
+                    child: const Text('Reject'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      );
+
+  List<Widget> _ownershipSection(HomeSessionSnapshot snapshot) {
+    final eligible = snapshot.memberships
+        .where(
+          (membership) =>
+              membership.isActive &&
+              membership.role != HomeRole.owner &&
+              membership.userId != widget.currentUserId,
+        )
+        .toList(growable: false);
+    final pendingTransfers = snapshot.ownershipTransfers
+        .where((transfer) => transfer.isPending)
+        .toList(growable: false);
+    final selectedTargetId =
+        eligible.any((membership) => membership.userId == _transferTargetUserId)
+        ? _transferTargetUserId
+        : null;
+    return <Widget>[
+      const SizedBox(height: 24),
+      Text('Ownership', style: Theme.of(context).textTheme.titleLarge),
+      const Text(
+        'Ownership changes only after the proposed member accepts an '
+        'email-confirmed transfer proposal.',
+      ),
+      ...pendingTransfers.map(
+        (transfer) => _pendingTransfer(transfer, snapshot.memberships),
+      ),
+      if (eligible.isEmpty)
+        const Padding(
+          padding: EdgeInsets.only(top: 10),
+          child: Text('Invite another member before transferring ownership.'),
+        )
+      else ...<Widget>[
+        const SizedBox(height: 10),
+        DropdownButton<String>(
+          key: const Key('ownership-transfer-target'),
+          isExpanded: true,
+          value: selectedTargetId,
+          hint: const Text('Choose the proposed new owner'),
+          items: eligible
+              .map(
+                (membership) => DropdownMenuItem<String>(
+                  value: membership.userId,
+                  child: Text(
+                    '${membership.displayName} · ${membership.role.name}',
+                  ),
+                ),
+              )
+              .toList(growable: false),
+          onChanged: (userId) => setState(() => _transferTargetUserId = userId),
+        ),
+        const SizedBox(height: 10),
+        FilledButton.icon(
+          key: const Key('propose-ownership-transfer'),
+          onPressed: selectedTargetId == null
+              ? null
+              : () => unawaited(
+                  _proposeOwnership(
+                    eligible.firstWhere(
+                      (membership) => membership.userId == selectedTargetId,
+                    ),
+                  ),
+                ),
+          icon: const Icon(Icons.swap_horiz_rounded),
+          label: const Text('Propose ownership transfer'),
+        ),
+      ],
+    ];
+  }
+
+  Widget _pendingTransfer(
+    HomeOwnershipTransfer transfer,
+    List<HomeMembership> memberships,
+  ) => Card(
+    child: ListTile(
+      key: Key('ownership-transfer-${transfer.id}'),
+      leading: const Icon(Icons.swap_horiz_rounded),
+      title: Text(
+        'Proposed to ${_memberName(transfer.targetUserId, memberships)}',
+      ),
+      subtitle: Text(
+        '${transfer.status.name} · expires '
+        '${DateFormat.yMMMd().format(transfer.expiresAt.toLocal())}',
+      ),
+      trailing: IconButton(
+        key: Key('revoke-ownership-transfer-${transfer.id}'),
+        tooltip: 'Revoke ownership transfer',
+        onPressed: () =>
+            unawaited(widget.controller.revokeOwnershipTransfer(transfer)),
+        icon: const Icon(Icons.cancel_outlined),
+      ),
+    ),
+  );
+
+  String _memberName(String userId, List<HomeMembership> memberships) {
+    for (final membership in memberships) {
+      if (membership.userId == userId) {
+        return membership.displayName;
+      }
+    }
+    return 'Household member';
+  }
+
+  /// Requests the step-up confirmation email, asks the person to open it and
+  /// paste the single-use code, then proposes the transfer with the target's
+  /// expected membership revision. Development profiles prefill the code.
+  Future<void> _proposeOwnership(HomeMembership target) async {
+    final receipt = await widget.controller.requestOwnershipTransferStepUp();
+    if (receipt == null || !mounted) {
+      return;
+    }
+    final token = TextEditingController(
+      text: receipt.developmentStepUpToken ?? '',
+    );
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirm ownership transfer'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              'We emailed you a single-use confirmation code. Open the email '
+              'and paste the code here to propose transferring ownership of '
+              'this home to ${target.displayName}. Ownership only changes '
+              'after they accept.',
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              key: const Key('ownership-step-up-token'),
+              controller: token,
+              decoration: const InputDecoration(
+                labelText: 'Confirmation code',
+                prefixIcon: Icon(Icons.mark_email_read_outlined),
+              ),
+            ),
+          ],
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const Key('confirm-ownership-transfer'),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Propose transfer'),
+          ),
+        ],
+      ),
+    );
+    final code = token.text;
+    token.dispose();
+    if (confirmed ?? false) {
+      await widget.controller.proposeOwnershipTransfer(
+        target: target,
+        stepUpToken: code,
+      );
+    }
   }
 
   Widget _sentInvitation(HomeInvitation invitation) => Card(

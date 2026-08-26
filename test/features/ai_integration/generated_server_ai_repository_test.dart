@@ -179,6 +179,260 @@ void main() {
     },
   );
 
+  test('owner scope and profile endpoints round-trip on load', () async {
+    final repository = GeneratedServerAiRepository(
+      _client((request) async {
+        return switch (request.url.path.split('/').last) {
+          'settings' => _json(_settings()),
+          'profiles' => _json(<String, Object?>{
+            'items': <Object?>[
+              _profile(id: 'profile-1'),
+              _profile(
+                id: 'profile-2',
+                provider: 'openai-compatible',
+                ownerScope: 'home',
+                endpoint: 'https://ai.example.test/v1',
+              ),
+              _profile(
+                id: 'profile-3',
+                provider: 'ollama',
+                endpoint: 'http://192.168.1.20:11434',
+              ),
+            ],
+          }),
+          'policy' => _json(
+            _policy(extractionIds: const <String>['profile-1']),
+          ),
+          _ => throw StateError('Unexpected ${request.url.path}'),
+        };
+      }),
+    );
+
+    final workspace = await repository.loadWorkspace(homeId: 'home-1');
+
+    expect(workspace.profiles[0].ownerScope, AiProfileOwnerScope.private);
+    expect(workspace.profiles[0].endpoint, isNull);
+    expect(workspace.profiles[1].ownerScope, AiProfileOwnerScope.home);
+    expect(
+      workspace.profiles[1].endpoint,
+      Uri.parse('https://ai.example.test/v1'),
+    );
+    expect(workspace.profiles[2].ownerScope, AiProfileOwnerScope.private);
+    expect(
+      workspace.profiles[2].endpoint,
+      Uri.parse('http://192.168.1.20:11434'),
+    );
+  });
+
+  for (final (name, profile) in <(String, Map<String, Object?>)>[
+    ('missing owner scope', _profile()..remove('ownerScope')),
+    ('unknown owner scope', _profile(ownerScope: 'shared')),
+    ('missing endpoint key', _profile()..remove('endpoint')),
+    (
+      'endpoint on a fixed-endpoint provider',
+      _profile(endpoint: 'https://ai.example.test/v1'),
+    ),
+    (
+      'plain HTTP endpoint outside ollama',
+      _profile(
+        provider: 'openai-compatible',
+        endpoint: 'http://ai.example.test/v1',
+      ),
+    ),
+    (
+      'relative endpoint',
+      _profile(provider: 'openai-compatible', endpoint: 'ai.example.test'),
+    ),
+    (
+      'oversized endpoint',
+      _profile(
+        provider: 'openai-compatible',
+        endpoint: 'https://ai.example.test/${'a' * 300}',
+      ),
+    ),
+  ]) {
+    test('$name in a profile listing fails closed', () async {
+      final repository = GeneratedServerAiRepository(
+        _client((request) async {
+          return switch (request.url.path.split('/').last) {
+            'settings' => _json(_settings()),
+            'profiles' => _json(<String, Object?>{
+              'items': <Object?>[profile],
+            }),
+            'policy' => _json(_policy()),
+            _ => throw StateError('Unexpected ${request.url.path}'),
+          };
+        }),
+      );
+
+      await expectLater(
+        repository.loadWorkspace(homeId: 'home-1'),
+        throwsA(
+          isA<AiServerException>().having(
+            (error) => error.kind,
+            'kind',
+            AiServerFailureKind.invalidResponse,
+          ),
+        ),
+      );
+    });
+  }
+
+  test('profile save submits owner scope and endpoint verbatim', () async {
+    final requests = <http.Request>[];
+    final repository = GeneratedServerAiRepository(
+      _client((request) async {
+        requests.add(request);
+        return _json(
+          _profile(
+            id: 'profile-new',
+            provider: 'openai-compatible',
+            revision: 1,
+            ownerScope: 'home',
+            endpoint: 'https://ai.example.test/v1',
+          ),
+          statusCode: 201,
+        );
+      }),
+    );
+
+    final profile = await repository.saveProviderProfile(
+      homeId: 'home-1',
+      draft: const AiProviderProfileDraft(
+        id: null,
+        label: 'Receipt extractor',
+        provider: 'openai-compatible',
+        model: 'gpt-5-mini',
+        estimatedCostMicros: 2500,
+        expectedRevision: 0,
+        ownerScope: AiProfileOwnerScope.home,
+        endpoint: 'https://ai.example.test/v1',
+      ),
+    );
+
+    final body = jsonDecode(requests.single.body) as Map<String, Object?>;
+    expect(body['ownerScope'], 'home');
+    expect(body['endpoint'], 'https://ai.example.test/v1');
+    expect(body.containsKey('credential'), isFalse);
+    expect(profile.ownerScope, AiProfileOwnerScope.home);
+    expect(profile.endpoint, Uri.parse('https://ai.example.test/v1'));
+  });
+
+  test(
+    'profile save defaults to a private scope without an endpoint',
+    () async {
+      final requests = <http.Request>[];
+      final repository = GeneratedServerAiRepository(
+        _client((request) async {
+          requests.add(request);
+          return _json(
+            _profile(id: 'profile-new', revision: 1),
+            statusCode: 201,
+          );
+        }),
+      );
+
+      final profile = await repository.saveProviderProfile(
+        homeId: 'home-1',
+        draft: const AiProviderProfileDraft(
+          id: null,
+          label: 'Receipt extractor',
+          provider: 'openai',
+          model: 'gpt-5-mini',
+          estimatedCostMicros: 2500,
+          expectedRevision: 0,
+        ),
+      );
+
+      final body = jsonDecode(requests.single.body) as Map<String, Object?>;
+      expect(body['ownerScope'], 'private');
+      expect(body.containsKey('endpoint'), isFalse);
+      expect(profile.ownerScope, AiProfileOwnerScope.private);
+      expect(profile.endpoint, isNull);
+    },
+  );
+
+  test('a scope-mangling profile echo fails closed', () async {
+    final repository = GeneratedServerAiRepository(
+      _client(
+        (_) async => _json(
+          _profile(id: 'profile-new', revision: 1, ownerScope: 'private'),
+          statusCode: 201,
+        ),
+      ),
+    );
+
+    await expectLater(
+      repository.saveProviderProfile(
+        homeId: 'home-1',
+        draft: const AiProviderProfileDraft(
+          id: null,
+          label: 'Receipt extractor',
+          provider: 'openai',
+          model: 'gpt-5-mini',
+          estimatedCostMicros: 2500,
+          expectedRevision: 0,
+          ownerScope: AiProfileOwnerScope.home,
+        ),
+      ),
+      throwsA(
+        isA<AiServerException>().having(
+          (error) => error.kind,
+          'kind',
+          AiServerFailureKind.invalidResponse,
+        ),
+      ),
+    );
+  });
+
+  for (final (name, provider, endpoint) in <(String, String, String)>[
+    ('a fixed-endpoint provider', 'openai', 'https://ai.example.test/v1'),
+    (
+      'plain HTTP outside ollama',
+      'openai-compatible',
+      'http://ai.example.test',
+    ),
+    ('a relative URL', 'openai-compatible', 'ai.example.test/v1'),
+    (
+      'an oversized URL',
+      'openai-compatible',
+      'https://ai.example.test/${'a' * 300}',
+    ),
+  ]) {
+    test('an endpoint draft for $name never leaves the device', () async {
+      var requested = false;
+      final repository = GeneratedServerAiRepository(
+        _client((_) async {
+          requested = true;
+          return _json(_profile());
+        }),
+      );
+
+      await expectLater(
+        repository.saveProviderProfile(
+          homeId: 'home-1',
+          draft: AiProviderProfileDraft(
+            id: null,
+            label: 'Receipt extractor',
+            provider: provider,
+            model: 'gpt-5-mini',
+            estimatedCostMicros: 2500,
+            expectedRevision: 0,
+            endpoint: endpoint,
+          ),
+        ),
+        throwsA(
+          isA<AiServerException>().having(
+            (error) => error.kind,
+            'kind',
+            AiServerFailureKind.validation,
+          ),
+        ),
+      );
+      expect(requested, isFalse);
+    });
+  }
+
   test('settings update verifies the write and refresh revisions', () async {
     final requests = <http.Request>[];
     final repository = GeneratedServerAiRepository(
@@ -473,11 +727,15 @@ Map<String, Object?> _profile({
   String id = 'profile-new',
   String provider = 'openai',
   int revision = 3,
+  String ownerScope = 'private',
+  String? endpoint,
 }) => <String, Object?>{
   'id': id,
   'label': 'Receipt extractor',
   'provider': provider,
   'model': 'gpt-5-mini',
+  'ownerScope': ownerScope,
+  'endpoint': endpoint,
   'credentialConfigured': true,
   'lastFour': '3456',
   'estimatedCostMicros': 2500,

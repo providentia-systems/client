@@ -1796,7 +1796,384 @@ void main() {
       expect(repository.inventoryOrPurchaseMutationCalls, 0);
     });
   });
+
+  group('person-scoped BYOK profiles', () {
+    test('sharing capability requires both manage and the owner role', () {
+      expect(
+        AiHomeCapabilities.fromPermissions(
+          homeId: 'home-1',
+          permissions: const <String>{'ai.read', 'ai.manage'},
+        ).mayShareHomeProfiles,
+        isFalse,
+      );
+      expect(
+        AiHomeCapabilities.fromPermissions(
+          homeId: 'home-1',
+          permissions: const <String>{'ai.read', 'ownership.transfer'},
+        ).mayShareHomeProfiles,
+        isFalse,
+      );
+      expect(
+        AiHomeCapabilities.fromPermissions(
+          homeId: 'home-1',
+          permissions: const <String>{
+            'ai.read',
+            'ai.manage',
+            'ownership.transfer',
+          },
+        ).mayShareHomeProfiles,
+        isTrue,
+      );
+    });
+
+    test('home-scope sharing is refused without the owner role', () async {
+      final repository = _ServerRepository(_workspace());
+      final controller = _controller(repository: repository);
+      addTearDown(controller.dispose);
+      await controller.load();
+
+      await controller.saveProviderProfile(
+        draft: const AiProviderProfileDraft(
+          id: null,
+          label: 'Shared profile',
+          provider: 'openai',
+          model: 'gpt-5-mini',
+          estimatedCostMicros: 0,
+          expectedRevision: 0,
+          ownerScope: AiProfileOwnerScope.home,
+        ),
+      );
+
+      expect(controller.status, ServerAiWorkspaceStatus.failed);
+      expect(controller.safeMessage, contains('home owner'));
+      expect(repository.saveProfileCalls, 0);
+    });
+
+    test('the home owner may deliberately share a profile', () async {
+      final repository = _ServerRepository(_workspace());
+      final controller = _controller(
+        repository: repository,
+        capabilities: _ownerCapabilities(),
+      );
+      addTearDown(controller.dispose);
+      await controller.load();
+
+      await controller.saveProviderProfile(
+        draft: const AiProviderProfileDraft(
+          id: null,
+          label: 'Shared profile',
+          provider: 'openai-compatible',
+          model: 'gpt-5-mini',
+          estimatedCostMicros: 0,
+          expectedRevision: 0,
+          ownerScope: AiProfileOwnerScope.home,
+          endpoint: 'https://ai.example.test/v1',
+        ),
+      );
+
+      expect(repository.saveProfileCalls, 1);
+      expect(repository.lastProfileDraft?.ownerScope, AiProfileOwnerScope.home);
+      expect(
+        repository.lastProfileDraft?.endpoint,
+        'https://ai.example.test/v1',
+      );
+      expect(controller.status, ServerAiWorkspaceStatus.ready);
+    });
+
+    testWidgets('scope badges distinguish private and home profiles', (
+      tester,
+    ) async {
+      final repository = _ServerRepository(
+        _workspace(
+          profiles: <AiProviderProfile>[
+            serverProvider(),
+            _secondServerProvider().copyWith(
+              ownerScope: AiProfileOwnerScope.home,
+            ),
+          ],
+        ),
+      );
+      final controller = _controller(repository: repository);
+      addTearDown(controller.dispose);
+      await controller.load();
+      await _pumpPage(tester, controller);
+
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('ai-profile-scope-provider-1')),
+          matching: find.text('Private to me'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('ai-profile-scope-provider-2')),
+          matching: find.text('Shared with this home'),
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('the shared-scope choice stays owner-gated in the dialog', (
+      tester,
+    ) async {
+      final repository = _ServerRepository(_workspace());
+      final controller = _controller(repository: repository);
+      addTearDown(controller.dispose);
+      await controller.load();
+      await _pumpPage(tester, controller);
+
+      await _scrollTo(tester, const Key('ai-add-profile'));
+      await tester.tap(find.byKey(const Key('ai-add-profile')));
+      await tester.pumpAndSettle();
+      final homeTile = tester.widget<RadioListTile<AiProfileOwnerScope>>(
+        find.byKey(const Key('ai-profile-scope-home')),
+      );
+      expect(homeTile.enabled, isFalse);
+      expect(
+        find.text('Only the home owner can share a profile with this home.'),
+        findsOneWidget,
+      );
+      await tester.enterText(
+        find.byKey(const Key('ai-profile-label-field')),
+        'Personal profile',
+      );
+      await tester.enterText(
+        find.byKey(const Key('ai-profile-model-field')),
+        'gpt-5-mini',
+      );
+      await tester.tap(find.byKey(const Key('ai-create-profile')));
+      await tester.pumpAndSettle();
+      expect(
+        repository.lastProfileDraft?.ownerScope,
+        AiProfileOwnerScope.private,
+      );
+    });
+
+    testWidgets('the owner may pick the shared scope in the dialog', (
+      tester,
+    ) async {
+      final repository = _ServerRepository(_workspace());
+      final controller = _controller(
+        repository: repository,
+        capabilities: _ownerCapabilities(),
+      );
+      addTearDown(controller.dispose);
+      await controller.load();
+      await _pumpPage(tester, controller);
+
+      await _scrollTo(tester, const Key('ai-add-profile'));
+      await tester.tap(find.byKey(const Key('ai-add-profile')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('explicit home-owner choice'), findsOneWidget);
+      await tester.enterText(
+        find.byKey(const Key('ai-profile-label-field')),
+        'Household profile',
+      );
+      await tester.enterText(
+        find.byKey(const Key('ai-profile-model-field')),
+        'gpt-5-mini',
+      );
+      await tester.ensureVisible(
+        find.byKey(const Key('ai-profile-scope-home')),
+      );
+      await tester.tap(find.byKey(const Key('ai-profile-scope-home')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('ai-create-profile')));
+      await tester.pumpAndSettle();
+      expect(repository.lastProfileDraft?.ownerScope, AiProfileOwnerScope.home);
+    });
+
+    testWidgets('the endpoint field is provider-gated and validated', (
+      tester,
+    ) async {
+      final repository = _ServerRepository(_workspace());
+      final controller = _controller(repository: repository);
+      addTearDown(controller.dispose);
+      await controller.load();
+      await _pumpPage(tester, controller);
+
+      await _scrollTo(tester, const Key('ai-add-profile'));
+      await tester.tap(find.byKey(const Key('ai-add-profile')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('ai-profile-endpoint-field')), findsNothing);
+
+      await tester.tap(find.byType(DropdownButtonFormField<String>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('OpenAI-compatible').last);
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('ai-profile-endpoint-field')),
+        findsOneWidget,
+      );
+      expect(find.textContaining('deployment opt-in'), findsOneWidget);
+
+      await tester.enterText(
+        find.byKey(const Key('ai-profile-label-field')),
+        'Compatible profile',
+      );
+      await tester.enterText(
+        find.byKey(const Key('ai-profile-model-field')),
+        'compat-model',
+      );
+      await tester.enterText(
+        find.byKey(const Key('ai-profile-endpoint-field')),
+        'http://ai.example.test/v1',
+      );
+      await tester.tap(find.byKey(const Key('ai-create-profile')));
+      await tester.pumpAndSettle();
+      expect(find.text('The endpoint must use HTTPS.'), findsOneWidget);
+      expect(repository.saveProfileCalls, 0);
+
+      await tester.enterText(
+        find.byKey(const Key('ai-profile-endpoint-field')),
+        'https://ai.example.test/v1',
+      );
+      await tester.tap(find.byKey(const Key('ai-create-profile')));
+      await tester.pumpAndSettle();
+      expect(repository.saveProfileCalls, 1);
+      expect(
+        repository.lastProfileDraft?.endpoint,
+        'https://ai.example.test/v1',
+      );
+    });
+
+    testWidgets('an ollama endpoint may use a local-network address', (
+      tester,
+    ) async {
+      final repository = _ServerRepository(_workspace());
+      final controller = _controller(repository: repository);
+      addTearDown(controller.dispose);
+      await controller.load();
+      await _pumpPage(tester, controller);
+
+      await _scrollTo(tester, const Key('ai-add-profile'));
+      await tester.tap(find.byKey(const Key('ai-add-profile')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(DropdownButtonFormField<String>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Ollama').last);
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('ai-profile-label-field')),
+        'Kitchen Ollama',
+      );
+      await tester.enterText(
+        find.byKey(const Key('ai-profile-model-field')),
+        'gemma3',
+      );
+      await tester.enterText(
+        find.byKey(const Key('ai-profile-endpoint-field')),
+        'http://192.168.1.20:11434',
+      );
+      await tester.tap(find.byKey(const Key('ai-create-profile')));
+      await tester.pumpAndSettle();
+
+      expect(repository.saveProfileCalls, 1);
+      expect(repository.lastProfileDraft?.provider, 'ollama');
+      expect(
+        repository.lastProfileDraft?.endpoint,
+        'http://192.168.1.20:11434',
+      );
+    });
+
+    testWidgets('editing keeps identity and warns about credential loss', (
+      tester,
+    ) async {
+      final repository = _ServerRepository(
+        _workspace(
+          profiles: <AiProviderProfile>[
+            serverProvider(ownerScope: AiProfileOwnerScope.home),
+          ],
+        ),
+      );
+      final controller = _controller(
+        repository: repository,
+        capabilities: _ownerCapabilities(),
+      );
+      addTearDown(controller.dispose);
+      await controller.load();
+      await _pumpPage(tester, controller);
+
+      await _scrollTo(tester, const Key('ai-edit-profile'));
+      await tester.tap(find.byKey(const Key('ai-edit-profile')));
+      await tester.pumpAndSettle();
+      expect(find.text('Edit provider profile'), findsOneWidget);
+      expect(
+        find.byKey(const Key('ai-profile-credential-clear-note')),
+        findsOneWidget,
+      );
+      expect(find.text('OpenAI via Providentia'), findsWidgets);
+      await tester.tap(find.byKey(const Key('ai-save-profile')));
+      await tester.pumpAndSettle();
+
+      expect(repository.lastProfileDraft?.id, 'provider-1');
+      expect(repository.lastProfileDraft?.expectedRevision, 1);
+      expect(repository.lastProfileDraft?.ownerScope, AiProfileOwnerScope.home);
+      expect(repository.lastCredential, isNull);
+    });
+
+    testWidgets('credential replacement preserves scope and endpoint', (
+      tester,
+    ) async {
+      final shared = AiProviderProfile(
+        id: 'provider-1',
+        homeId: 'home-1',
+        displayName: 'Household compatible',
+        kind: AiProviderKind.openAiCompatible,
+        transport: AiTransport.serverProxy,
+        protocol: AiEndpointProtocol.openAiChatCompletions,
+        ownerScope: AiProfileOwnerScope.home,
+        endpoint: Uri.parse('https://ai.example.test/v1'),
+        model: 'compat-model',
+        capabilities: const <AiCapability>{
+          AiCapability.vision,
+          AiCapability.strictJsonSchema,
+        },
+        availability: AiProviderAvailability.available,
+        credentialConfigured: true,
+        revision: 2,
+      );
+      final repository = _ServerRepository(
+        _workspace(profiles: <AiProviderProfile>[shared]),
+      );
+      final controller = _controller(
+        repository: repository,
+        capabilities: _ownerCapabilities(),
+      );
+      addTearDown(controller.dispose);
+      await controller.load();
+      await _pumpPage(tester, controller);
+
+      await _scrollTo(tester, const Key('ai-replace-credential'));
+      await tester.tap(find.byKey(const Key('ai-replace-credential')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('ai-credential-field')),
+        'rotated-write-only-secret',
+      );
+      await tester.tap(find.byKey(const Key('ai-submit-credential')));
+      await tester.pumpAndSettle();
+
+      expect(repository.lastProfileDraft?.ownerScope, AiProfileOwnerScope.home);
+      expect(
+        repository.lastProfileDraft?.endpoint,
+        'https://ai.example.test/v1',
+      );
+      expect(repository.lastCredential, 'rotated-write-only-secret');
+    });
+  });
 }
+
+AiHomeCapabilities _ownerCapabilities() => AiHomeCapabilities.fromPermissions(
+  homeId: 'home-1',
+  permissions: const <String>{
+    'ai.read',
+    'ai.use',
+    'ai.manage',
+    'ownership.transfer',
+  },
+);
 
 final Uint8List _transparentPixel = base64Decode(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',

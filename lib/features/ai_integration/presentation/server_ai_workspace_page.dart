@@ -191,8 +191,20 @@ final class _ServerAiWorkspacePageState extends State<ServerAiWorkspacePage> {
                     value: profile.id,
                     enabled: !controller.isBusy,
                     title: Text(profile.displayName),
-                    subtitle: Text(
-                      '${profile.providerWireId} · ${profile.model} · revision ${profile.revision}',
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          '${profile.providerWireId} · ${profile.model} · revision ${profile.revision}',
+                        ),
+                        if (profile.endpoint != null)
+                          Text(
+                            'Endpoint: ${profile.endpoint}',
+                            key: Key('ai-profile-endpoint-${profile.id}'),
+                          ),
+                        const SizedBox(height: 4),
+                        Row(children: <Widget>[_ProfileScopeBadge(profile)]),
+                      ],
                     ),
                     secondary: Icon(
                       profile.credentialConfigured
@@ -216,6 +228,14 @@ final class _ServerAiWorkspacePageState extends State<ServerAiWorkspacePage> {
                     : () => _showProfileDialog(context),
                 icon: const Icon(Icons.add),
                 label: const Text('Add provider'),
+              ),
+              OutlinedButton.icon(
+                key: const Key('ai-edit-profile'),
+                onPressed: selected == null || controller.isBusy
+                    ? null
+                    : () => _showProfileDialog(context, profile: selected),
+                icon: const Icon(Icons.edit_outlined),
+                label: const Text('Edit profile'),
               ),
               OutlinedButton.icon(
                 key: const Key('ai-replace-credential'),
@@ -713,16 +733,25 @@ final class _ServerAiWorkspacePageState extends State<ServerAiWorkspacePage> {
         model: profile.model,
         estimatedCostMicros: profile.estimatedCostMicros,
         expectedRevision: profile.revision,
+        ownerScope: profile.ownerScope,
+        endpoint: profile.endpoint?.toString(),
       ),
       credential: secret,
     );
   }
 
-  Future<void> _showProfileDialog(BuildContext context) async {
+  Future<void> _showProfileDialog(
+    BuildContext context, {
+    AiProviderProfile? profile,
+  }) async {
     final draft =
         await showDialog<({AiProviderProfileDraft draft, String secret})>(
           context: context,
-          builder: (context) => const _ProviderProfileDialog(),
+          builder: (context) => _ProviderProfileDialog(
+            profile: profile,
+            mayShareWithHome:
+                widget.controller.capabilities.mayShareHomeProfiles,
+          ),
         );
     if (!mounted || draft == null) return;
     await widget.controller.saveProviderProfile(
@@ -797,34 +826,105 @@ final class _CredentialDialogState extends State<_CredentialDialog> {
 }
 
 final class _ProviderProfileDialog extends StatefulWidget {
-  const _ProviderProfileDialog();
+  const _ProviderProfileDialog({required this.mayShareWithHome, this.profile});
+
+  /// Sharing with the home is an explicit owner choice from the decision
+  /// record; managers may only keep profiles private to themselves.
+  final bool mayShareWithHome;
+
+  /// Null creates a new profile; otherwise the dialog edits this profile.
+  final AiProviderProfile? profile;
 
   @override
   State<_ProviderProfileDialog> createState() => _ProviderProfileDialogState();
 }
 
 final class _ProviderProfileDialogState extends State<_ProviderProfileDialog> {
-  final TextEditingController _label = TextEditingController();
-  final TextEditingController _model = TextEditingController();
+  late final TextEditingController _label;
+  late final TextEditingController _model;
+  late final TextEditingController _endpoint;
   final TextEditingController _credential = TextEditingController();
-  String _provider = 'openai';
+  late String _provider;
+  late AiProfileOwnerScope _scope;
+  String? _endpointError;
+
+  bool get _editing => widget.profile != null;
+
+  bool get _providerSupportsEndpoint =>
+      _provider == 'openai-compatible' || _provider == 'ollama';
+
+  @override
+  void initState() {
+    super.initState();
+    final profile = widget.profile;
+    _label = TextEditingController(text: profile?.displayName ?? '');
+    _model = TextEditingController(text: profile?.model ?? '');
+    _endpoint = TextEditingController(
+      text: profile?.endpoint?.toString() ?? '',
+    );
+    _provider = profile?.providerWireId ?? 'openai';
+    _scope = profile?.ownerScope ?? AiProfileOwnerScope.private;
+  }
 
   @override
   void dispose() {
     _credential.clear();
     _label.dispose();
     _model.dispose();
+    _endpoint.dispose();
     _credential.dispose();
     super.dispose();
+  }
+
+  String? _validateEndpoint(String endpoint) {
+    if (endpoint.isEmpty) return null;
+    if (endpoint.length > 300) {
+      return 'Use at most 300 characters.';
+    }
+    final parsed = Uri.tryParse(endpoint);
+    if (parsed == null || !parsed.isAbsolute || parsed.host.isEmpty) {
+      return 'Enter an absolute URL such as https://ai.example.test.';
+    }
+    if (parsed.scheme != 'https' &&
+        !(_provider == 'ollama' && parsed.scheme == 'http')) {
+      return 'The endpoint must use HTTPS.';
+    }
+    return null;
+  }
+
+  void _submit() {
+    final endpoint = _providerSupportsEndpoint ? _endpoint.text.trim() : '';
+    final endpointError = _validateEndpoint(endpoint);
+    if (endpointError != null) {
+      setState(() => _endpointError = endpointError);
+      return;
+    }
+    final secret = _credential.text;
+    _credential.clear();
+    final profile = widget.profile;
+    Navigator.pop(context, (
+      draft: AiProviderProfileDraft(
+        id: profile?.id,
+        label: _label.text,
+        provider: _provider,
+        model: _model.text,
+        estimatedCostMicros: profile?.estimatedCostMicros ?? 0,
+        expectedRevision: profile?.revision ?? 0,
+        ownerScope: _scope,
+        endpoint: endpoint.isEmpty ? null : endpoint,
+      ),
+      secret: secret,
+    ));
   }
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Add provider profile'),
+      title: Text(_editing ? 'Edit provider profile' : 'Add provider profile'),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             DropdownButtonFormField<String>(
               initialValue: _provider,
@@ -840,7 +940,14 @@ final class _ProviderProfileDialogState extends State<_ProviderProfileDialog> {
                 DropdownMenuItem(value: 'ollama', child: Text('Ollama')),
               ],
               onChanged: (value) {
-                if (value != null) setState(() => _provider = value);
+                if (value == null) return;
+                setState(() {
+                  _provider = value;
+                  if (!_providerSupportsEndpoint) {
+                    _endpoint.clear();
+                  }
+                  _endpointError = null;
+                });
               },
               decoration: const InputDecoration(labelText: 'Provider'),
             ),
@@ -854,6 +961,70 @@ final class _ProviderProfileDialogState extends State<_ProviderProfileDialog> {
               controller: _model,
               decoration: const InputDecoration(labelText: 'Model'),
             ),
+            if (_providerSupportsEndpoint)
+              TextField(
+                key: const Key('ai-profile-endpoint-field'),
+                controller: _endpoint,
+                decoration: InputDecoration(
+                  labelText: 'Endpoint',
+                  helperText:
+                      'Absolute HTTPS URL. Local-network Ollama endpoints '
+                      'also need the deployment opt-in.',
+                  helperMaxLines: 3,
+                  errorText: _endpointError,
+                  errorMaxLines: 3,
+                ),
+                onChanged: (_) {
+                  if (_endpointError != null) {
+                    setState(() => _endpointError = null);
+                  }
+                },
+              ),
+            const SizedBox(height: 8),
+            RadioGroup<AiProfileOwnerScope>(
+              groupValue: _scope,
+              onChanged: (value) {
+                if (value != null) setState(() => _scope = value);
+              },
+              child: Column(
+                children: <Widget>[
+                  RadioListTile<AiProfileOwnerScope>(
+                    key: const Key('ai-profile-scope-private'),
+                    value: AiProfileOwnerScope.private,
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Private to me'),
+                    subtitle: const Text(
+                      'Only you can see and use this profile. Household '
+                      'scans prefer your own private profile.',
+                    ),
+                  ),
+                  RadioListTile<AiProfileOwnerScope>(
+                    key: const Key('ai-profile-scope-home'),
+                    value: AiProfileOwnerScope.home,
+                    enabled: widget.mayShareWithHome,
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Shared with this home'),
+                    subtitle: Text(
+                      widget.mayShareWithHome
+                          ? 'Sharing is an explicit home-owner choice; it is '
+                                'never inferred from storage scope.'
+                          : 'Only the home owner can share a profile with '
+                                'this home.',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (_editing)
+              const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: Text(
+                  'Changing the provider or the sharing scope clears the '
+                  'stored credential. It must be entered again before this '
+                  'profile can run extractions.',
+                  key: Key('ai-profile-credential-clear-note'),
+                ),
+              ),
             TextField(
               key: const Key('ai-new-profile-credential-field'),
               controller: _credential,
@@ -874,25 +1045,44 @@ final class _ProviderProfileDialogState extends State<_ProviderProfileDialog> {
           child: const Text('Cancel'),
         ),
         FilledButton(
-          key: const Key('ai-create-profile'),
-          onPressed: () {
-            final secret = _credential.text;
-            _credential.clear();
-            Navigator.pop(context, (
-              draft: AiProviderProfileDraft(
-                id: null,
-                label: _label.text,
-                provider: _provider,
-                model: _model.text,
-                estimatedCostMicros: 0,
-                expectedRevision: 0,
-              ),
-              secret: secret,
-            ));
-          },
-          child: const Text('Add'),
+          key: Key(_editing ? 'ai-save-profile' : 'ai-create-profile'),
+          onPressed: _submit,
+          child: Text(_editing ? 'Save' : 'Add'),
         ),
       ],
+    );
+  }
+}
+
+final class _ProfileScopeBadge extends StatelessWidget {
+  const _ProfileScopeBadge(this.profile);
+
+  final AiProviderProfile profile;
+
+  @override
+  Widget build(BuildContext context) {
+    final shared = profile.ownerScope == AiProfileOwnerScope.home;
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      key: Key('ai-profile-scope-${profile.id}'),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: shared
+            ? scheme.secondaryContainer
+            : scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(shared ? Icons.home_outlined : Icons.lock_outline, size: 14),
+          const SizedBox(width: 4),
+          Text(
+            shared ? 'Shared with this home' : 'Private to me',
+            style: Theme.of(context).textTheme.labelSmall,
+          ),
+        ],
+      ),
     );
   }
 }

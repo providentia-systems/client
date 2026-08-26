@@ -4,6 +4,8 @@ enum HomeRole { owner, manager, member, viewer }
 
 enum InvitationStatus { pending, accepted, revoked, expired }
 
+enum OwnershipTransferStatus { pending, accepted, rejected, revoked, expired }
+
 /// Backend-owned permission vocabulary used by the client only to hide or
 /// disable command surfaces. The backend remains the authorization authority.
 final class HomePermissions {
@@ -217,6 +219,59 @@ final class RecipientHomeInvitation {
   final int revision;
 }
 
+/// A server-governed proposal to move home ownership to another active
+/// member. The backend changes ownership only after the target accepts the
+/// pending proposal; the client merely renders participant views of it.
+final class HomeOwnershipTransfer {
+  HomeOwnershipTransfer({
+    required this.id,
+    required this.homeId,
+    required this.proposedByUserId,
+    required this.targetUserId,
+    required this.status,
+    required this.expiresAt,
+    required this.revision,
+    this.expectedTargetRevision,
+  }) {
+    _requireNonEmpty(id, 'id');
+    _requireNonEmpty(homeId, 'homeId');
+    _requireNonEmpty(proposedByUserId, 'proposedByUserId');
+    _requireNonEmpty(targetUserId, 'targetUserId');
+    if (revision < 1) {
+      throw ArgumentError.value(revision, 'revision', 'must be positive');
+    }
+    if (expectedTargetRevision case final expected? when expected < 1) {
+      throw ArgumentError.value(
+        expected,
+        'expectedTargetRevision',
+        'must be positive',
+      );
+    }
+  }
+
+  final String id;
+  final String homeId;
+  final String proposedByUserId;
+  final String targetUserId;
+  final int? expectedTargetRevision;
+  final OwnershipTransferStatus status;
+  final DateTime expiresAt;
+  final int revision;
+
+  bool get isPending => status == OwnershipTransferStatus.pending;
+
+  bool isOfferedTo(String userId) => isPending && targetUserId == userId;
+}
+
+/// Receipt for a queued step-up confirmation email. The single-use token is
+/// delivered out of band; only an explicitly enabled non-production
+/// development profile returns it inline for local flows.
+final class StepUpLinkReceipt {
+  const StepUpLinkReceipt({this.developmentStepUpToken});
+
+  final String? developmentStepUpToken;
+}
+
 final class HomePermissionPolicy {
   HomePermissionPolicy({
     required this.role,
@@ -248,6 +303,8 @@ final class HomeSessionSnapshot {
         const <RecipientHomeInvitation>[],
     List<HomePermissionPolicy> permissionPolicies =
         const <HomePermissionPolicy>[],
+    List<HomeOwnershipTransfer> ownershipTransfers =
+        const <HomeOwnershipTransfer>[],
     this.revokedHomeId,
     this.safeMessage,
   }) : homes = UnmodifiableListView<HomeSummary>(List<HomeSummary>.of(homes)),
@@ -262,6 +319,9 @@ final class HomeSessionSnapshot {
        ),
        permissionPolicies = UnmodifiableListView<HomePermissionPolicy>(
          List<HomePermissionPolicy>.of(permissionPolicies),
+       ),
+       ownershipTransfers = UnmodifiableListView<HomeOwnershipTransfer>(
+         List<HomeOwnershipTransfer>.of(ownershipTransfers),
        );
 
   final HomeSessionStatus status;
@@ -271,6 +331,7 @@ final class HomeSessionSnapshot {
   final List<HomeInvitation> invitations;
   final List<RecipientHomeInvitation> pendingInvitations;
   final List<HomePermissionPolicy> permissionPolicies;
+  final List<HomeOwnershipTransfer> ownershipTransfers;
   final String? revokedHomeId;
   final String? safeMessage;
 
@@ -309,6 +370,7 @@ final class HomeSessionSnapshot {
     List<HomeInvitation>? invitations,
     List<RecipientHomeInvitation>? pendingInvitations,
     List<HomePermissionPolicy>? permissionPolicies,
+    List<HomeOwnershipTransfer>? ownershipTransfers,
     String? revokedHomeId,
     bool clearRevokedHome = false,
     String? safeMessage,
@@ -322,6 +384,7 @@ final class HomeSessionSnapshot {
       invitations: invitations ?? this.invitations,
       pendingInvitations: pendingInvitations ?? this.pendingInvitations,
       permissionPolicies: permissionPolicies ?? this.permissionPolicies,
+      ownershipTransfers: ownershipTransfers ?? this.ownershipTransfers,
       revokedHomeId: clearRevokedHome
           ? null
           : (revokedHomeId ?? this.revokedHomeId),

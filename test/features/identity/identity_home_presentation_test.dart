@@ -950,6 +950,43 @@ final class _PresentationHomeTransport implements HomeTransportPort {
     required int expectedRevision,
   }) => throw UnimplementedError();
   @override
+  Future<void> removeHomeMembership({
+    required String homeId,
+    required String userId,
+    required int expectedRevision,
+  }) => throw UnimplementedError();
+  @override
+  Future<List<HomeOwnershipTransfer>> listHomeOwnershipTransfers(
+    String homeId,
+  ) async => const <HomeOwnershipTransfer>[];
+  @override
+  Future<StepUpLinkReceipt> requestStepUpLink() => throw UnimplementedError();
+  @override
+  Future<HomeOwnershipTransfer> proposeHomeOwnershipTransfer({
+    required String homeId,
+    required String targetUserId,
+    required int expectedTargetRevision,
+    required String stepUpToken,
+  }) => throw UnimplementedError();
+  @override
+  Future<void> acceptHomeOwnershipTransfer({
+    required String homeId,
+    required String transferId,
+    required int expectedRevision,
+  }) => throw UnimplementedError();
+  @override
+  Future<void> rejectHomeOwnershipTransfer({
+    required String homeId,
+    required String transferId,
+    required int expectedRevision,
+  }) => throw UnimplementedError();
+  @override
+  Future<void> revokeHomeOwnershipTransfer({
+    required String homeId,
+    required String transferId,
+    required int expectedRevision,
+  }) => throw UnimplementedError();
+  @override
   Future<void> leaveHome(String homeId) async {}
 }
 

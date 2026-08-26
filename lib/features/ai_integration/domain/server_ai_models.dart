@@ -56,6 +56,7 @@ final class AiHomeCapabilities {
     required this.mayRead,
     required this.mayUse,
     required this.mayManage,
+    this.isHomeOwner = false,
   });
 
   factory AiHomeCapabilities.fromPermissions({
@@ -77,6 +78,10 @@ final class AiHomeCapabilities {
       mayRead: permissions.contains('ai.read'),
       mayUse: permissions.contains('ai.use'),
       mayManage: permissions.contains('ai.manage'),
+      // Only the immutable owner policy carries ownership.transfer, so its
+      // presence identifies the home owner without a cross-feature dependency.
+      // The backend still enforces the owner role on every share command.
+      isHomeOwner: permissions.contains('ownership.transfer'),
     );
   }
 
@@ -84,8 +89,13 @@ final class AiHomeCapabilities {
   final bool mayRead;
   final bool mayUse;
   final bool mayManage;
+  final bool isHomeOwner;
 
   bool get hasAnyAccess => mayRead || mayUse || mayManage;
+
+  /// Sharing a provider profile with the home is an explicit owner choice;
+  /// managers may still create and manage their own private profiles.
+  bool get mayShareHomeProfiles => mayManage && isHomeOwner;
 }
 
 final class AiAvailableServerProvider {
@@ -255,6 +265,8 @@ final class AiProviderProfileDraft {
     required this.model,
     required this.estimatedCostMicros,
     required this.expectedRevision,
+    this.ownerScope = AiProfileOwnerScope.private,
+    this.endpoint,
   });
 
   /// Null creates a new server-owned profile identity.
@@ -264,6 +276,14 @@ final class AiProviderProfileDraft {
   final String model;
   final int estimatedCostMicros;
   final int expectedRevision;
+
+  /// Private stores the profile for the requesting person only; home requires
+  /// the home-owner role and deliberately shares the profile with the home.
+  final AiProfileOwnerScope ownerScope;
+
+  /// Profile-owned base endpoint, accepted only for the openai-compatible and
+  /// ollama providers; null uses the deployment endpoint.
+  final String? endpoint;
 }
 
 final class AiOrchestrationPolicyUpdate {
