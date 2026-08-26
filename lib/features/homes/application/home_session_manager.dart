@@ -330,7 +330,11 @@ final class HomeSessionManager {
         }
       }
       final effectivePermissions = active.role == HomeRole.owner
-          ? const <String>{'members.read', 'members.invite'}
+          ? const <String>{
+              'members.read',
+              'members.invite',
+              'ownership.transfer',
+            }
           : activePolicy?.permissions ?? const <String>{};
       final memberships = effectivePermissions.contains('members.read')
           ? await _transport.listMemberships(active.id)
@@ -338,6 +342,15 @@ final class HomeSessionManager {
       final invitations = effectivePermissions.contains('members.invite')
           ? await _transport.listInvitations(active.id)
           : const <HomeInvitation>[];
+      // Ownership proposals are participant-scoped on the backend: holders of
+      // 'ownership.transfer' manage the proposals they created, while any
+      // other member may be the target of a pending proposal and must be able
+      // to see it to accept or reject.
+      final ownershipTransfers =
+          effectivePermissions.contains('ownership.transfer') ||
+              active.role != HomeRole.owner
+          ? await _transport.listHomeOwnershipTransfers(active.id)
+          : const <HomeOwnershipTransfer>[];
       if (generation != _generation || _snapshot.activeHome?.id != active.id) {
         return;
       }
@@ -346,6 +359,7 @@ final class HomeSessionManager {
           memberships: memberships,
           invitations: invitations,
           permissionPolicies: permissionPolicies,
+          ownershipTransfers: ownershipTransfers,
           clearMessage: true,
         ),
       );
@@ -379,6 +393,157 @@ final class HomeSessionManager {
       await _handleTransportFailure(error, fallbackHomeId: active.id);
     } on Exception {
       _handleUnexpectedFailure('Member access could not be changed safely.');
+    }
+  }
+
+  /// Removes another member's active membership. The caller's own membership
+  /// ends through [leaveActiveHome] and the owner membership changes only
+  /// through an accepted ownership transfer.
+  Future<void> removeMembership(HomeMembership membership) async {
+    final active = _requireActiveHome();
+    if (membership.role == HomeRole.owner) {
+      throw StateError(
+        'The owner membership changes only through an ownership transfer.',
+      );
+    }
+    try {
+      await _transport.removeHomeMembership(
+        homeId: active.id,
+        userId: membership.userId,
+        expectedRevision: membership.revision,
+      );
+      await refreshGovernance();
+    } on HomeTransportException catch (error) {
+      await _handleGovernanceConflict(error, active.id);
+    } on Exception {
+      _handleUnexpectedFailure('The member could not be removed safely.');
+    }
+  }
+
+  /// Requests the emailed single-use confirmation that authorizes proposing
+  /// an ownership transfer. Returns null when the request failed; the failure
+  /// is surfaced through the snapshot's safe message.
+  Future<StepUpLinkReceipt?> requestOwnershipTransferStepUp() async {
+    final active = _requireActiveHome();
+    try {
+      return await _transport.requestStepUpLink();
+    } on HomeTransportException catch (error) {
+      await _handleTransportFailure(error, fallbackHomeId: active.id);
+      return null;
+    } on Exception {
+      _handleUnexpectedFailure(
+        'The ownership confirmation email could not be requested safely.',
+      );
+      return null;
+    }
+  }
+
+  Future<void> proposeOwnershipTransfer({
+    required HomeMembership target,
+    required String stepUpToken,
+  }) async {
+    final active = _requireActiveHome();
+    if (target.role == HomeRole.owner) {
+      throw StateError('Ownership can only move to another active member.');
+    }
+    final token = stepUpToken.trim();
+    if (token.length < 40) {
+      throw ArgumentError.value(
+        stepUpToken,
+        'stepUpToken',
+        'must be the complete emailed confirmation code',
+      );
+    }
+    try {
+      await _transport.proposeHomeOwnershipTransfer(
+        homeId: active.id,
+        targetUserId: target.userId,
+        expectedTargetRevision: target.revision,
+        stepUpToken: token,
+      );
+      await refreshGovernance();
+    } on HomeTransportException catch (error) {
+      await _handleGovernanceConflict(error, active.id);
+    } on Exception {
+      _handleUnexpectedFailure(
+        'The ownership transfer could not be proposed safely.',
+      );
+    }
+  }
+
+  /// Accepts a pending transfer addressed to the signed-in member. Ownership
+  /// changes atomically on the backend, so the authoritative home list and
+  /// role are reloaded before governance data is republished.
+  Future<void> acceptOwnershipTransfer(HomeOwnershipTransfer transfer) async {
+    final active = _requireActiveHome();
+    if (transfer.homeId != active.id || !transfer.isPending) {
+      throw StateError(
+        'This ownership transfer is no longer available for the active home.',
+      );
+    }
+    try {
+      await _transport.acceptHomeOwnershipTransfer(
+        homeId: active.id,
+        transferId: transfer.id,
+        expectedRevision: transfer.revision,
+      );
+      await load(sessionActiveHomeId: active.id);
+      if (_snapshot.status == HomeSessionStatus.ready &&
+          _snapshot.activeHome?.id == active.id) {
+        await refreshGovernance();
+      }
+    } on HomeTransportException catch (error) {
+      await _handleGovernanceConflict(error, active.id);
+    } on Exception {
+      _handleUnexpectedFailure(
+        'The ownership transfer could not be accepted safely.',
+      );
+    }
+  }
+
+  Future<void> rejectOwnershipTransfer(HomeOwnershipTransfer transfer) async {
+    final active = _requireActiveHome();
+    if (transfer.homeId != active.id || !transfer.isPending) {
+      throw StateError(
+        'This ownership transfer is no longer available for the active home.',
+      );
+    }
+    try {
+      await _transport.rejectHomeOwnershipTransfer(
+        homeId: active.id,
+        transferId: transfer.id,
+        expectedRevision: transfer.revision,
+      );
+      await refreshGovernance();
+    } on HomeTransportException catch (error) {
+      await _handleGovernanceConflict(error, active.id);
+    } on Exception {
+      _handleUnexpectedFailure(
+        'The ownership transfer could not be rejected safely.',
+      );
+    }
+  }
+
+  Future<void> revokeOwnershipTransfer(HomeOwnershipTransfer transfer) async {
+    final active = _requireActiveHome();
+    if (transfer.homeId != active.id || !transfer.isPending) {
+      throw StateError(
+        'This ownership transfer is no longer available for the active home.',
+      );
+    }
+    try {
+      await _transport.revokeHomeOwnershipTransfer(
+        homeId: active.id,
+        transferId: transfer.id,
+        expectedRevision: transfer.revision,
+      );
+      await refreshGovernance();
+    } on HomeTransportException catch (error) {
+      await _handleGovernanceConflict(error, active.id);
+    } on Exception {
+      _handleUnexpectedFailure(
+        'The ownership transfer could not be revoked safely.',
+      );
     }
   }
 
@@ -711,6 +876,24 @@ final class HomeSessionManager {
           'The selected home could not be opened safely. Try again.',
         );
       }
+    }
+  }
+
+  /// Revision conflicts mean the governance target changed on another device.
+  /// The authoritative state is reloaded first so the next attempt uses
+  /// current revisions, then the safe retry guidance is surfaced.
+  Future<void> _handleGovernanceConflict(
+    HomeTransportException error,
+    String homeId,
+  ) async {
+    if (error.kind != HomeFailureKind.conflict) {
+      await _handleTransportFailure(error, fallbackHomeId: homeId);
+      return;
+    }
+    await refreshGovernance();
+    if (_snapshot.status == HomeSessionStatus.ready &&
+        _snapshot.activeHome?.id == homeId) {
+      _emit(_snapshot.copyWith(safeMessage: error.safeMessage));
     }
   }
 

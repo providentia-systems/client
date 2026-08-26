@@ -4,7 +4,7 @@ import 'package:providentia/features/ai_integration/domain/ai_models.dart';
 import 'package:providentia/features/ai_integration/domain/server_ai_models.dart';
 import 'package:providentia_api_client/providentia_api_client.dart';
 
-/// Closed, current-contract (API 1.18) boundary for household AI management
+/// Closed, current-contract (API 1.19) boundary for household AI management
 /// and mandatory review. Raw response maps and credential material never
 /// leave this adapter.
 final class GeneratedServerAiRepository implements ServerAiRepository {
@@ -113,13 +113,16 @@ final class GeneratedServerAiRepository implements ServerAiRepository {
           (credential.length < 16 || credential.length > 500)) {
         throw const AiServerException(AiServerFailureKind.validation);
       }
+      final endpoint = draft.endpoint?.trim();
       final body = <String, Object?>{
         'label': draft.label.trim(),
         'provider': draft.provider,
         'model': draft.model.trim(),
+        'ownerScope': _ownerScopeWireValue(draft.ownerScope),
         'estimatedCostMicros': draft.estimatedCostMicros,
         'expectedRevision': draft.expectedRevision,
       };
+      if (endpoint != null) body['endpoint'] = endpoint;
       if (credential != null) body['credential'] = credential;
       final ApiResponse response;
       if (draft.id == null) {
@@ -158,6 +161,9 @@ final class GeneratedServerAiRepository implements ServerAiRepository {
           parsed.displayName != draft.label.trim() ||
           parsed.providerWireId != draft.provider ||
           parsed.model != draft.model.trim() ||
+          parsed.ownerScope != draft.ownerScope ||
+          parsed.endpoint?.toString() !=
+              (endpoint == null ? null : Uri.parse(endpoint).toString()) ||
           parsed.estimatedCostMicros != draft.estimatedCostMicros ||
           parsed.revision != draft.expectedRevision + 1) {
         throw const FormatException(
@@ -437,11 +443,18 @@ AiProviderProfile _profile(
   if (lastFour != null && (lastFour is! String || lastFour.length != 4)) {
     throw const FormatException('Invalid credential status metadata.');
   }
+  final ownerScope = switch (_string(object, 'ownerScope')) {
+    'private' => AiProfileOwnerScope.private,
+    'home' => AiProfileOwnerScope.home,
+    _ => throw const FormatException('Unknown AI profile owner scope.'),
+  };
   return AiProviderProfile(
     id: id,
     homeId: homeId,
     displayName: _string(object, 'label'),
     kind: kind,
+    ownerScope: ownerScope,
+    endpoint: _profileEndpoint(object, provider),
     transport: AiTransport.serverProxy,
     protocol: switch (kind) {
       AiProviderKind.openAi => AiEndpointProtocol.openAiResponses,
@@ -470,6 +483,38 @@ AiProviderProfile _profile(
       maximum: 1000000000,
     ),
   );
+}
+
+/// Endpoint values are profile-owned base URLs for the openai-compatible and
+/// ollama providers only. Every other provider must publish null. The client
+/// mirrors the write policy loosely: an absolute HTTPS URL, with plain HTTP
+/// tolerated only for ollama because the deployment opt-in may allow
+/// local-network endpoints there.
+Uri? _profileEndpoint(Map<String, Object?> object, String provider) {
+  if (!object.containsKey('endpoint')) {
+    throw const FormatException('Missing endpoint.');
+  }
+  final value = object['endpoint'];
+  if (value == null) return null;
+  if (value is! String || !_validEndpoint(value, provider)) {
+    throw const FormatException('Invalid endpoint.');
+  }
+  return Uri.parse(value);
+}
+
+bool _validEndpoint(String endpoint, String provider) {
+  if (endpoint.trim() != endpoint ||
+      endpoint.isEmpty ||
+      endpoint.length > 300 ||
+      (provider != 'openai-compatible' && provider != 'ollama')) {
+    return false;
+  }
+  final parsed = Uri.tryParse(endpoint);
+  return parsed != null &&
+      parsed.isAbsolute &&
+      parsed.host.isNotEmpty &&
+      (parsed.scheme == 'https' ||
+          (provider == 'ollama' && parsed.scheme == 'http'));
 }
 
 AiOrchestrationPolicy _policy(Map<String, Object?> object, String homeId) {
@@ -676,6 +721,8 @@ void _validateProfileDraft(AiProviderProfileDraft draft) {
       draft.model.trim().isEmpty ||
       draft.model.trim().length > 120 ||
       !_serverProviderIds.contains(draft.provider) ||
+      (draft.endpoint != null &&
+          !_validEndpoint(draft.endpoint!.trim(), draft.provider)) ||
       draft.estimatedCostMicros < 0 ||
       draft.estimatedCostMicros > 1000000000 ||
       draft.expectedRevision < 0 ||
@@ -709,6 +756,11 @@ void _validatePolicyUpdate(AiOrchestrationPolicyUpdate update) {
     throw const AiServerException(AiServerFailureKind.validation);
   }
 }
+
+String _ownerScopeWireValue(AiProfileOwnerScope scope) => switch (scope) {
+  AiProfileOwnerScope.private => 'private',
+  AiProfileOwnerScope.home => 'home',
+};
 
 String _modeWireValue(AiServerMode mode) => switch (mode) {
   AiServerMode.manualOnly => 'manual_only',

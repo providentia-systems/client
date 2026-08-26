@@ -142,6 +142,219 @@ void main() {
     );
   });
 
+  test('membership removal deletes with the expected revision query', () async {
+    http.Request? seen;
+    final transport = Api11HomeTransport(
+      _client((request) async {
+        seen = request;
+        return http.Response('', 204);
+      }),
+    );
+
+    await transport.removeHomeMembership(
+      homeId: _homeId,
+      userId: _userId,
+      expectedRevision: 7,
+    );
+
+    expect(seen?.method, 'DELETE');
+    expect(seen?.url.path, endsWith('/homes/$_homeId/memberships/$_userId'));
+    expect(seen?.url.queryParameters, <String, String>{
+      'expectedRevision': '7',
+    });
+    expect(seen?.body, isEmpty);
+  });
+
+  test(
+    'membership removal conflict keeps the standard retry message',
+    () async {
+      final transport = Api11HomeTransport(_client((_) async => _problem(409)));
+
+      await expectLater(
+        transport.removeHomeMembership(
+          homeId: _homeId,
+          userId: _userId,
+          expectedRevision: 3,
+        ),
+        throwsA(
+          isA<HomeTransportException>()
+              .having((error) => error.kind, 'kind', HomeFailureKind.conflict)
+              .having(
+                (error) => error.safeMessage,
+                'safeMessage',
+                'This member is no longer available. Refresh and try again.',
+              ),
+        ),
+      );
+    },
+  );
+
+  test('ownership transfers parse the contract schema strictly', () async {
+    final transport = Api11HomeTransport(
+      _client(
+        (_) async => _json(<String, Object?>{
+          'data': <Object?>[_transferJson()],
+        }),
+      ),
+    );
+
+    final transfers = await transport.listHomeOwnershipTransfers(_homeId);
+
+    final transfer = transfers.single;
+    expect(transfer.id, _transferId);
+    expect(transfer.homeId, _homeId);
+    expect(transfer.proposedByUserId, _ownerUserId);
+    expect(transfer.targetUserId, _userId);
+    expect(transfer.expectedTargetRevision, 4);
+    expect(transfer.status, OwnershipTransferStatus.pending);
+    expect(transfer.revision, 2);
+
+    final malformed = Api11HomeTransport(
+      _client(
+        (_) async => _json(<String, Object?>{
+          'data': <Object?>[_transferJson()..['status'] = 'stolen'],
+        }),
+      ),
+    );
+    await expectLater(
+      malformed.listHomeOwnershipTransfers(_homeId),
+      throwsA(
+        isA<HomeTransportException>().having(
+          (error) => error.kind,
+          'kind',
+          HomeFailureKind.unavailable,
+        ),
+      ),
+    );
+  });
+
+  test(
+    'ownership proposal posts the step-up token and target revision',
+    () async {
+      http.Request? seen;
+      final transport = Api11HomeTransport(
+        _client((request) async {
+          seen = request;
+          return _json(_transferJson());
+        }),
+      );
+
+      final proposed = await transport.proposeHomeOwnershipTransfer(
+        homeId: _homeId,
+        targetUserId: _userId,
+        expectedTargetRevision: 4,
+        stepUpToken: _stepUpToken,
+      );
+
+      expect(proposed.status, OwnershipTransferStatus.pending);
+      expect(seen?.url.path, endsWith('/homes/$_homeId/ownership-transfers'));
+      expect(jsonDecode(seen?.body ?? ''), <String, Object?>{
+        'targetUserId': _userId,
+        'expectedTargetRevision': 4,
+        'stepUpToken': _stepUpToken,
+      });
+    },
+  );
+
+  test('transfer decisions post revisions and normalize conflicts', () async {
+    http.Request? seen;
+    final transport = Api11HomeTransport(
+      _client((request) async {
+        seen = request;
+        return http.Response('', 204);
+      }),
+    );
+
+    await transport.acceptHomeOwnershipTransfer(
+      homeId: _homeId,
+      transferId: _transferId,
+      expectedRevision: 2,
+    );
+    expect(
+      seen?.url.path,
+      endsWith('/homes/$_homeId/ownership-transfers/$_transferId/accept'),
+    );
+    expect(jsonDecode(seen?.body ?? ''), <String, Object?>{
+      'expectedRevision': 2,
+    });
+
+    await transport.rejectHomeOwnershipTransfer(
+      homeId: _homeId,
+      transferId: _transferId,
+      expectedRevision: 2,
+    );
+    expect(seen?.url.path, endsWith('/$_transferId/reject'));
+
+    await transport.revokeHomeOwnershipTransfer(
+      homeId: _homeId,
+      transferId: _transferId,
+      expectedRevision: 2,
+    );
+    expect(seen?.url.path, endsWith('/$_transferId/revoke'));
+
+    final conflicted = Api11HomeTransport(_client((_) async => _problem(409)));
+    await expectLater(
+      conflicted.revokeHomeOwnershipTransfer(
+        homeId: _homeId,
+        transferId: _transferId,
+        expectedRevision: 2,
+      ),
+      throwsA(
+        isA<HomeTransportException>()
+            .having((error) => error.kind, 'kind', HomeFailureKind.conflict)
+            .having(
+              (error) => error.safeMessage,
+              'safeMessage',
+              'This ownership transfer is no longer available. Refresh and try again.',
+            ),
+      ),
+    );
+  });
+
+  test('step-up request is scoped to homeowner ownership transfer', () async {
+    http.Request? seen;
+    final transport = Api11HomeTransport(
+      _client((request) async {
+        seen = request;
+        return _json(<String, Object?>{
+          'accepted': true,
+          'developmentStepUpToken': _stepUpToken,
+        });
+      }),
+    );
+
+    final receipt = await transport.requestStepUpLink();
+
+    expect(seen?.url.path, endsWith('/auth/step-up-links'));
+    expect(jsonDecode(seen?.body ?? ''), <String, Object?>{
+      'applicationKind': 'homeowner',
+      'action': 'ownership-transfer',
+    });
+    expect(receipt.developmentStepUpToken, _stepUpToken);
+
+    final production = Api11HomeTransport(
+      _client((_) async => _json(<String, Object?>{'accepted': true})),
+    );
+    expect(
+      (await production.requestStepUpLink()).developmentStepUpToken,
+      isNull,
+    );
+
+    final refused = Api11HomeTransport(
+      _client((_) async => _json(<String, Object?>{'accepted': false})),
+    );
+    await expectLater(
+      refused.requestStepUpLink(),
+      throwsA(
+        isA<HomeTransportException>().having(
+          (error) => error.kind,
+          'kind',
+          HomeFailureKind.unavailable,
+        ),
+      ),
+    );
+  });
+
   test(
     'timed-out home switch is aborted before a later switch can land',
     () async {
@@ -204,6 +417,11 @@ void main() {
 }
 
 const String _homeId = '0198a0b1-c2d3-7e4f-8123-456789abcded';
+const String _userId = '0198a0b1-c2d3-7e4f-8123-456789abcd01';
+const String _ownerUserId = '0198a0b1-c2d3-7e4f-8123-456789abcd02';
+const String _transferId = '0198a0b1-c2d3-7e4f-8123-456789abcd03';
+const String _stepUpToken =
+    'development-step-up-token-0000000000000000000000000000000000000000';
 
 ProvidentiaApiClient _client(
   Future<http.Response> Function(http.Request request) handler,
@@ -236,6 +454,17 @@ http.Response _problem(int status) => http.Response(
   status,
   headers: const <String, String>{'content-type': 'application/problem+json'},
 );
+
+Map<String, Object?> _transferJson() => <String, Object?>{
+  'id': _transferId,
+  'homeId': _homeId,
+  'proposedByUserId': _ownerUserId,
+  'targetUserId': _userId,
+  'expectedTargetRevision': 4,
+  'status': 'pending',
+  'expiresAt': '2030-01-01T00:00:00Z',
+  'revision': 2,
+};
 
 Map<String, Object?> _homeJson() => <String, Object?>{
   'id': _homeId,

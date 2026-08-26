@@ -73,6 +73,44 @@ abstract interface class HomeTransportPort {
     required int expectedRevision,
   });
 
+  Future<void> removeHomeMembership({
+    required String homeId,
+    required String userId,
+    required int expectedRevision,
+  });
+
+  Future<List<HomeOwnershipTransfer>> listHomeOwnershipTransfers(String homeId);
+
+  /// Requests the single-use ownership-transfer confirmation email for the
+  /// signed-in account. The token itself arrives out of band; development
+  /// profiles may echo it in the receipt.
+  Future<StepUpLinkReceipt> requestStepUpLink();
+
+  Future<HomeOwnershipTransfer> proposeHomeOwnershipTransfer({
+    required String homeId,
+    required String targetUserId,
+    required int expectedTargetRevision,
+    required String stepUpToken,
+  });
+
+  Future<void> acceptHomeOwnershipTransfer({
+    required String homeId,
+    required String transferId,
+    required int expectedRevision,
+  });
+
+  Future<void> rejectHomeOwnershipTransfer({
+    required String homeId,
+    required String transferId,
+    required int expectedRevision,
+  });
+
+  Future<void> revokeHomeOwnershipTransfer({
+    required String homeId,
+    required String transferId,
+    required int expectedRevision,
+  });
+
   Future<List<HomePermissionPolicy>> listPermissionPolicies(String homeId);
 
   Future<HomePermissionPolicy> putPermissionPolicy({

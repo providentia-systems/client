@@ -248,14 +248,18 @@ final class _HomeSelectionPageState extends State<HomeSelectionPage> {
 
   Widget _createSection(HomeSessionSnapshot snapshot) {
     final noHomes = snapshot.homes.isEmpty;
-    if (!_showCreate && !noHomes) {
+    // Invited first-time people land here with zero homes: their invitations
+    // render first and creating a home stays an explicit secondary choice.
+    // Only with neither homes nor invitations does the create form lead.
+    final invitationsLead = noHomes && snapshot.pendingInvitations.isNotEmpty;
+    if (!_showCreate && (!noHomes || invitationsLead)) {
       return OutlinedButton.icon(
         key: const Key('show-create-home'),
         onPressed: widget.controller.isBusy
             ? null
             : () => setState(() => _showCreate = true),
         icon: const Icon(Icons.add_home_outlined),
-        label: const Text('Create another home'),
+        label: Text(noHomes ? 'Create a home instead' : 'Create another home'),
       );
     }
     return Card(
@@ -334,8 +338,9 @@ final class _HomeSelectionPageState extends State<HomeSelectionPage> {
                 icon: const Icon(Icons.add_home_rounded),
                 label: const Text('Create and open home'),
               ),
-              if (!noHomes)
+              if (!noHomes || snapshot.pendingInvitations.isNotEmpty)
                 TextButton(
+                  key: const Key('cancel-create-home'),
                   onPressed: widget.controller.isBusy
                       ? null
                       : () => setState(() => _showCreate = false),

@@ -172,6 +172,13 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
     String? credential,
   }) async {
     if (!_requireManage()) return;
+    if (draft.ownerScope == AiProfileOwnerScope.home &&
+        !_capabilities.mayShareHomeProfiles) {
+      _setFailure(
+        'Only the home owner can share an AI provider profile with this home.',
+      );
+      return;
+    }
     final current = draft.id == null ? null : _workspace?.profile(draft.id!);
     if ((draft.id == null && draft.expectedRevision != 0) ||
         (draft.id != null &&

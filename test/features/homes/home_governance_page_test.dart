@@ -128,6 +128,276 @@ void main() {
     },
   );
 
+  testWidgets(
+    'owner proposes and revokes an ownership transfer through step-up',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1000, 4000);
+      addTearDown(tester.view.reset);
+
+      final transport = _GovernanceTransport(role: HomeRole.owner);
+      final fixture = await _GovernanceFixture.create(transport);
+      addTearDown(fixture.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: HomeGovernancePage(
+            controller: fixture.controller,
+            currentUserId: _currentUserId,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Ownership'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('ownership-transfer-target')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Household helper · member').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('propose-ownership-transfer')));
+      await tester.pumpAndSettle();
+
+      expect(transport.stepUpRequests, 1);
+      expect(find.text('Confirm ownership transfer'), findsOneWidget);
+      final tokenField = tester.widget<TextField>(
+        find.byKey(const Key('ownership-step-up-token')),
+      );
+      expect(
+        tokenField.controller?.text,
+        _stepUpToken,
+        reason: 'development profiles prefill the emailed code',
+      );
+      await tester.tap(find.byKey(const Key('confirm-ownership-transfer')));
+      await tester.pumpAndSettle();
+
+      expect(transport.proposedTransfer, (
+        targetUserId: 'user-member',
+        expectedTargetRevision: 2,
+        stepUpToken: _stepUpToken,
+      ));
+      final pendingTile = find.byKey(
+        const Key('ownership-transfer-transfer-proposed'),
+      );
+      expect(pendingTile, findsOneWidget);
+      expect(find.text('Proposed to Household helper'), findsOneWidget);
+
+      await tester.tap(
+        find.byKey(const Key('revoke-ownership-transfer-transfer-proposed')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(transport.revokedTransfer, (
+        transferId: 'transfer-proposed',
+        expectedRevision: 1,
+      ));
+      expect(pendingTile, findsNothing);
+    },
+  );
+
+  testWidgets(
+    'transfer target accepts pending ownership with revision semantics',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1000, 2400);
+      addTearDown(tester.view.reset);
+
+      final transport = _GovernanceTransport(role: HomeRole.member)
+        ..ownershipTransfers.add(_offeredTransfer());
+      final fixture = await _GovernanceFixture.create(transport);
+      addTearDown(fixture.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: HomeGovernancePage(
+            controller: fixture.controller,
+            currentUserId: _currentUserId,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Ownership transfer for you'), findsOneWidget);
+      expect(
+        find.byKey(const Key('ownership-transfer-offer-transfer-offer')),
+        findsOneWidget,
+      );
+      expect(find.text('Become the owner of My home?'), findsOneWidget);
+      expect(
+        find.text('Ownership'),
+        findsNothing,
+        reason: 'the management section stays owner-only',
+      );
+
+      await tester.tap(
+        find.byKey(const Key('accept-ownership-transfer-transfer-offer')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(transport.acceptedTransfer, (
+        transferId: 'transfer-offer',
+        expectedRevision: 6,
+      ));
+      expect(find.text('Your role: owner'), findsOneWidget);
+    },
+  );
+
+  testWidgets('transfer target can reject a pending ownership offer', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1000, 2400);
+    addTearDown(tester.view.reset);
+
+    final transport = _GovernanceTransport(role: HomeRole.member)
+      ..ownershipTransfers.add(_offeredTransfer());
+    final fixture = await _GovernanceFixture.create(transport);
+    addTearDown(fixture.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: HomeGovernancePage(
+          controller: fixture.controller,
+          currentUserId: _currentUserId,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.byKey(const Key('reject-ownership-transfer-transfer-offer')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(transport.rejectedTransfer, (
+      transferId: 'transfer-offer',
+      expectedRevision: 6,
+    ));
+    expect(
+      find.byKey(const Key('ownership-transfer-offer-transfer-offer')),
+      findsNothing,
+    );
+    expect(find.text('Your role: member'), findsOneWidget);
+  });
+
+  testWidgets(
+    'owner removes a member only after an explicit named confirmation',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1000, 4000);
+      addTearDown(tester.view.reset);
+
+      final transport = _GovernanceTransport(role: HomeRole.owner);
+      final fixture = await _GovernanceFixture.create(transport);
+      addTearDown(fixture.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: HomeGovernancePage(
+            controller: fixture.controller,
+            currentUserId: _currentUserId,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('remove-home-membership-user-member')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('remove-home-membership-$_currentUserId')),
+        findsNothing,
+        reason: 'the caller leaves through Leave, never removes itself',
+      );
+
+      await tester.tap(
+        find.byKey(const Key('remove-home-membership-user-member')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Remove Household helper?'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.textContaining(
+            'ends the member access of Household helper to My home',
+          ),
+        ),
+        findsOneWidget,
+        reason: 'the confirmation names the member and role',
+      );
+      await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+      await tester.pumpAndSettle();
+      expect(transport.removedMembership, isNull);
+
+      await tester.tap(
+        find.byKey(const Key('remove-home-membership-user-member')),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('confirm-remove-membership')));
+      await tester.pumpAndSettle();
+
+      expect(transport.removedMembership, (
+        userId: 'user-member',
+        expectedRevision: 2,
+      ));
+      expect(
+        find.byKey(const Key('home-membership-user-member')),
+        findsNothing,
+      );
+    },
+  );
+
+  testWidgets(
+    'member removal conflict reloads governance and shows retry guidance',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1000, 4000);
+      addTearDown(tester.view.reset);
+
+      final transport = _GovernanceTransport(role: HomeRole.owner)
+        ..removalFailure = const HomeTransportException(
+          kind: HomeFailureKind.conflict,
+          safeMessage:
+              'This member is no longer available. Refresh and try again.',
+          homeId: _homeId,
+        );
+      final fixture = await _GovernanceFixture.create(transport);
+      addTearDown(fixture.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: HomeGovernancePage(
+            controller: fixture.controller,
+            currentUserId: _currentUserId,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final refreshesBefore = transport.membershipListCalls;
+
+      await tester.tap(
+        find.byKey(const Key('remove-home-membership-user-member')),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('confirm-remove-membership')));
+      await tester.pumpAndSettle();
+
+      expect(
+        transport.membershipListCalls,
+        refreshesBefore + 1,
+        reason: 'a 409 reloads authoritative governance revisions',
+      );
+      expect(
+        find.text('This member is no longer available. Refresh and try again.'),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('home-membership-user-member')),
+        findsOneWidget,
+      );
+    },
+  );
+
   testWidgets('viewer governance remains read-only and can leave', (
     tester,
   ) async {
@@ -156,6 +426,11 @@ void main() {
     expect(find.text('Sent invitations'), findsNothing);
     expect(find.text('Role permissions'), findsNothing);
     expect(find.byType(DropdownButton<HomeRole>), findsNothing);
+    expect(find.text('Ownership'), findsNothing);
+    expect(
+      find.byKey(const Key('remove-home-membership-user-member')),
+      findsNothing,
+    );
     expect(find.byKey(const Key('leave-active-home')), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('leave-active-home')));
@@ -168,6 +443,19 @@ void main() {
 
 const _homeId = 'home-primary';
 const _currentUserId = 'user-current';
+const _stepUpToken =
+    'development-step-up-token-0000000000000000000000000000000000000000';
+
+HomeOwnershipTransfer _offeredTransfer() => HomeOwnershipTransfer(
+  id: 'transfer-offer',
+  homeId: _homeId,
+  proposedByUserId: 'user-inviter',
+  targetUserId: _currentUserId,
+  expectedTargetRevision: 1,
+  status: OwnershipTransferStatus.pending,
+  expiresAt: DateTime.utc(2030),
+  revision: 6,
+);
 
 final class _GovernanceFixture {
   const _GovernanceFixture(this.manager, this.controller);
@@ -266,6 +554,9 @@ final class _GovernanceTransport implements HomeTransportPort {
         ),
       ];
 
+  final List<HomeOwnershipTransfer> ownershipTransfers =
+      <HomeOwnershipTransfer>[];
+
   String? updatedHomeName;
   HomeRole? changedRole;
   String? invitedEmail;
@@ -274,6 +565,15 @@ final class _GovernanceTransport implements HomeTransportPort {
   Set<String>? savedPolicyPermissions;
   String? acceptedInvitationId;
   String? leftHomeId;
+  int stepUpRequests = 0;
+  int membershipListCalls = 0;
+  HomeTransportException? removalFailure;
+  ({String userId, int expectedRevision})? removedMembership;
+  ({String targetUserId, int expectedTargetRevision, String stepUpToken})?
+  proposedTransfer;
+  ({String transferId, int expectedRevision})? acceptedTransfer;
+  ({String transferId, int expectedRevision})? rejectedTransfer;
+  ({String transferId, int expectedRevision})? revokedTransfer;
 
   @override
   Future<List<HomeSummary>> listHomes() async => <HomeSummary>[home];
@@ -308,8 +608,108 @@ final class _GovernanceTransport implements HomeTransportPort {
   }
 
   @override
-  Future<List<HomeMembership>> listMemberships(String homeId) async =>
-      List<HomeMembership>.of(memberships);
+  Future<List<HomeMembership>> listMemberships(String homeId) async {
+    membershipListCalls++;
+    return List<HomeMembership>.of(memberships);
+  }
+
+  @override
+  Future<void> removeHomeMembership({
+    required String homeId,
+    required String userId,
+    required int expectedRevision,
+  }) async {
+    if (removalFailure case final failure?) {
+      throw failure;
+    }
+    removedMembership = (userId: userId, expectedRevision: expectedRevision);
+    memberships.removeWhere((member) => member.userId == userId);
+  }
+
+  @override
+  Future<List<HomeOwnershipTransfer>> listHomeOwnershipTransfers(
+    String homeId,
+  ) async => List<HomeOwnershipTransfer>.of(ownershipTransfers);
+
+  @override
+  Future<StepUpLinkReceipt> requestStepUpLink() async {
+    stepUpRequests++;
+    return const StepUpLinkReceipt(developmentStepUpToken: _stepUpToken);
+  }
+
+  @override
+  Future<HomeOwnershipTransfer> proposeHomeOwnershipTransfer({
+    required String homeId,
+    required String targetUserId,
+    required int expectedTargetRevision,
+    required String stepUpToken,
+  }) async {
+    proposedTransfer = (
+      targetUserId: targetUserId,
+      expectedTargetRevision: expectedTargetRevision,
+      stepUpToken: stepUpToken,
+    );
+    final transfer = HomeOwnershipTransfer(
+      id: 'transfer-proposed',
+      homeId: homeId,
+      proposedByUserId: _currentUserId,
+      targetUserId: targetUserId,
+      expectedTargetRevision: expectedTargetRevision,
+      status: OwnershipTransferStatus.pending,
+      expiresAt: DateTime.utc(2030),
+      revision: 1,
+    );
+    ownershipTransfers.add(transfer);
+    return transfer;
+  }
+
+  @override
+  Future<void> acceptHomeOwnershipTransfer({
+    required String homeId,
+    required String transferId,
+    required int expectedRevision,
+  }) async {
+    acceptedTransfer = (
+      transferId: transferId,
+      expectedRevision: expectedRevision,
+    );
+    ownershipTransfers.removeWhere((transfer) => transfer.id == transferId);
+    home = HomeSummary(
+      id: home.id,
+      name: home.name,
+      locale: home.locale,
+      currency: home.currency,
+      timezone: home.timezone,
+      role: HomeRole.owner,
+      revision: home.revision + 1,
+    );
+  }
+
+  @override
+  Future<void> rejectHomeOwnershipTransfer({
+    required String homeId,
+    required String transferId,
+    required int expectedRevision,
+  }) async {
+    rejectedTransfer = (
+      transferId: transferId,
+      expectedRevision: expectedRevision,
+    );
+    ownershipTransfers.removeWhere((transfer) => transfer.id == transferId);
+  }
+
+  @override
+  Future<void> revokeHomeOwnershipTransfer({
+    required String homeId,
+    required String transferId,
+    required int expectedRevision,
+  }) async {
+    revokedTransfer = (
+      transferId: transferId,
+      expectedRevision: expectedRevision,
+    );
+    ownershipTransfers.removeWhere((transfer) => transfer.id == transferId);
+  }
 
   @override
   Future<void> changeMembershipRole({

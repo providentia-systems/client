@@ -191,6 +191,144 @@ final class Api11HomeTransport implements HomeTransportPort {
   );
 
   @override
+  Future<void> removeHomeMembership({
+    required String homeId,
+    required String userId,
+    required int expectedRevision,
+  }) => _run(
+    (abortTrigger) async {
+      await _invoke(
+        operationId: 'removeHomeMembership',
+        pathParameters: <String, String>{'homeId': homeId, 'userId': userId},
+        query: <String, String>{'expectedRevision': '$expectedRevision'},
+        abortTrigger: abortTrigger,
+      );
+    },
+    homeId: homeId,
+    conflictMessage:
+        'This member is no longer available. Refresh and try again.',
+  );
+
+  @override
+  Future<List<HomeOwnershipTransfer>> listHomeOwnershipTransfers(
+    String homeId,
+  ) => _run(
+    (abortTrigger) async => _data(
+      (await _invoke(
+        operationId: 'listHomeOwnershipTransfers',
+        pathParameters: <String, String>{'homeId': homeId},
+        abortTrigger: abortTrigger,
+      )).requireObject(),
+    ).map(_ownershipTransfer).toList(growable: false),
+    homeId: homeId,
+    treatNotFoundAsRevoked: true,
+  );
+
+  @override
+  Future<StepUpLinkReceipt> requestStepUpLink() => _run((abortTrigger) async {
+    final object = (await _invoke(
+      operationId: 'requestStepUpLink',
+      abortTrigger: abortTrigger,
+      body: <String, Object?>{
+        'applicationKind': 'homeowner',
+        'action': 'ownership-transfer',
+      },
+    )).requireObject();
+    if (object['accepted'] != true) {
+      throw const FormatException('Step-up link was not accepted.');
+    }
+    return StepUpLinkReceipt(
+      developmentStepUpToken: _nullableStringField(
+        object,
+        'developmentStepUpToken',
+      ),
+    );
+  });
+
+  @override
+  Future<HomeOwnershipTransfer> proposeHomeOwnershipTransfer({
+    required String homeId,
+    required String targetUserId,
+    required int expectedTargetRevision,
+    required String stepUpToken,
+  }) => _run(
+    (abortTrigger) async => _ownershipTransfer(
+      (await _invoke(
+        operationId: 'proposeHomeOwnershipTransfer',
+        pathParameters: <String, String>{'homeId': homeId},
+        abortTrigger: abortTrigger,
+        body: <String, Object?>{
+          'targetUserId': targetUserId,
+          'expectedTargetRevision': expectedTargetRevision,
+          'stepUpToken': stepUpToken,
+        },
+      )).body,
+    ),
+    homeId: homeId,
+    treatNotFoundAsRevoked: true,
+    conflictMessage:
+        'This member is no longer available. Refresh and try again.',
+  );
+
+  @override
+  Future<void> acceptHomeOwnershipTransfer({
+    required String homeId,
+    required String transferId,
+    required int expectedRevision,
+  }) => _decideOwnershipTransfer(
+    operationId: 'acceptHomeOwnershipTransfer',
+    homeId: homeId,
+    transferId: transferId,
+    expectedRevision: expectedRevision,
+  );
+
+  @override
+  Future<void> rejectHomeOwnershipTransfer({
+    required String homeId,
+    required String transferId,
+    required int expectedRevision,
+  }) => _decideOwnershipTransfer(
+    operationId: 'rejectHomeOwnershipTransfer',
+    homeId: homeId,
+    transferId: transferId,
+    expectedRevision: expectedRevision,
+  );
+
+  @override
+  Future<void> revokeHomeOwnershipTransfer({
+    required String homeId,
+    required String transferId,
+    required int expectedRevision,
+  }) => _decideOwnershipTransfer(
+    operationId: 'revokeHomeOwnershipTransfer',
+    homeId: homeId,
+    transferId: transferId,
+    expectedRevision: expectedRevision,
+  );
+
+  Future<void> _decideOwnershipTransfer({
+    required String operationId,
+    required String homeId,
+    required String transferId,
+    required int expectedRevision,
+  }) => _run(
+    (abortTrigger) async {
+      await _invoke(
+        operationId: operationId,
+        pathParameters: <String, String>{
+          'homeId': homeId,
+          'transferId': transferId,
+        },
+        abortTrigger: abortTrigger,
+        body: <String, Object?>{'expectedRevision': expectedRevision},
+      );
+    },
+    homeId: homeId,
+    conflictMessage:
+        'This ownership transfer is no longer available. Refresh and try again.',
+  );
+
+  @override
   Future<List<RecipientHomeInvitation>> listPendingInvitations() => _run(
     (abortTrigger) async => _data(
       (await _invoke(
@@ -346,10 +484,12 @@ final class Api11HomeTransport implements HomeTransportPort {
     required String operationId,
     required Future<void> abortTrigger,
     Map<String, String> pathParameters = const <String, String>{},
+    Map<String, String>? query,
     Map<String, Object?>? body,
   }) => _client.invokeOperation(
     operationId: operationId,
     pathParameters: pathParameters,
+    query: query,
     body: body,
     abortTrigger: abortTrigger,
   );
@@ -425,6 +565,35 @@ RecipientHomeInvitation _recipientInvitation(Object? value) {
     revision: _integer(value, 'revision'),
   );
 }
+
+HomeOwnershipTransfer _ownershipTransfer(Object? value) {
+  if (value is! Map<String, Object?>) {
+    throw const FormatException('Expected an ownership transfer object.');
+  }
+  return HomeOwnershipTransfer(
+    id: _uuid(value, 'id'),
+    homeId: _uuid(value, 'homeId'),
+    proposedByUserId: _uuid(value, 'proposedByUserId'),
+    targetUserId: _uuid(value, 'targetUserId'),
+    expectedTargetRevision: _optionalIntegerField(
+      value,
+      'expectedTargetRevision',
+    ),
+    status: _ownershipTransferStatus(_string(value, 'status')),
+    expiresAt: _dateTime(value, 'expiresAt'),
+    revision: _integer(value, 'revision'),
+  );
+}
+
+OwnershipTransferStatus _ownershipTransferStatus(String source) =>
+    switch (source) {
+      'pending' => OwnershipTransferStatus.pending,
+      'accepted' => OwnershipTransferStatus.accepted,
+      'rejected' => OwnershipTransferStatus.rejected,
+      'revoked' => OwnershipTransferStatus.revoked,
+      'expired' => OwnershipTransferStatus.expired,
+      _ => throw FormatException('Unknown ownership transfer status $source.'),
+    };
 
 HomePermissionPolicy _permissionPolicy(Object? value) {
   if (value is! Map<String, Object?>) {
@@ -566,6 +735,16 @@ int _integer(Map<String, Object?> object, String key) {
     return value;
   }
   throw FormatException('Missing $key.');
+}
+
+int? _optionalIntegerField(Map<String, Object?> object, String key) {
+  if (!object.containsKey(key)) {
+    return null;
+  }
+  return switch (object[key]) {
+    final int parsed => parsed,
+    _ => throw FormatException('Expected integer $key.'),
+  };
 }
 
 DateTime _dateTime(Map<String, Object?> object, String key) {

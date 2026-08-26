@@ -25,6 +25,13 @@ enum AiCapability {
 
 enum AiProviderAvailability { available, missingBackendContract, unavailable }
 
+/// Storage and visibility scope of one server-proxy provider profile.
+///
+/// `private` profiles belong to one person and are visible only to them;
+/// `home` profiles are deliberately shared with the whole home by the home
+/// owner. Sharing is never inferred from storage scope.
+enum AiProfileOwnerScope { private, home }
+
 enum AiExtractionKind { receipt, stockPhoto }
 
 enum AiRunState {
@@ -68,6 +75,7 @@ final class AiProviderProfile {
     required this.model,
     required Set<AiCapability> capabilities,
     required this.availability,
+    this.ownerScope = AiProfileOwnerScope.private,
     this.endpoint,
     this.credentialConfigured = false,
     this.strictLocalAttestedAt,
@@ -95,6 +103,7 @@ final class AiProviderProfile {
   final AiProviderKind kind;
   final AiTransport transport;
   final AiEndpointProtocol protocol;
+  final AiProfileOwnerScope ownerScope;
   final Uri? endpoint;
   final String model;
   final Set<AiCapability> capabilities;
@@ -118,6 +127,7 @@ final class AiProviderProfile {
 
   AiProviderProfile copyWith({
     String? displayName,
+    AiProfileOwnerScope? ownerScope,
     Uri? endpoint,
     String? model,
     Set<AiCapability>? capabilities,
@@ -134,6 +144,7 @@ final class AiProviderProfile {
     kind: kind,
     transport: transport,
     protocol: protocol,
+    ownerScope: ownerScope ?? this.ownerScope,
     endpoint: endpoint ?? this.endpoint,
     model: model ?? this.model,
     capabilities: capabilities ?? this.capabilities,

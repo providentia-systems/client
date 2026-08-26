@@ -650,6 +650,249 @@ void main() {
   );
 
   test(
+    'governance refresh publishes the participant ownership transfers',
+    () async {
+      final transport = _FakeHomeTransport(
+        homes: <HomeSummary>[_home('home-a', 'Home A')],
+        ownershipTransfers: <HomeOwnershipTransfer>[_transfer()],
+      );
+      final manager = HomeSessionManager(
+        transport: transport,
+        activeHomeStore: _MemoryActiveHomeStore(),
+      );
+      addTearDown(manager.dispose);
+      await manager.load(sessionActiveHomeId: 'home-a');
+
+      await manager.refreshGovernance();
+
+      expect(transport.ownershipTransferListCalls, 1);
+      expect(manager.snapshot.ownershipTransfers.single.id, 'transfer-1');
+      expect(manager.snapshot.ownershipTransfers.single.isPending, isTrue);
+    },
+  );
+
+  test('member removal sends the read revision and refreshes state', () async {
+    final transport = _FakeHomeTransport(
+      homes: <HomeSummary>[_home('home-a', 'Home A')],
+    );
+    final manager = HomeSessionManager(
+      transport: transport,
+      activeHomeStore: _MemoryActiveHomeStore(),
+    );
+    addTearDown(manager.dispose);
+    await manager.load(sessionActiveHomeId: 'home-a');
+
+    await manager.removeMembership(
+      HomeMembership(
+        userId: 'user-member',
+        displayName: 'Household helper',
+        role: HomeRole.member,
+        revision: 7,
+      ),
+    );
+
+    expect(transport.removedMembership, (
+      userId: 'user-member',
+      expectedRevision: 7,
+    ));
+    expect(transport.membershipListCalls, 1);
+    expect(manager.snapshot.status, HomeSessionStatus.ready);
+  });
+
+  test('member removal never targets the owner membership', () async {
+    final transport = _FakeHomeTransport(
+      homes: <HomeSummary>[_home('home-a', 'Home A')],
+    );
+    final manager = HomeSessionManager(
+      transport: transport,
+      activeHomeStore: _MemoryActiveHomeStore(),
+    );
+    addTearDown(manager.dispose);
+    await manager.load(sessionActiveHomeId: 'home-a');
+
+    await expectLater(
+      manager.removeMembership(_membership()),
+      throwsStateError,
+    );
+    expect(transport.removedMembership, isNull);
+  });
+
+  test(
+    'member removal conflict reloads governance and surfaces retry guidance',
+    () async {
+      final transport = _FakeHomeTransport(
+        homes: <HomeSummary>[_home('home-a', 'Home A')],
+      );
+      transport.removalFailure = const HomeTransportException(
+        kind: HomeFailureKind.conflict,
+        safeMessage:
+            'This member is no longer available. Refresh and try again.',
+        homeId: 'home-a',
+      );
+      final manager = HomeSessionManager(
+        transport: transport,
+        activeHomeStore: _MemoryActiveHomeStore(),
+      );
+      addTearDown(manager.dispose);
+      await manager.load(sessionActiveHomeId: 'home-a');
+
+      await manager.removeMembership(
+        HomeMembership(
+          userId: 'user-member',
+          displayName: 'Household helper',
+          role: HomeRole.member,
+          revision: 2,
+        ),
+      );
+
+      expect(transport.membershipListCalls, 1, reason: 'reloads revisions');
+      expect(manager.snapshot.status, HomeSessionStatus.ready);
+      expect(manager.snapshot.activeHome?.id, 'home-a');
+      expect(
+        manager.snapshot.safeMessage,
+        'This member is no longer available. Refresh and try again.',
+      );
+    },
+  );
+
+  test(
+    'ownership proposal requires the complete step-up confirmation code',
+    () async {
+      final transport = _FakeHomeTransport(
+        homes: <HomeSummary>[_home('home-a', 'Home A')],
+      );
+      final manager = HomeSessionManager(
+        transport: transport,
+        activeHomeStore: _MemoryActiveHomeStore(),
+      );
+      addTearDown(manager.dispose);
+      await manager.load(sessionActiveHomeId: 'home-a');
+
+      await expectLater(
+        manager.proposeOwnershipTransfer(
+          target: HomeMembership(
+            userId: 'user-target',
+            displayName: 'Next owner',
+            role: HomeRole.member,
+            revision: 4,
+          ),
+          stepUpToken: 'too-short',
+        ),
+        throwsArgumentError,
+      );
+      expect(transport.proposedTransfer, isNull);
+
+      await manager.proposeOwnershipTransfer(
+        target: HomeMembership(
+          userId: 'user-target',
+          displayName: 'Next owner',
+          role: HomeRole.member,
+          revision: 4,
+        ),
+        stepUpToken: _stepUpToken,
+      );
+
+      expect(transport.proposedTransfer, (
+        targetUserId: 'user-target',
+        expectedTargetRevision: 4,
+        stepUpToken: _stepUpToken,
+      ));
+      expect(manager.snapshot.ownershipTransfers, hasLength(1));
+    },
+  );
+
+  test(
+    'accepting an ownership transfer reloads the authoritative owner role',
+    () async {
+      final transfer = _transfer(targetUserId: 'user-current');
+      final transport = _FakeHomeTransport(
+        homes: <HomeSummary>[_home('home-a', 'Home A', role: HomeRole.member)],
+        ownershipTransfers: <HomeOwnershipTransfer>[transfer],
+      );
+      final manager = HomeSessionManager(
+        transport: transport,
+        activeHomeStore: _MemoryActiveHomeStore(),
+      );
+      addTearDown(manager.dispose);
+      await manager.load(sessionActiveHomeId: 'home-a');
+
+      await manager.acceptOwnershipTransfer(transfer);
+
+      expect(transport.acceptedTransfer, (
+        transferId: 'transfer-1',
+        expectedRevision: 5,
+      ));
+      expect(manager.snapshot.status, HomeSessionStatus.ready);
+      expect(manager.snapshot.activeHome?.role, HomeRole.owner);
+      expect(manager.snapshot.ownershipTransfers, isEmpty);
+    },
+  );
+
+  test(
+    'transfer decisions stay scoped to pending active-home proposals',
+    () async {
+      final transport = _FakeHomeTransport(
+        homes: <HomeSummary>[_home('home-a', 'Home A')],
+      );
+      final manager = HomeSessionManager(
+        transport: transport,
+        activeHomeStore: _MemoryActiveHomeStore(),
+      );
+      addTearDown(manager.dispose);
+      await manager.load(sessionActiveHomeId: 'home-a');
+
+      await expectLater(
+        manager.revokeOwnershipTransfer(_transfer(homeId: 'other-home')),
+        throwsStateError,
+      );
+      await expectLater(
+        manager.rejectOwnershipTransfer(
+          _transfer(status: OwnershipTransferStatus.revoked),
+        ),
+        throwsStateError,
+      );
+      expect(transport.revokedTransfer, isNull);
+      expect(transport.rejectedTransfer, isNull);
+
+      await manager.revokeOwnershipTransfer(_transfer());
+      expect(transport.revokedTransfer, (
+        transferId: 'transfer-1',
+        expectedRevision: 5,
+      ));
+    },
+  );
+
+  test(
+    'transfer revocation conflict reloads governance with retry guidance',
+    () async {
+      final transport = _FakeHomeTransport(
+        homes: <HomeSummary>[_home('home-a', 'Home A')],
+        governanceTargetFailure: const HomeTransportException(
+          kind: HomeFailureKind.conflict,
+          safeMessage:
+              'This ownership transfer is no longer available. Refresh and try again.',
+          homeId: 'home-a',
+        ),
+      );
+      final manager = HomeSessionManager(
+        transport: transport,
+        activeHomeStore: _MemoryActiveHomeStore(),
+      );
+      addTearDown(manager.dispose);
+      await manager.load(sessionActiveHomeId: 'home-a');
+
+      await manager.revokeOwnershipTransfer(_transfer());
+
+      expect(transport.ownershipTransferListCalls, 1);
+      expect(manager.snapshot.status, HomeSessionStatus.ready);
+      expect(
+        manager.snapshot.safeMessage,
+        'This ownership transfer is no longer available. Refresh and try again.',
+      );
+    },
+  );
+
+  test(
     'activation publishes backend-effective permissions fail closed',
     () async {
       final transport = _FakeHomeTransport(
@@ -767,6 +1010,9 @@ void main() {
   }
 }
 
+const String _stepUpToken =
+    'development-step-up-token-0000000000000000000000000000000000000000';
+
 HomeSummary _home(String id, String name, {HomeRole role = HomeRole.owner}) {
   return HomeSummary(
     id: id,
@@ -778,6 +1024,25 @@ HomeSummary _home(String id, String name, {HomeRole role = HomeRole.owner}) {
     revision: 1,
   );
 }
+
+HomeOwnershipTransfer _transfer({
+  String id = 'transfer-1',
+  String homeId = 'home-a',
+  String proposedByUserId = 'user-owner',
+  String targetUserId = 'user-target',
+  int? expectedTargetRevision,
+  OwnershipTransferStatus status = OwnershipTransferStatus.pending,
+  int revision = 5,
+}) => HomeOwnershipTransfer(
+  id: id,
+  homeId: homeId,
+  proposedByUserId: proposedByUserId,
+  targetUserId: targetUserId,
+  expectedTargetRevision: expectedTargetRevision,
+  status: status,
+  expiresAt: DateTime.utc(2030),
+  revision: revision,
+);
 
 HomeMembership _membership() {
   return HomeMembership(
@@ -808,20 +1073,24 @@ final class _FakeHomeTransport implements HomeTransportPort {
     required this.homes,
     this.switchCompletion,
     List<RecipientHomeInvitation>? pendingInvitations,
+    List<HomeOwnershipTransfer>? ownershipTransfers,
     this.policies,
     this.acceptFailure,
     this.governanceTargetFailure,
     this.unexpectedPolicyFailure,
-  }) : pendingInvitations = pendingInvitations ?? <RecipientHomeInvitation>[];
+  }) : pendingInvitations = pendingInvitations ?? <RecipientHomeInvitation>[],
+       ownershipTransfers = ownershipTransfers ?? <HomeOwnershipTransfer>[];
 
   final List<HomeSummary> homes;
   final Completer<HomeSummary>? switchCompletion;
   final List<RecipientHomeInvitation> pendingInvitations;
+  final List<HomeOwnershipTransfer> ownershipTransfers;
   final List<HomePermissionPolicy>? policies;
   final HomeTransportException? acceptFailure;
   final HomeTransportException? governanceTargetFailure;
   final Object? unexpectedPolicyFailure;
   Object? pendingInvitationFailure;
+  HomeTransportException? removalFailure;
   Completer<List<HomeSummary>>? nextHomesResponse;
   final List<String> switches = <String>[];
   final Map<String, Completer<HomeSummary>> switchCompletions =
@@ -831,6 +1100,14 @@ final class _FakeHomeTransport implements HomeTransportPort {
   int? updatedExpectedRevision;
   int membershipListCalls = 0;
   int invitationListCalls = 0;
+  int ownershipTransferListCalls = 0;
+  int stepUpRequests = 0;
+  ({String userId, int expectedRevision})? removedMembership;
+  ({String targetUserId, int expectedTargetRevision, String stepUpToken})?
+  proposedTransfer;
+  ({String transferId, int expectedRevision})? acceptedTransfer;
+  ({String transferId, int expectedRevision})? rejectedTransfer;
+  ({String transferId, int expectedRevision})? revokedTransfer;
 
   @override
   Future<HomeSummary> acceptPendingInvitation({
@@ -933,6 +1210,106 @@ final class _FakeHomeTransport implements HomeTransportPort {
     if (governanceTargetFailure case final failure?) {
       throw failure;
     }
+  }
+
+  @override
+  Future<void> removeHomeMembership({
+    required String homeId,
+    required String userId,
+    required int expectedRevision,
+  }) async {
+    if (removalFailure case final failure?) {
+      throw failure;
+    }
+    removedMembership = (userId: userId, expectedRevision: expectedRevision);
+  }
+
+  @override
+  Future<List<HomeOwnershipTransfer>> listHomeOwnershipTransfers(
+    String homeId,
+  ) async {
+    ownershipTransferListCalls++;
+    return List<HomeOwnershipTransfer>.of(ownershipTransfers);
+  }
+
+  @override
+  Future<StepUpLinkReceipt> requestStepUpLink() async {
+    stepUpRequests++;
+    return const StepUpLinkReceipt(developmentStepUpToken: _stepUpToken);
+  }
+
+  @override
+  Future<HomeOwnershipTransfer> proposeHomeOwnershipTransfer({
+    required String homeId,
+    required String targetUserId,
+    required int expectedTargetRevision,
+    required String stepUpToken,
+  }) async {
+    if (governanceTargetFailure case final failure?) {
+      throw failure;
+    }
+    proposedTransfer = (
+      targetUserId: targetUserId,
+      expectedTargetRevision: expectedTargetRevision,
+      stepUpToken: stepUpToken,
+    );
+    final transfer = _transfer(
+      homeId: homeId,
+      targetUserId: targetUserId,
+      expectedTargetRevision: expectedTargetRevision,
+    );
+    ownershipTransfers.add(transfer);
+    return transfer;
+  }
+
+  @override
+  Future<void> acceptHomeOwnershipTransfer({
+    required String homeId,
+    required String transferId,
+    required int expectedRevision,
+  }) async {
+    if (governanceTargetFailure case final failure?) {
+      throw failure;
+    }
+    acceptedTransfer = (
+      transferId: transferId,
+      expectedRevision: expectedRevision,
+    );
+    final index = homes.indexWhere((home) => home.id == homeId);
+    homes[index] = _home(homeId, homes[index].name, role: HomeRole.owner);
+    ownershipTransfers.removeWhere((transfer) => transfer.id == transferId);
+  }
+
+  @override
+  Future<void> rejectHomeOwnershipTransfer({
+    required String homeId,
+    required String transferId,
+    required int expectedRevision,
+  }) async {
+    if (governanceTargetFailure case final failure?) {
+      throw failure;
+    }
+    rejectedTransfer = (
+      transferId: transferId,
+      expectedRevision: expectedRevision,
+    );
+    ownershipTransfers.removeWhere((transfer) => transfer.id == transferId);
+  }
+
+  @override
+  Future<void> revokeHomeOwnershipTransfer({
+    required String homeId,
+    required String transferId,
+    required int expectedRevision,
+  }) async {
+    if (governanceTargetFailure case final failure?) {
+      throw failure;
+    }
+    revokedTransfer = (
+      transferId: transferId,
+      expectedRevision: expectedRevision,
+    );
+    ownershipTransfers.removeWhere((transfer) => transfer.id == transferId);
   }
 
   @override
