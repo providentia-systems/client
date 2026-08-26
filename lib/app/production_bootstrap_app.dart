@@ -260,8 +260,6 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp>
           highContrastTheme: ProvidentiaTheme.light(highContrast: true),
           home: LoginLinkSignInPage(
             controller: _identityController,
-            developmentPasswordAvailable:
-                widget.configuration.enableDevelopmentPasswordLogin,
             authenticatedBuilder: (context, identitySnapshot) =>
                 HomeSelectionPage(
                   controller: _homesController,

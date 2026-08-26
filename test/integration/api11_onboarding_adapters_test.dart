@@ -126,6 +126,120 @@ void main() {
     expect(grant.secrets.refreshToken, 'refresh-secret');
   });
 
+  test(
+    'durable exchange maps null expiry to a session without a ceiling',
+    () async {
+      final transport = Api11IdentityTransport(
+        _client(
+          (_) async => _json(<String, Object?>{
+            ..._nativeSessionJson(),
+            'refreshExpiresAt': null,
+            'idleExpiresAt': null,
+            'refreshIdleTtlSeconds': null,
+          }, 200),
+        ),
+        sessionTransport: ClientSessionTransport.nativeBearer,
+      );
+
+      final grant = await transport.exchangeLoginLink(request: _pending());
+
+      expect(grant.metadata.refreshExpiresAt, isNull);
+      expect(grant.metadata.idleExpiresAt, isNull);
+      expect(grant.metadata.refreshIdleTtl, isNull);
+      expect(grant.metadata.isDurable, isTrue);
+      expect(grant.metadata.isExpiredAt(DateTime.utc(2036, 8, 9, 12)), isFalse);
+      expect(grant.metadata.accessExpiresAt, DateTime.utc(2026, 8, 9, 12, 15));
+      expect(grant.secrets.refreshToken, 'refresh-secret');
+    },
+  );
+
+  test('session grant missing its expiry declaration is rejected', () async {
+    for (final omittedField in <String>[
+      'refreshExpiresAt',
+      'idleExpiresAt',
+      'refreshIdleTtlSeconds',
+    ]) {
+      final transport = Api11IdentityTransport(
+        _client(
+          (_) async => _json(
+            <String, Object?>{..._nativeSessionJson()}..remove(omittedField),
+            200,
+          ),
+        ),
+        sessionTransport: ClientSessionTransport.nativeBearer,
+      );
+
+      await expectLater(
+        transport.exchangeLoginLink(request: _pending()),
+        throwsA(
+          isA<IdentityTransportException>().having(
+            (error) => error.kind,
+            'kind',
+            IdentityFailureKind.validation,
+          ),
+        ),
+        reason: omittedField,
+      );
+    }
+  });
+
+  test('device session list parses durable and bounded entries', () async {
+    final transport = Api11IdentityTransport(
+      _client(
+        (_) async => _json(<String, Object?>{
+          'data': <Object?>[
+            _deviceSessionJson(),
+            <String, Object?>{
+              ..._deviceSessionJson(),
+              'id': _secondSessionId,
+              'current': false,
+              'refreshExpiresAt': null,
+              'idleExpiresAt': null,
+            },
+          ],
+        }, 200),
+      ),
+      sessionTransport: ClientSessionTransport.nativeBearer,
+    );
+
+    final sessions = await transport.listDeviceSessions(
+      accessToken: 'access-secret',
+    );
+
+    final bounded = sessions.singleWhere((session) => session.current);
+    final durable = sessions.singleWhere((session) => !session.current);
+    expect(bounded.isDurable, isFalse);
+    expect(bounded.idleExpiresAt, DateTime.utc(2026, 10, 8, 12));
+    expect(durable.isDurable, isTrue);
+    expect(durable.refreshExpiresAt, isNull);
+    expect(durable.idleExpiresAt, isNull);
+    expect(durable.isActiveAt(DateTime.utc(2036, 8, 9, 12)), isTrue);
+  });
+
+  test('device session missing its expiry declaration is rejected', () async {
+    final transport = Api11IdentityTransport(
+      _client(
+        (_) async => _json(<String, Object?>{
+          'data': <Object?>[
+            <String, Object?>{..._deviceSessionJson()}..remove('idleExpiresAt'),
+          ],
+        }, 200),
+      ),
+      sessionTransport: ClientSessionTransport.nativeBearer,
+    );
+
+    await expectLater(
+      transport.listDeviceSessions(accessToken: 'access-secret'),
+      throwsA(
+        isA<IdentityTransportException>().having(
+          (error) => error.kind,
+          'kind',
+          IdentityFailureKind.validation,
+        ),
+      ),
+    );
+  });
+
   test('web grant without required CSRF token is rejected safely', () async {
     final transport = Api11IdentityTransport(
       _client(
@@ -640,6 +754,7 @@ const _requestId = '0198a0b1-c2d3-7e4f-8123-456789abcdef';
 const _deviceId = '0198a0b1-c2d3-7e4f-8123-456789abcdea';
 const _installationId = '0198a0b1-c2d3-7e4f-8123-456789abcd00';
 const _sessionId = '0198a0b1-c2d3-7e4f-8123-456789abcdeb';
+const _secondSessionId = '0198a0b1-c2d3-7e4f-8123-456789abcd01';
 const _userId = '0198a0b1-c2d3-7e4f-8123-456789abcdec';
 const _homeId = '0198a0b1-c2d3-7e4f-8123-456789abcded';
 const _secondHomeId = '0198a0b1-c2d3-7e4f-8123-456789abcdee';

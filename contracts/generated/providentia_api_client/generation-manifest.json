@@ -3,10 +3,10 @@
   "generatorVersion": 7,
   "clientProfile": "homeowner",
   "contract": "../../providentia-v1.json",
-  "contractVersion": "1.18.0",
-  "contractSha256": "fb7f18cc8d2e0f7aaf3ec9f1bd3039316c6f44af0023110936778a8d616a6759",
-  "canonicalOperationCount": 177,
-  "generatedOperationCount": 145,
+  "contractVersion": "1.19.0",
+  "contractSha256": "7e13d550e7a4438297766f654fadbd1e75894efac989229da6fcd0d9f7f97dda",
+  "canonicalOperationCount": 172,
+  "generatedOperationCount": 140,
   "generatedFiles": [
     "pubspec.yaml",
     "lib/providentia_api_client.dart"

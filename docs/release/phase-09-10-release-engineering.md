@@ -134,9 +134,9 @@ Chrome runs the authenticated mailbox flow. The other engines run the PWA and
 persistence checks without requesting another email, keeping a workflow retry
 inside the backend's five-attempt per-address window.
 
-Authenticated browser acceptance uses the production login-link protocol; it
-must never enable or call the development password-login route, and it never
-opens an HTML route on the backend. For the
+Authenticated browser acceptance uses the production login-link protocol —
+the contract's only human authentication; API 1.19.0 has no password route
+anywhere — and it never opens an HTML route on the backend. For the
 authenticated Chrome entry the harness:
 
 1. generates a fresh request ID, installation ID, private polling token, PKCE
@@ -152,8 +152,10 @@ authenticated Chrome entry the harness:
    login** through the app-owned page;
 5. verifies that the approval browser did not receive a session;
 6. polls and exchanges from the original PWA context, then verifies `/api/v1/me`,
-   the authorized home list, current-session identity, 30-day web idle policy,
-   secure cookie attributes and another tab's cookie session;
+   the authorized home list, current-session identity, the deliberately
+   requested 30-day idle bound (durable null-expiry sessions are the default
+   when no bound is requested), secure cookie attributes and another tab's
+   cookie session;
 7. refreshes the session, requires refresh-cookie rotation, logs out and proves
    both `/api/v1/me` and the home list are unauthorized afterward.
 

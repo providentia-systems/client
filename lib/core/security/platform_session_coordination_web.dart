@@ -233,9 +233,10 @@ Map<String, Object?> _grantToJson(SessionGrant grant) => <String, Object?>{
   'installationId': grant.metadata.installationId,
   'userId': grant.metadata.userId,
   'accessExpiresAt': grant.metadata.accessExpiresAt.toIso8601String(),
-  'refreshExpiresAt': grant.metadata.refreshExpiresAt.toIso8601String(),
-  'idleExpiresAt': grant.metadata.idleExpiresAt.toIso8601String(),
-  'refreshIdleTtlSeconds': grant.metadata.refreshIdleTtl.inSeconds,
+  // Null means a durable trusted-device session without an idle ceiling.
+  'refreshExpiresAt': grant.metadata.refreshExpiresAt?.toIso8601String(),
+  'idleExpiresAt': grant.metadata.idleExpiresAt?.toIso8601String(),
+  'refreshIdleTtlSeconds': grant.metadata.refreshIdleTtl?.inSeconds,
   'activeHomeId': grant.metadata.activeHomeId,
   'csrfToken': grant.secrets.csrfToken,
 };
@@ -244,6 +245,14 @@ SessionGrant _grantFromJson(Object? value) {
   if (value is! Map<String, Object?>) {
     throw const FormatException('Expected a coordinated session grant.');
   }
+  if (!value.containsKey('refreshExpiresAt') ||
+      !value.containsKey('idleExpiresAt') ||
+      !value.containsKey('refreshIdleTtlSeconds')) {
+    throw const FormatException('Missing session expiry declaration.');
+  }
+  final refreshIdleTtlSeconds = _optionalInteger(
+    value['refreshIdleTtlSeconds'],
+  );
   return SessionGrant(
     metadata: SessionMetadata(
       sessionId: _string(value, 'sessionId'),
@@ -251,11 +260,11 @@ SessionGrant _grantFromJson(Object? value) {
       installationId: _string(value, 'installationId'),
       userId: _string(value, 'userId'),
       accessExpiresAt: _dateTime(value, 'accessExpiresAt'),
-      refreshExpiresAt: _dateTime(value, 'refreshExpiresAt'),
-      idleExpiresAt: _dateTime(value, 'idleExpiresAt'),
-      refreshIdleTtl: Duration(
-        seconds: _integer(value, 'refreshIdleTtlSeconds'),
-      ),
+      refreshExpiresAt: _optionalDateTime(value['refreshExpiresAt']),
+      idleExpiresAt: _optionalDateTime(value['idleExpiresAt']),
+      refreshIdleTtl: refreshIdleTtlSeconds == null
+          ? null
+          : Duration(seconds: refreshIdleTtlSeconds),
       transport: ClientSessionTransport.webCookie,
       activeHomeId: _optionalString(value['activeHomeId']),
     ),
@@ -277,14 +286,23 @@ String? _optionalString(Object? value) {
   throw const FormatException('Expected a string or null.');
 }
 
-int _integer(Map<String, Object?> value, String key) {
-  final field = value[key];
-  if (field is! int) throw FormatException('Missing $key.');
-  return field;
+int? _optionalInteger(Object? value) {
+  if (value == null) return null;
+  if (value is int) return value;
+  throw const FormatException('Expected an integer or null.');
 }
 
 DateTime _dateTime(Map<String, Object?> value, String key) {
   final parsed = DateTime.tryParse(_string(value, key));
   if (parsed == null) throw FormatException('Invalid $key.');
   return parsed.toUtc();
+}
+
+DateTime? _optionalDateTime(Object? value) {
+  if (value == null) return null;
+  if (value case final String source) {
+    final parsed = DateTime.tryParse(source);
+    if (parsed != null) return parsed.toUtc();
+  }
+  throw const FormatException('Expected a date-time string or null.');
 }

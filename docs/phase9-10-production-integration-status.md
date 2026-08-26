@@ -47,7 +47,7 @@ compatibility surfaces do not satisfy this acceptance boundary.
 
 ## Connected acceptance boundary
 
-Against the pinned API `1.18.0` development stack, the production composition can:
+Against the pinned API `1.19.0` development stack, the production composition can:
 
 1. start and approve a neutral login-link request for a new or existing email;
 2. complete the private exchange in the originating client and bootstrap the

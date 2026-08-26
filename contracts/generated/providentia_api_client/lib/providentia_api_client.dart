@@ -1,6 +1,6 @@
 // GENERATED FILE - DO NOT EDIT.
 // Source: contracts/providentia-v1.json
-// Contract SHA-256: fb7f18cc8d2e0f7aaf3ec9f1bd3039316c6f44af0023110936778a8d616a6759
+// Contract SHA-256: 7e13d550e7a4438297766f654fadbd1e75894efac989229da6fcd0d9f7f97dda
 // ignore_for_file: use_null_aware_elements
 
 library;
@@ -537,12 +537,6 @@ final class ProvidentiaApiClient {
       pathTemplate: "/api/v1/homes/{homeId}/receipts/{receiptId}/commit",
       multipart: false,
     ),
-    "completePasswordReset": ApiOperation(
-      operationId: "completePasswordReset",
-      method: "POST",
-      pathTemplate: "/api/v1/auth/password-reset/complete",
-      multipart: false,
-    ),
     "confirmHomeCatalogImport": ApiOperation(
       operationId: "confirmHomeCatalogImport",
       method: "POST",
@@ -1056,12 +1050,6 @@ final class ProvidentiaApiClient {
       pathTemplate: "/api/v1/homes/{homeId}/stock-movements",
       multipart: false,
     ),
-    "login": ApiOperation(
-      operationId: "login",
-      method: "POST",
-      pathTemplate: "/api/v1/auth/login",
-      multipart: false,
-    ),
     "logout": ApiOperation(
       operationId: "logout",
       method: "POST",
@@ -1147,17 +1135,17 @@ final class ProvidentiaApiClient {
       pathTemplate: "/api/v1/auth/refresh",
       multipart: false,
     ),
-    "registerAccount": ApiOperation(
-      operationId: "registerAccount",
-      method: "POST",
-      pathTemplate: "/api/v1/auth/register",
-      multipart: false,
-    ),
     "rejectHomeOwnershipTransfer": ApiOperation(
       operationId: "rejectHomeOwnershipTransfer",
       method: "POST",
       pathTemplate:
           "/api/v1/homes/{homeId}/ownership-transfers/{transferId}/reject",
+      multipart: false,
+    ),
+    "removeHomeMembership": ApiOperation(
+      operationId: "removeHomeMembership",
+      method: "DELETE",
+      pathTemplate: "/api/v1/homes/{homeId}/memberships/{userId}",
       multipart: false,
     ),
     "requestAccountDataExport": ApiOperation(
@@ -1184,22 +1172,10 @@ final class ProvidentiaApiClient {
       pathTemplate: "/api/v1/homes/{homeId}/erasure-requests",
       multipart: false,
     ),
-    "requestPasswordReset": ApiOperation(
-      operationId: "requestPasswordReset",
-      method: "POST",
-      pathTemplate: "/api/v1/auth/password-reset/request",
-      multipart: false,
-    ),
     "requestStepUpLink": ApiOperation(
       operationId: "requestStepUpLink",
       method: "POST",
       pathTemplate: "/api/v1/auth/step-up-links",
-      multipart: false,
-    ),
-    "resendEmailVerification": ApiOperation(
-      operationId: "resendEmailVerification",
-      method: "POST",
-      pathTemplate: "/api/v1/auth/verify-email/resend",
       multipart: false,
     ),
     "reviewAiExtractionCandidate": ApiOperation(
@@ -1345,12 +1321,6 @@ final class ProvidentiaApiClient {
       method: "POST",
       pathTemplate: "/api/v1/homes/{homeId}/ai/media",
       multipart: true,
-    ),
-    "verifyEmail": ApiOperation(
-      operationId: "verifyEmail",
-      method: "POST",
-      pathTemplate: "/api/v1/auth/verify-email",
-      multipart: false,
     ),
   };
 
@@ -1696,20 +1666,6 @@ final class ProvidentiaApiClient {
         "homeId": homeId,
         "receiptId": receiptId,
       },
-      query: query,
-      headers: headers,
-      body: body,
-    );
-  }
-
-  Future<ApiResponse> completePasswordReset({
-    required Map<String, Object?> body,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "completePasswordReset",
-      pathParameters: const <String, String>{},
       query: query,
       headers: headers,
       body: body,
@@ -2879,20 +2835,6 @@ final class ProvidentiaApiClient {
     );
   }
 
-  Future<ApiResponse> login({
-    required Map<String, Object?> body,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "login",
-      pathParameters: const <String, String>{},
-      query: query,
-      headers: headers,
-      body: body,
-    );
-  }
-
   Future<ApiResponse> logout({
     Map<String, Object?>? body,
     Map<String, String>? query,
@@ -3084,20 +3026,6 @@ final class ProvidentiaApiClient {
     );
   }
 
-  Future<ApiResponse> registerAccount({
-    required Map<String, Object?> body,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "registerAccount",
-      pathParameters: const <String, String>{},
-      query: query,
-      headers: headers,
-      body: body,
-    );
-  }
-
   Future<ApiResponse> rejectHomeOwnershipTransfer({
     required String homeId,
     required String transferId,
@@ -3114,6 +3042,20 @@ final class ProvidentiaApiClient {
       query: query,
       headers: headers,
       body: body,
+    );
+  }
+
+  Future<ApiResponse> removeHomeMembership({
+    required String homeId,
+    required String userId,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "removeHomeMembership",
+      pathParameters: <String, String>{"homeId": homeId, "userId": userId},
+      query: query,
+      headers: headers,
     );
   }
 
@@ -3167,20 +3109,6 @@ final class ProvidentiaApiClient {
     );
   }
 
-  Future<ApiResponse> requestPasswordReset({
-    required Map<String, Object?> body,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "requestPasswordReset",
-      pathParameters: const <String, String>{},
-      query: query,
-      headers: headers,
-      body: body,
-    );
-  }
-
   Future<ApiResponse> requestStepUpLink({
     required Map<String, Object?> body,
     Map<String, String>? query,
@@ -3188,20 +3116,6 @@ final class ProvidentiaApiClient {
   }) {
     return invokeOperation(
       operationId: "requestStepUpLink",
-      pathParameters: const <String, String>{},
-      query: query,
-      headers: headers,
-      body: body,
-    );
-  }
-
-  Future<ApiResponse> resendEmailVerification({
-    required Map<String, Object?> body,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "resendEmailVerification",
       pathParameters: const <String, String>{},
       query: query,
       headers: headers,
@@ -3599,20 +3513,6 @@ final class ProvidentiaApiClient {
       headers: headers,
       formFields: formFields,
       files: files,
-    );
-  }
-
-  Future<ApiResponse> verifyEmail({
-    required Map<String, Object?> body,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "verifyEmail",
-      pathParameters: const <String, String>{},
-      query: query,
-      headers: headers,
-      body: body,
     );
   }
 

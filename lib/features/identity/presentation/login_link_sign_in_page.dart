@@ -8,14 +8,12 @@ final class LoginLinkSignInPage extends StatefulWidget {
   const LoginLinkSignInPage({
     required this.controller,
     this.restoreOnStart = true,
-    this.developmentPasswordAvailable = false,
     this.authenticatedBuilder,
     super.key,
   });
 
   final IdentityController controller;
   final bool restoreOnStart;
-  final bool developmentPasswordAvailable;
   final Widget Function(BuildContext context, IdentitySessionSnapshot snapshot)?
   authenticatedBuilder;
 
@@ -27,12 +25,6 @@ final class _LoginLinkSignInPageState extends State<LoginLinkSignInPage>
     with WidgetsBindingObserver {
   final GlobalKey<FormState> _emailForm = GlobalKey<FormState>();
   final TextEditingController _email = TextEditingController();
-  final TextEditingController _password = TextEditingController();
-  bool _useDevelopmentPassword = false;
-
-  bool get _developmentPasswordEnabled =>
-      widget.developmentPasswordAvailable &&
-      widget.controller.supportsDevelopmentPassword;
 
   @override
   void initState() {
@@ -62,7 +54,6 @@ final class _LoginLinkSignInPageState extends State<LoginLinkSignInPage>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _email.dispose();
-    _password.dispose();
     super.dispose();
   }
 
@@ -213,73 +204,26 @@ final class _LoginLinkSignInPageState extends State<LoginLinkSignInPage>
             autocorrect: false,
             keyboardType: TextInputType.emailAddress,
             textCapitalization: TextCapitalization.none,
-            textInputAction: _useDevelopmentPassword
-                ? TextInputAction.next
-                : TextInputAction.done,
+            textInputAction: TextInputAction.done,
             decoration: const InputDecoration(
               labelText: 'Email address',
               hintText: 'name@example.com',
               prefixIcon: Icon(Icons.email_outlined),
             ),
             validator: _validateEmail,
-            onFieldSubmitted: (_) {
-              if (!_useDevelopmentPassword) {
-                _requestLoginLink();
-              }
-            },
+            onFieldSubmitted: (_) => _requestLoginLink(),
           ),
-          if (_useDevelopmentPassword) ...<Widget>[
-            const SizedBox(height: 12),
-            TextFormField(
-              key: const Key('identity-development-password'),
-              controller: _password,
-              enabled: !widget.controller.isBusy,
-              obscureText: true,
-              textInputAction: TextInputAction.done,
-              decoration: const InputDecoration(
-                labelText: 'Development password',
-                prefixIcon: Icon(Icons.lock_outline),
-              ),
-              validator: (value) => value == null || value.isEmpty
-                  ? 'Enter the development password.'
-                  : null,
-              onFieldSubmitted: (_) => _submitDevelopmentPassword(),
-            ),
-          ],
           const SizedBox(height: 16),
           FilledButton.icon(
             key: const Key('identity-request-login-link'),
-            onPressed: widget.controller.isBusy
-                ? null
-                : (_useDevelopmentPassword
-                      ? _submitDevelopmentPassword
-                      : _requestLoginLink),
+            onPressed: widget.controller.isBusy ? null : _requestLoginLink,
             icon: const Icon(Icons.mark_email_read_outlined),
-            label: Text(
-              _useDevelopmentPassword
-                  ? 'Use development access'
-                  : 'Email me a login link',
-            ),
+            label: const Text('Email me a login link'),
           ),
-          if (_developmentPasswordEnabled)
-            TextButton(
-              key: const Key('identity-toggle-development-password'),
-              onPressed: widget.controller.isBusy
-                  ? null
-                  : () => setState(
-                      () => _useDevelopmentPassword = !_useDevelopmentPassword,
-                    ),
-              child: Text(
-                _useDevelopmentPassword
-                    ? 'Use a login link'
-                    : 'Use local development password',
-              ),
-            ),
           const SizedBox(height: 12),
-          if (!_useDevelopmentPassword)
-            const Text(
-              'For privacy, the response is the same whether this address is new or already registered.',
-            ),
+          const Text(
+            'For privacy, the response is the same whether this address is new or already registered.',
+          ),
         ],
       ),
     );
@@ -346,17 +290,6 @@ final class _LoginLinkSignInPageState extends State<LoginLinkSignInPage>
   void _requestLoginLink() {
     if (_emailForm.currentState?.validate() ?? false) {
       unawaited(widget.controller.requestLoginLink(_email.text));
-    }
-  }
-
-  void _submitDevelopmentPassword() {
-    if (_emailForm.currentState?.validate() ?? false) {
-      unawaited(
-        widget.controller.signInWithDevelopmentPassword(
-          email: _email.text,
-          password: _password.text,
-        ),
-      );
     }
   }
 

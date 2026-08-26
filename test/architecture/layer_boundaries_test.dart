@@ -164,7 +164,21 @@ void main() {
         reason: '$requiredSymbol must remain reachable from production.',
       );
     }
-    expect(source, contains('enableDevelopmentPasswordLogin'));
+    // API 1.19.0 has no human-account password surface anywhere; the
+    // login-link flow is the only human authentication path.
+    for (final removedSymbol in <String>[
+      'enableDevelopmentPasswordLogin',
+      'DevelopmentPassword',
+      'developmentPassword',
+      'loginWithPassword',
+      'signInWithPassword',
+    ]) {
+      expect(
+        source,
+        isNot(contains(removedSymbol)),
+        reason: '$removedSymbol was removed with the password surface.',
+      );
+    }
 
     final accountSource = File(
       'lib/features/identity/presentation/account_access_page.dart',

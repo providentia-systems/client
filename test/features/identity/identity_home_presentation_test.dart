@@ -9,6 +9,7 @@ import 'package:providentia/features/identity/application/identity_ports.dart';
 import 'package:providentia/features/identity/application/identity_session_manager.dart';
 import 'package:providentia/features/identity/domain/identity_models.dart';
 import 'package:providentia/features/identity/presentation/account_access_page.dart';
+import 'package:providentia/features/identity/presentation/device_sessions_page.dart';
 import 'package:providentia/features/identity/presentation/identity_controller.dart';
 import 'package:providentia/features/identity/presentation/login_link_sign_in_page.dart';
 
@@ -49,31 +50,61 @@ void main() {
     await tester.pump();
   });
 
-  testWidgets('development password is hidden unless explicitly enabled', (
-    tester,
-  ) async {
-    final identity = _IdentityFixture(developmentPassword: true);
+  testWidgets('sign-in never renders any password affordance', (tester) async {
+    final identity = _IdentityFixture();
     addTearDown(identity.dispose);
     await tester.pumpWidget(
       MaterialApp(
         home: LoginLinkSignInPage(
           controller: identity.controller,
           restoreOnStart: false,
-          developmentPasswordAvailable: true,
         ),
       ),
     );
 
-    await tester.tap(
+    expect(find.byType(TextField), findsOneWidget);
+    expect(
       find.byKey(const Key('identity-toggle-development-password')),
+      findsNothing,
     );
-    await tester.pump();
-
     expect(
       find.byKey(const Key('identity-development-password')),
+      findsNothing,
+    );
+    expect(find.textContaining('password'), findsOneWidget);
+    expect(
+      find.text('Enter your email. No password is needed.'),
       findsOneWidget,
     );
-    expect(find.text('Use development access'), findsOneWidget);
+  });
+
+  testWidgets('device list renders durable sessions without an idle deadline', (
+    tester,
+  ) async {
+    final identity = _AuthenticatedIdentityFixture();
+    addTearDown(identity.dispose);
+    await identity.controller.restore();
+
+    await tester.pumpWidget(
+      MaterialApp(home: DeviceSessionsPage(controller: identity.controller)),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Durable phone'), findsOneWidget);
+    expect(find.textContaining('Signed in until you sign out'), findsOneWidget);
+    expect(find.textContaining('30 days'), findsNothing);
+    expect(find.textContaining('60 days'), findsNothing);
+    final boundedCard = find.byKey(
+      const Key('device-session-$_remoteSessionId'),
+    );
+    expect(
+      find.descendant(
+        of: boundedCard,
+        matching: find.textContaining('Idle deadline'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Expired browser'), findsNothing);
   });
 
   testWidgets('chooser exposes recipient invitations and accepts by revision', (
@@ -462,10 +493,7 @@ const _verifier =
 const _state = 'login-state-000000000000000000000000000000000';
 
 final class _IdentityFixture {
-  _IdentityFixture({bool developmentPassword = false})
-    : transport = developmentPassword
-          ? _DevelopmentIdentityTransport()
-          : _PresentationIdentityTransport() {
+  _IdentityFixture() : transport = _PresentationIdentityTransport() {
     manager = IdentitySessionManager(
       transport: transport,
       credentialStore: _MemoryCredentialStore(),
@@ -599,16 +627,6 @@ class _PresentationIdentityTransport implements IdentityTransportPort {
   }) async {}
 }
 
-final class _DevelopmentIdentityTransport extends _PresentationIdentityTransport
-    implements DevelopmentPasswordIdentityTransportPort {
-  @override
-  Future<SessionGrant> loginWithPassword({
-    required String email,
-    required String password,
-    required DeviceDescriptor device,
-  }) => throw UnimplementedError();
-}
-
 final class _AuthenticatedPresentationIdentityTransport
     extends _PresentationIdentityTransport {
   _AuthenticatedPresentationIdentityTransport(this.now, this.platformRoles)
@@ -635,6 +653,14 @@ final class _AuthenticatedPresentationIdentityTransport
           deviceName: 'Expired browser',
           platform: 'web',
           expired: true,
+        ),
+        _identityDeviceSession(
+          now,
+          id: _durableSessionId,
+          deviceId: _durableDeviceId,
+          deviceName: 'Durable phone',
+          platform: 'android',
+          durable: true,
         ),
       ];
 
@@ -944,6 +970,8 @@ const _remoteSessionId = '0198a0b1-c2d3-7e4f-8123-456789abcda4';
 const _remoteDeviceId = '0198a0b1-c2d3-7e4f-8123-456789abcda5';
 const _expiredSessionId = '0198a0b1-c2d3-7e4f-8123-456789abcda6';
 const _expiredDeviceId = '0198a0b1-c2d3-7e4f-8123-456789abcda7';
+const _durableSessionId = '0198a0b1-c2d3-7e4f-8123-456789abcda8';
+const _durableDeviceId = '0198a0b1-c2d3-7e4f-8123-456789abcda9';
 
 SessionGrant _identityGrant(DateTime now) => SessionGrant(
   metadata: SessionMetadata(
@@ -970,6 +998,7 @@ DeviceSessionView _identityDeviceSession(
   required String platform,
   bool current = false,
   bool expired = false,
+  bool durable = false,
 }) => DeviceSessionView(
   id: id,
   deviceId: deviceId,
@@ -984,10 +1013,14 @@ DeviceSessionView _identityDeviceSession(
   accessExpiresAt: expired
       ? now.subtract(const Duration(minutes: 1))
       : now.add(const Duration(minutes: 15)),
-  refreshExpiresAt: expired
+  refreshExpiresAt: durable
+      ? null
+      : expired
       ? now.subtract(const Duration(minutes: 1))
       : now.add(const Duration(days: 60)),
-  idleExpiresAt: expired
+  idleExpiresAt: durable
+      ? null
+      : expired
       ? now.subtract(const Duration(minutes: 1))
       : now.add(const Duration(days: 60)),
 );

@@ -133,8 +133,8 @@ void main() {
       );
     });
 
-    test('publishes only the API 1.18.0 homeowner operation registry', () {
-      expect(ProvidentiaApiClient.operations, hasLength(145));
+    test('publishes only the API 1.19.0 homeowner operation registry', () {
+      expect(ProvidentiaApiClient.operations, hasLength(140));
       expect(
         ProvidentiaApiClient.operations['createAiExtraction'],
         isA<ApiOperation>()
@@ -147,9 +147,19 @@ void main() {
             .having((operation) => operation.multipart, 'multipart', true),
       );
       expect(
+        ProvidentiaApiClient.operations['removeHomeMembership'],
+        isA<ApiOperation>()
+            .having((operation) => operation.method, 'method', 'DELETE')
+            .having(
+              (operation) => operation.pathTemplate,
+              'path',
+              '/api/v1/homes/{homeId}/memberships/{userId}',
+            )
+            .having((operation) => operation.multipart, 'multipart', false),
+      );
+      expect(
         ProvidentiaApiClient.operations.keys,
         containsAll(<String>[
-          'login',
           'startLoginLink',
           'proveLoginLinkApproval',
           'reviewLoginLinkApproval',
@@ -158,6 +168,7 @@ void main() {
           'exchangeLoginLink',
           'refreshSession',
           'getCurrentUser',
+          'removeHomeMembership',
           'createHome',
           'listPendingHomeInvitations',
           'listHomeStock',
@@ -174,7 +185,15 @@ void main() {
           'submitCatalogProposal',
         ]),
       );
+      // API 1.19.0 removed the entire human-account password and
+      // email-verification surface; login links are the only human sign-in.
       for (final forbiddenOperation in <String>[
+        'registerAccount',
+        'login',
+        'verifyEmail',
+        'resendEmailVerification',
+        'requestPasswordReset',
+        'completePasswordReset',
         'getMetrics',
         'listPlatformAdministrators',
         'grantPlatformAdministrator',
@@ -234,31 +253,53 @@ void main() {
         baseUri: Uri.parse('https://api.example.test'),
         httpClient: MockClient((request) async {
           expect(request.method, 'POST');
-          expect(request.url.path, '/api/v1/auth/login');
+          expect(request.url.path, '/api/v1/auth/login-links');
           expect(
             request.headers['Content-Type'],
             startsWith('application/json'),
           );
           expect(jsonDecode(request.body), <String, Object?>{
             'email': 'owner@example.test',
-            'password': 'correct horse battery staple',
+            'applicationKind': 'homeowner',
           });
           return http.Response(
-            jsonEncode(<String, Object?>{'accessToken': 'redacted'}),
-            200,
+            jsonEncode(<String, Object?>{'accepted': true}),
+            202,
             headers: <String, String>{'content-type': 'application/json'},
           );
         }),
       );
 
-      final response = await client.login(
+      final response = await client.startLoginLink(
         body: <String, Object?>{
           'email': 'owner@example.test',
-          'password': 'correct horse battery staple',
+          'applicationKind': 'homeowner',
         },
       );
 
-      expect(response.requireObject()['accessToken'], 'redacted');
+      expect(response.requireObject()['accepted'], true);
+    });
+
+    test('sends the revisioned membership removal without a body', () async {
+      final client = ProvidentiaApiClient(
+        baseUri: Uri.parse('https://api.example.test'),
+        httpClient: MockClient((request) async {
+          expect(request.method, 'DELETE');
+          expect(request.url.path, '/api/v1/homes/home-1/memberships/user%201');
+          expect(request.url.queryParameters['expectedRevision'], '7');
+          expect(request.body, isEmpty);
+          return http.Response('', 204);
+        }),
+      );
+
+      final response = await client.removeHomeMembership(
+        homeId: 'home-1',
+        userId: 'user 1',
+        query: <String, String>{'expectedRevision': '7'},
+      );
+
+      expect(response.statusCode, 204);
+      expect(response.body, isNull);
     });
 
     test('encodes path parameters and forwards query values', () async {
