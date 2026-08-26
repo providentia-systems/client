@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:providentia/features/catalog_import/presentation/catalog_import_access.dart';
 import 'package:providentia/features/homes/domain/home_models.dart';
 import 'package:providentia/features/homes/presentation/home_governance_page.dart';
 import 'package:providentia/features/homes/presentation/homes_controller.dart';
@@ -13,6 +14,7 @@ final class AccountAccessPage extends StatelessWidget {
     this.catalogContributionPageBuilder,
     this.catalogProductImageContributionPageBuilder,
     this.catalogStorePriceContributionPageBuilder,
+    this.catalogImportPageBuilder,
     this.householdReportsPageBuilder,
     this.householdAiPageBuilder,
     this.dataGovernancePageBuilder,
@@ -25,6 +27,7 @@ final class AccountAccessPage extends StatelessWidget {
   final WidgetBuilder? catalogContributionPageBuilder;
   final WidgetBuilder? catalogProductImageContributionPageBuilder;
   final WidgetBuilder? catalogStorePriceContributionPageBuilder;
+  final WidgetBuilder? catalogImportPageBuilder;
   final WidgetBuilder? householdReportsPageBuilder;
   final WidgetBuilder? householdAiPageBuilder;
   final WidgetBuilder? dataGovernancePageBuilder;
@@ -191,6 +194,21 @@ final class AccountAccessPage extends StatelessWidget {
                 MaterialPageRoute<void>(
                   builder: catalogStorePriceContributionPageBuilder!,
                 ),
+              ),
+            ),
+          if (home != null &&
+              catalogImportPageBuilder != null &&
+              mayImportCatalogSpreadsheet(permissions))
+            ListTile(
+              key: const Key('open-catalog-import'),
+              leading: const Icon(Icons.upload_file_outlined),
+              title: const Text('Import from spreadsheet'),
+              subtitle: const Text(
+                'Map a CSV or Excel product list and review before applying',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context).push<void>(
+                MaterialPageRoute<void>(builder: catalogImportPageBuilder!),
               ),
             ),
           if (home != null &&

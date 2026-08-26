@@ -11,6 +11,11 @@ Current direct non-SDK runtime dependencies:
 - `drift 2.34.3`, the typed local database and migration API
 - `drift_flutter 0.3.1`, the persistent native and web database opener
 - `sqlite3 3.5.0`, pinned explicitly to the compatible native/WebAssembly ABI
+- `excel_plus 2.15.0`, XLSX decoding for the desktop/web catalog spreadsheet
+  import. Chosen over `excel` and `spreadsheet_decoder` because it is the
+  maintained decoder compatible with the `archive 4.0.9`/`xml 7.0.1` tree the
+  application already locks; it adds only `csv_plus` transitively, and CSV
+  parsing stays in dependency-free domain code
 
 Current direct development dependencies:
 

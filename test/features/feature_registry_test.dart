@@ -9,6 +9,7 @@ void main() {
       'identity',
       'homes',
       'catalog',
+      'catalog_import',
       'inventory',
       'purchasing',
       'shopping',
