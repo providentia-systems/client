@@ -59,6 +59,13 @@ import 'package:providentia/features/catalog/presentation/catalog_product_contri
 import 'package:providentia/features/catalog/presentation/catalog_product_image_contribution_page.dart';
 import 'package:providentia/features/catalog/presentation/catalog_sharing_page.dart';
 import 'package:providentia/features/catalog/presentation/catalog_store_price_contribution_page.dart';
+import 'package:providentia/features/catalog_import/application/catalog_import_controller.dart';
+import 'package:providentia/features/catalog_import/application/catalog_import_ports.dart';
+import 'package:providentia/features/catalog_import/infrastructure/generated_catalog_import_transport.dart';
+import 'package:providentia/features/catalog_import/infrastructure/spreadsheet_file_source.dart';
+import 'package:providentia/features/catalog_import/infrastructure/xlsx_spreadsheet_decoder.dart';
+import 'package:providentia/features/catalog_import/presentation/catalog_import_access.dart';
+import 'package:providentia/features/catalog_import/presentation/catalog_import_page.dart';
 import 'package:providentia/features/data_governance/application/data_governance_service.dart';
 import 'package:providentia/features/data_governance/domain/data_governance_models.dart';
 import 'package:providentia/features/data_governance/infrastructure/generated_data_governance_repository.dart';
@@ -947,6 +954,7 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
                 _catalogProductImageContributionPageBuilder,
             catalogStorePriceContributionPageBuilder:
                 _catalogStorePriceContributionPageBuilder,
+            catalogImportPageBuilder: _catalogImportPageBuilder,
             householdReportsPageBuilder: widget.householdReportsPageBuilder,
             householdAiPageBuilder: _connectedHouseholdAiPageBuilder,
             dataGovernancePageBuilder: widget.dataGovernancePageBuilder,
@@ -986,6 +994,20 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
         onAuthorizationLost: widget.onCatalogAuthorizationLost,
       );
     };
+  }
+
+  WidgetBuilder? get _catalogImportPageBuilder {
+    final permissions = widget.homesController.snapshot.effectivePermissions;
+    if (!mayImportCatalogSpreadsheet(permissions) ||
+        !spreadsheetImportFormFactorSupported()) {
+      return null;
+    }
+    return (_) => ProductionCatalogImportRoute(
+      gateway: GeneratedCatalogImportTransport(widget.api),
+      homeId: widget.home.id,
+      protectedRouteRegistry: widget.protectedRouteRegistry,
+      onAuthorizationLost: widget.onCatalogAuthorizationLost,
+    );
   }
 
   WidgetBuilder? get _catalogProductImageContributionPageBuilder {
@@ -1458,6 +1480,64 @@ final class _ProductionCatalogStorePriceContributionRouteState
     inventoryController: widget.inventoryController,
     defaultCurrency: widget.defaultCurrency,
   );
+
+  @override
+  void dispose() {
+    widget.protectedRouteRegistry.unregister(_clearSensitiveState);
+    _clearSensitiveState();
+    _controller.dispose();
+    super.dispose();
+  }
+}
+
+/// Route-owned bridge for one explicit desktop/web spreadsheet import. The
+/// selection path never touches the AI media registry, parsed rows stay
+/// route-owned, and nothing is applied before the in-page confirmation.
+@visibleForTesting
+final class ProductionCatalogImportRoute extends StatefulWidget {
+  const ProductionCatalogImportRoute({
+    required this.gateway,
+    required this.homeId,
+    required this.protectedRouteRegistry,
+    required this.onAuthorizationLost,
+    this.pickFile,
+    super.key,
+  });
+
+  final CatalogImportGateway gateway;
+  final String homeId;
+  final ProductionProtectedRouteRegistry protectedRouteRegistry;
+  final Future<void> Function() onAuthorizationLost;
+  final SpreadsheetFilePick? pickFile;
+
+  @override
+  State<ProductionCatalogImportRoute> createState() =>
+      _ProductionCatalogImportRouteState();
+}
+
+final class _ProductionCatalogImportRouteState
+    extends State<ProductionCatalogImportRoute> {
+  late final CatalogImportController _controller;
+  late final VoidCallback _clearSensitiveState;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = CatalogImportController(
+      homeId: widget.homeId,
+      gateway: widget.gateway,
+      pickFile: widget.pickFile ?? const SpreadsheetFileSource().pick,
+      parser: const SpreadsheetTableParser(decodeXlsx: decodeXlsxGrid),
+      idGenerator: UuidV4Generator().call,
+      onAuthorizationLost: widget.onAuthorizationLost,
+    );
+    _clearSensitiveState = _controller.clearSensitiveState;
+    widget.protectedRouteRegistry.register(_clearSensitiveState);
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      CatalogImportPage(controller: _controller);
 
   @override
   void dispose() {

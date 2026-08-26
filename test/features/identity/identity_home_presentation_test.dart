@@ -267,6 +267,8 @@ void main() {
                 const Scaffold(body: Text('Product image contribution route')),
             catalogStorePriceContributionPageBuilder: (_) =>
                 const Scaffold(body: Text('Store price contribution route')),
+            catalogImportPageBuilder: (_) =>
+                const Scaffold(body: Text('Spreadsheet import route')),
           ),
         ),
       );
@@ -275,6 +277,7 @@ void main() {
         find.byKey(const Key('open-catalog-product-contribution')),
         findsOneWidget,
       );
+      expect(find.byKey(const Key('open-catalog-import')), findsOneWidget);
       expect(
         find.byKey(const Key('open-catalog-product-image-contribution')),
         findsOneWidget,
@@ -288,6 +291,31 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('Product image contribution route'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'spreadsheet import stays hidden without the catalog-import permission',
+    (tester) async {
+      final identity = _AuthenticatedIdentityFixture();
+      final homes = _HomeFixture(existingHomes: 1);
+      addTearDown(identity.dispose);
+      addTearDown(homes.dispose);
+      await identity.controller.restore();
+      await homes.controller.load(sessionActiveHomeId: 'home-0');
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: AccountAccessPage(
+            identityController: identity.controller,
+            homesController: homes.controller,
+            catalogImportPageBuilder: (_) =>
+                const Scaffold(body: Text('Spreadsheet import route')),
+          ),
+        ),
+      );
+
+      expect(find.byKey(const Key('open-catalog-import')), findsNothing);
     },
   );
 

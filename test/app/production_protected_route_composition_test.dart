@@ -1,6 +1,12 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:providentia/app/production_bootstrap_app.dart';
+import 'package:providentia/features/catalog_import/application/catalog_import_ports.dart';
+import 'package:providentia/features/catalog_import/domain/catalog_import_models.dart';
+import 'package:providentia/features/catalog_import/domain/spreadsheet_models.dart';
 import 'package:providentia/features/data_governance/application/data_governance_service.dart';
 import 'package:providentia/features/data_governance/domain/data_governance_models.dart';
 import 'package:providentia/features/homes/domain/home_models.dart';
@@ -77,6 +83,47 @@ void main() {
     await tester.tap(find.text('Check access'));
     await tester.pumpAndSettle();
     expect(authorizationLosses, 1);
+  });
+
+  testWidgets('catalog import route owns clearing and registry disposal', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final registry = ProductionProtectedRouteRegistry();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ProductionCatalogImportRoute(
+          gateway: const _UnreachedImportGateway(),
+          homeId: _homeId,
+          protectedRouteRegistry: registry,
+          onAuthorizationLost: () async {},
+          pickFile: () async => PickedSpreadsheetFile(
+            name: 'products.csv',
+            kind: SpreadsheetFileKind.csv,
+            bytes: Uint8List.fromList(utf8.encode('name\nRolled oats\n')),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('catalog-import-pick-file')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('catalog-import-pick-file')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('catalog-import-record-type')), findsOneWidget);
+
+    registry.clearSensitiveState();
+    await tester.pump();
+    expect(find.byKey(const Key('catalog-import-record-type')), findsNothing);
+    expect(find.byKey(const Key('catalog-import-pick-file')), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    registry.clearSensitiveState();
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets(
@@ -336,3 +383,27 @@ DataGovernanceRequest _request({
 
 const String _homeId = '01912345-6789-7abc-8def-0123456789ab';
 final DateTime _instant = DateTime.utc(2026, 8, 11);
+
+final class _UnreachedImportGateway implements CatalogImportGateway {
+  const _UnreachedImportGateway();
+
+  @override
+  Future<CatalogImportBatchView> stage({
+    required String homeId,
+    required String idempotencyKey,
+    required List<Map<String, Object?>> records,
+  }) async => throw StateError('The import gateway must not be reached.');
+
+  @override
+  Future<CatalogImportBatchView> fetch({
+    required String homeId,
+    required String importId,
+  }) async => throw StateError('The import gateway must not be reached.');
+
+  @override
+  Future<CatalogImportBatchView> confirm({
+    required String homeId,
+    required String importId,
+    required int expectedRevision,
+  }) async => throw StateError('The import gateway must not be reached.');
+}
