@@ -32,6 +32,9 @@ CI emits a machine-readable Dart dependency inventory. A release workflow must
 add full OSI licence validation, a release SBOM, vulnerability scanning, and
 signed provenance before Phase 9 artifacts are distributed.
 
-The owner has not selected a distribution licence. This repository therefore
-contains no project `LICENSE` file and makes no open-source licensing claim.
-Flutter-generated runner files retain their upstream copyright headers.
+Providentia is proprietary software under `LicenseRef-Proprietary`; it is not
+open source. The root [LICENSE](../LICENSE) grants no right to use, copy,
+modify, merge, publish, distribute, sublicense, or sell the project except as
+expressly authorised in writing by Vast Development Method Trading Pty Ltd.
+Flutter-generated runner files and third-party dependencies retain their own
+upstream copyright and licence terms.
