@@ -1,5 +1,6 @@
 # Providentia Flutter documentation
 
+- [License](../LICENSE): proprietary terms and rights expressly reserved by Vast Development Method Trading Pty Ltd.
 - [Project memory](project-memory.md): permanent owner and compatibility
   decisions that future work must preserve.
 - [Controlling implementation prompt](product/providentia_master_implementation_prompt_V1.md):
