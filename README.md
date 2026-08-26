@@ -1,5 +1,8 @@
 # Providentia Flutter application
 
+> **Proprietary software.** Copyright (c) 2026 Vast Development Method Trading
+> Pty Ltd. All rights reserved. No licence is granted; see [LICENSE](LICENSE).
+
 This repository contains the authenticated, multi-platform Providentia client.
 The application supplies real Android, iOS, Windows, macOS, Linux, and web
 runners, explicit core/feature boundaries, pinned toolchains, a pinned backend
@@ -181,6 +184,12 @@ the Phase 5–8 backend boundary is in
 and the exact support claims are in
 [docs/platform-support.md](docs/platform-support.md).
 
-This is a proprietary project. No distribution licence has been selected. Do
-not publish or redistribute the application until the owner records that
-decision.
+## License
+
+Copyright (c) 2026 Vast Development Method Trading Pty Ltd. All rights reserved.
+
+This repository is proprietary software. No licence is granted to use, copy,
+modify, merge, publish, distribute, sublicense, or sell the software except as
+expressly authorised in writing by Vast Development Method Trading Pty Ltd.
+Viewing or forking this repository on GitHub does not grant a licence. See the
+[LICENSE](LICENSE) file for the complete terms.
