@@ -6,10 +6,7 @@ import 'package:providentia/features/identity/domain/identity_models.dart';
 import 'package:providentia_api_client/providentia_api_client.dart';
 
 final class Api11IdentityTransport
-    implements
-        IdentityTransportPort,
-        DevelopmentPasswordIdentityTransportPort,
-        AbortBoundIdentityTransportPort {
+    implements IdentityTransportPort, AbortBoundIdentityTransportPort {
   const Api11IdentityTransport(
     this._client, {
     required this.sessionTransport,
@@ -142,36 +139,6 @@ final class Api11IdentityTransport
       );
     } on ProvidentiaApiException catch (error) {
       throw _identityFailure(error);
-    } on http.ClientException {
-      throw _identityNetworkFailure();
-    }
-  }
-
-  @override
-  Future<SessionGrant> loginWithPassword({
-    required String email,
-    required String password,
-    required DeviceDescriptor device,
-  }) async {
-    try {
-      final response = await _invoke(
-        operationId: 'login',
-        body: <String, Object?>{
-          'email': email.trim().toLowerCase(),
-          'password': password,
-          'deviceId': device.id,
-          'deviceName': device.name,
-          'platform': device.platform,
-          'transport': _transportName(sessionTransport),
-        },
-      );
-      return _grant(response.requireObject());
-    } on ProvidentiaApiException catch (error) {
-      throw _identityFailure(error);
-    } on FormatException {
-      throw _malformedIdentityResponse('Invalid development session response.');
-    } on ArgumentError {
-      throw _malformedIdentityResponse('Invalid development session response.');
     } on http.ClientException {
       throw _identityNetworkFailure();
     }
@@ -316,17 +283,25 @@ final class Api11IdentityTransport
     if (returnedTransport != sessionTransport) {
       throw const FormatException('Session transport changed.');
     }
+    if (!json.containsKey('refreshExpiresAt') ||
+        !json.containsKey('idleExpiresAt') ||
+        !json.containsKey('refreshIdleTtlSeconds')) {
+      throw const FormatException('Missing session expiry declaration.');
+    }
+    final refreshIdleTtlSeconds = _optionalInteger(
+      json['refreshIdleTtlSeconds'],
+    );
     final metadata = SessionMetadata(
       sessionId: _string(json, 'sessionId'),
       deviceId: _string(json, 'deviceId'),
       installationId: _string(json, 'installationId'),
       userId: _string(json, 'userId'),
       accessExpiresAt: _dateTime(json, 'accessExpiresAt'),
-      refreshExpiresAt: _dateTime(json, 'refreshExpiresAt'),
-      idleExpiresAt: _dateTime(json, 'idleExpiresAt'),
-      refreshIdleTtl: Duration(
-        seconds: _integer(json, 'refreshIdleTtlSeconds'),
-      ),
+      refreshExpiresAt: _optionalDateTime(json['refreshExpiresAt']),
+      idleExpiresAt: _optionalDateTime(json['idleExpiresAt']),
+      refreshIdleTtl: refreshIdleTtlSeconds == null
+          ? null
+          : Duration(seconds: refreshIdleTtlSeconds),
       transport: returnedTransport,
       activeHomeId: _optionalString(json['activeHomeId']),
     );
@@ -344,6 +319,10 @@ final class Api11IdentityTransport
     if (value is! Map<String, Object?>) {
       throw const FormatException('Expected a device session object.');
     }
+    if (!value.containsKey('refreshExpiresAt') ||
+        !value.containsKey('idleExpiresAt')) {
+      throw const FormatException('Missing device session expiry declaration.');
+    }
     return DeviceSessionView(
       id: _string(value, 'id'),
       deviceId: _string(value, 'deviceId'),
@@ -355,8 +334,8 @@ final class Api11IdentityTransport
       createdAt: _dateTime(value, 'createdAt'),
       lastSeenAt: _dateTime(value, 'lastSeenAt'),
       accessExpiresAt: _dateTime(value, 'accessExpiresAt'),
-      refreshExpiresAt: _dateTime(value, 'refreshExpiresAt'),
-      idleExpiresAt: _dateTime(value, 'idleExpiresAt'),
+      refreshExpiresAt: _optionalDateTime(value['refreshExpiresAt']),
+      idleExpiresAt: _optionalDateTime(value['idleExpiresAt']),
       revokedAt: _optionalDateTime(value['revokedAt']),
     );
   }
@@ -529,6 +508,12 @@ int _integer(Map<String, Object?> json, String key) {
     return value;
   }
   throw FormatException('Missing $key.');
+}
+
+int? _optionalInteger(Object? value) {
+  if (value == null) return null;
+  if (value is int) return value;
+  throw const FormatException('Expected an integer or null.');
 }
 
 bool _boolean(Map<String, Object?> json, String key) {

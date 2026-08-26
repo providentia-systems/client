@@ -4,14 +4,12 @@ class RuntimeConfiguration {
     required this.apiBaseUri,
     required this.homeownerAppLinkBaseUri,
     required this.environment,
-    required this.enableDevelopmentPasswordLogin,
   });
 
   factory RuntimeConfiguration({
     required Uri apiBaseUri,
     required String environment,
     Uri? homeownerAppLinkBaseUri,
-    bool enableDevelopmentPasswordLogin = false,
   }) {
     final validatedEnvironment = environment.trim();
     if (validatedEnvironment.isEmpty) {
@@ -26,17 +24,10 @@ class RuntimeConfiguration {
           Uri.parse('providentia://login-link/homeowner'),
       environment: validatedEnvironment,
     );
-    if (enableDevelopmentPasswordLogin &&
-        validatedEnvironment != 'development') {
-      throw const FormatException(
-        'Development password login can only be enabled in development.',
-      );
-    }
     return RuntimeConfiguration._(
       apiBaseUri: validatedApiBaseUri,
       homeownerAppLinkBaseUri: validatedHomeownerAppLinkBaseUri,
       environment: validatedEnvironment,
-      enableDevelopmentPasswordLogin: enableDevelopmentPasswordLogin,
     );
   }
 
@@ -49,9 +40,6 @@ class RuntimeConfiguration {
       'PROVIDENTIA_ENVIRONMENT',
       defaultValue: 'development',
     );
-    const enableDevelopmentPasswordLogin = bool.fromEnvironment(
-      'PROVIDENTIA_ENABLE_DEVELOPMENT_PASSWORD_LOGIN',
-    );
     const rawHomeownerAppLinkBase = String.fromEnvironment(
       'PROVIDENTIA_HOMEOWNER_APP_LINK_BASE',
       defaultValue: 'providentia://login-link/homeowner',
@@ -60,14 +48,12 @@ class RuntimeConfiguration {
       apiBaseUri: Uri.parse(rawApiBaseUrl),
       homeownerAppLinkBaseUri: Uri.parse(rawHomeownerAppLinkBase),
       environment: environment,
-      enableDevelopmentPasswordLogin: enableDevelopmentPasswordLogin,
     );
   }
 
   final Uri apiBaseUri;
   final Uri homeownerAppLinkBaseUri;
   final String environment;
-  final bool enableDevelopmentPasswordLogin;
 
   static Uri _validateApiBaseUri(String value, {required String environment}) {
     final uri = Uri.parse(value);

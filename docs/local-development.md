@@ -241,7 +241,7 @@ cleared even if remote cleanup cannot be completed.
 
 Login-link onboarding and app-owned approval, session/device management,
 current-user bootstrap, multiple homes, invitations, home governance, and
-editable home settings are composed against API `1.18.0`. Household
+editable home settings are composed against API `1.19.0`. Household
 inventory, purchase, and shopping-list screens still include local Drift
 projections; those screens alone are not proof of cross-device convergence for
 every backend resource. Catalog consent and homeowner contributions, household

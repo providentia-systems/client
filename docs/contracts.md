@@ -13,11 +13,26 @@ local `providentia_api_client` Dart package.
 
 ## Current pin
 
-- Client OpenAPI version: `1.18.0`
+- Client OpenAPI version: `1.19.0`
 - Contract SHA-256:
-  `fb7f18cc8d2e0f7aaf3ec9f1bd3039316c6f44af0023110936778a8d616a6759`
-- Canonical backend operations: 177
-- Generated homeowner operations: 145
+  `7e13d550e7a4438297766f654fadbd1e75894efac989229da6fcd0d9f7f97dda`
+- Canonical backend operations: 172
+- Generated homeowner operations: 140
+
+API 1.19.0 removes every human-account password and email-verification
+surface (`registerAccount`, `login`, `verifyEmail`,
+`resendEmailVerification`, `requestPasswordReset`, `completePasswordReset`
+and their request schemas): the email-only login link is the only human
+authentication, and the generator fails deliberately if a password surface
+ever returns. It adds the revision-guarded `removeHomeMembership`
+(`DELETE /api/v1/homes/{homeId}/memberships/{userId}` with required
+`expectedRevision`), makes trusted-device sessions durable —
+`SessionCredentials`/`DeviceSession` idle and refresh expiry plus
+`refreshIdleTtlSeconds` are nullable, where null means the session lives
+until explicit sign-out, revocation, or an account action, while
+`requestedSessionIdleSeconds` (900..5184000) still requests a deliberately
+bounded session — and gives `AiProviderProfile` a required `ownerScope`
+(`private`|`home`) with a nullable profile-owned `endpoint`.
 
 The login-link onboarding, account-management, and current household
 integration surfaces are deliberately adopted as one compatible boundary.

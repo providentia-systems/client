@@ -567,7 +567,9 @@ function validateWebSession(session, installationId) {
   assert(isUuid(session.userId), 'The authenticated account identifier is invalid.');
   assert(session.transport === 'web', 'The exchange did not issue a web session.');
   assert(typeof session.csrfToken === 'string' && session.csrfToken.length >= 40, 'The CSRF proof is invalid.');
-  assert(session.refreshIdleTtlSeconds === WEB_IDLE_SECONDS, 'The web session is not using the 30-day idle policy.');
+  // The harness deliberately requests a bounded 30-day session; a durable
+  // null-expiry session would mean the requested bound was ignored.
+  assert(session.refreshIdleTtlSeconds === WEB_IDLE_SECONDS, 'The web session did not honor the requested 30-day idle bound.');
   for (const field of ['accessExpiresAt', 'refreshExpiresAt', 'idleExpiresAt']) {
     assert(Number.isFinite(Date.parse(session[field] ?? '')), `The web session ${field} is invalid.`);
   }

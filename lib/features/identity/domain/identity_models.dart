@@ -245,6 +245,13 @@ final class SessionSecrets {
   final String? csrfToken;
 }
 
+/// Metadata for the granted session.
+///
+/// A durable trusted-device session has null [idleExpiresAt],
+/// [refreshExpiresAt], and [refreshIdleTtl]: it stays signed in until
+/// explicit sign-out, device or session revocation, or an account action.
+/// Non-null values describe a deliberately bounded session and keep their
+/// freshness checks.
 final class SessionMetadata {
   SessionMetadata({
     required this.sessionId,
@@ -262,15 +269,12 @@ final class SessionMetadata {
     _requireUuid(deviceId, 'deviceId');
     _requireUuid(this.installationId, 'installationId');
     _requireUuid(userId, 'userId');
-    final maximumIdleTtl = transport == ClientSessionTransport.webCookie
-        ? const Duration(days: 30)
-        : const Duration(days: 60);
-    if (refreshIdleTtl < const Duration(minutes: 15) ||
-        refreshIdleTtl > maximumIdleTtl) {
+    final finiteIdleTtl = refreshIdleTtl;
+    if (finiteIdleTtl != null && finiteIdleTtl < const Duration(minutes: 15)) {
       throw ArgumentError.value(
-        refreshIdleTtl,
+        finiteIdleTtl,
         'refreshIdleTtl',
-        'exceeds the session transport policy',
+        'is below the shortest bounded session the contract allows',
       );
     }
     if (activeHomeId != null) {
@@ -283,11 +287,24 @@ final class SessionMetadata {
   final String installationId;
   final String userId;
   final DateTime accessExpiresAt;
-  final DateTime refreshExpiresAt;
-  final DateTime idleExpiresAt;
-  final Duration refreshIdleTtl;
+  final DateTime? refreshExpiresAt;
+  final DateTime? idleExpiresAt;
+  final Duration? refreshIdleTtl;
   final ClientSessionTransport transport;
   final String? activeHomeId;
+
+  /// Whether this session lives until explicit sign-out or revocation.
+  bool get isDurable => idleExpiresAt == null && refreshExpiresAt == null;
+
+  /// True only when a deliberately bounded deadline has passed. A durable
+  /// session (null deadlines) never expires locally.
+  bool isExpiredAt(DateTime instant) {
+    final utc = instant.toUtc();
+    final idle = idleExpiresAt;
+    final refresh = refreshExpiresAt;
+    return (idle != null && !idle.isAfter(utc)) ||
+        (refresh != null && !refresh.isAfter(utc));
+  }
 
   SessionMetadata copyWith({
     String? activeHomeId,
@@ -378,17 +395,23 @@ final class DeviceSessionView {
   final DateTime createdAt;
   final DateTime lastSeenAt;
   final DateTime accessExpiresAt;
-  final DateTime refreshExpiresAt;
-  final DateTime idleExpiresAt;
+  final DateTime? refreshExpiresAt;
+  final DateTime? idleExpiresAt;
   final DateTime? revokedAt;
 
   bool get isRevoked => revokedAt != null;
 
+  /// Whether this device session stays signed in until it is explicitly
+  /// revoked. Null expiry means no inactivity ceiling applies.
+  bool get isDurable => idleExpiresAt == null && refreshExpiresAt == null;
+
   bool isActiveAt(DateTime instant) {
     final utc = instant.toUtc();
+    final idle = idleExpiresAt;
+    final refresh = refreshExpiresAt;
     return !isRevoked &&
-        idleExpiresAt.toUtc().isAfter(utc) &&
-        refreshExpiresAt.toUtc().isAfter(utc);
+        (idle == null || idle.toUtc().isAfter(utc)) &&
+        (refresh == null || refresh.toUtc().isAfter(utc));
   }
 
   DeviceSessionView withActiveHome(String? homeId) => DeviceSessionView(

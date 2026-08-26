@@ -25,8 +25,6 @@ final class IdentityController extends ChangeNotifier {
       _snapshot.status == IdentitySessionStatus.exchangingLoginLink ||
       _snapshot.status == IdentitySessionStatus.refreshing;
 
-  bool get supportsDevelopmentPassword => _manager.supportsDevelopmentPassword;
-
   Future<void> restore() => _manager.restore();
 
   Future<void> requestLoginLink(String email) async {
@@ -60,23 +58,6 @@ final class IdentityController extends ChangeNotifier {
   void pauseLoginLinkPolling() => _manager.pauseLoginLinkPolling();
 
   void resumeLoginLinkPolling() => _manager.resumeLoginLinkPolling();
-
-  Future<void> signInWithDevelopmentPassword({
-    required String email,
-    required String password,
-  }) async {
-    try {
-      await _manager.signInWithPassword(email: email, password: password);
-    } on ArgumentError {
-      _setLocalFailure('Enter a valid email address and password.');
-    } on UnsupportedError {
-      _setLocalFailure('Development password sign-in is unavailable.');
-    } on IdentityTransportException {
-      // The manager already published a safe transport message.
-    } on IdentityCredentialStoreException catch (error) {
-      _setLocalFailure(error.safeMessage);
-    }
-  }
 
   Future<void> logout() => _manager.logout();
 

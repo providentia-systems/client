@@ -253,6 +253,109 @@ void main() {
     expect(fixture.transport.logoutRefreshTokens, <String?>['refresh-token']);
   });
 
+  test('durable native session never expires locally from idleness', () async {
+    final clock = _MutableClock(DateTime.utc(2026, 8, 9, 12));
+    final fixture = _Fixture(
+      clock: clock,
+      installationId: _installationId,
+      stored: StoredNativeSession(
+        sessionId: _sessionId,
+        deviceId: _deviceId,
+        installationId: _installationId,
+        refreshToken: 'old-refresh-token',
+      ),
+    );
+    addTearDown(fixture.dispose);
+    fixture.transport
+      ..refreshGrant = _grant(
+        clock.value,
+        installationId: _installationId,
+        durable: true,
+      )
+      ..currentUser = _currentUser(clock.value);
+
+    await fixture.manager.restore();
+
+    expect(fixture.manager.snapshot.session?.isDurable, isTrue);
+    expect(fixture.manager.snapshot.session?.refreshIdleTtl, isNull);
+    expect(fixture.manager.snapshot.session?.idleExpiresAt, isNull);
+    expect(fixture.manager.snapshot.session?.refreshExpiresAt, isNull);
+    expect(fixture.credentials.value?.refreshToken, 'refresh-token');
+
+    // Idle far beyond every removed transport ceiling: the trusted device
+    // rotates its credential instead of being expired locally.
+    clock.value = clock.value.add(const Duration(days: 400));
+    fixture.transport.refreshGrant = _grant(
+      clock.value,
+      installationId: _installationId,
+      durable: true,
+    );
+
+    expect(await fixture.manager.ensureFresh(), isTrue);
+    expect(
+      fixture.manager.snapshot.status,
+      IdentitySessionStatus.authenticated,
+    );
+    expect(fixture.manager.snapshot.session?.isDurable, isTrue);
+    expect(await fixture.manager.tryRecover(), isTrue);
+    expect(
+      fixture.manager.snapshot.status,
+      IdentitySessionStatus.authenticated,
+    );
+  });
+
+  test('a bounded session still expires at its finite deadline', () async {
+    final clock = _MutableClock(DateTime.utc(2026, 8, 9, 12));
+    final fixture = _Fixture(clock: clock);
+    addTearDown(fixture.dispose);
+    await fixture.manager.requestLoginLink('person@example.com');
+    fixture.transport.status = LoginLinkRequestStatus.approved;
+    await fixture.manager.pollLoginLinkNow();
+    expect(fixture.manager.snapshot.session?.isDurable, isFalse);
+
+    clock.value = clock.value.add(const Duration(days: 61));
+
+    expect(await fixture.manager.ensureFresh(), isFalse);
+    expect(
+      fixture.manager.snapshot.status,
+      IdentitySessionStatus.sessionExpired,
+    );
+    expect(fixture.manager.accessToken, isNull);
+  });
+
+  test('cross-tab durable web grant round-trips null expiry', () async {
+    final hub = _CoordinationHub();
+    final firstPort = hub.connect();
+    final secondPort = hub.connect();
+    final now = DateTime.utc(2026, 8, 9, 12);
+    firstPort.publishGrant(
+      _grant(
+        now,
+        transport: ClientSessionTransport.webCookie,
+        csrfToken: 'csrf-durable',
+        durable: true,
+      ),
+    );
+    final second = _Fixture(
+      sessionTransport: ClientSessionTransport.webCookie,
+      sessionCoordination: secondPort,
+    );
+    second.transport.currentUser = _currentUser(
+      now,
+      transport: ClientSessionTransport.webCookie,
+    );
+    addTearDown(second.dispose);
+
+    await second.manager.restore();
+
+    expect(second.manager.csrfToken, 'csrf-durable');
+    expect(second.manager.snapshot.isAuthenticated, isTrue);
+    expect(second.manager.snapshot.session?.isDurable, isTrue);
+    expect(second.manager.snapshot.session?.idleExpiresAt, isNull);
+    expect(second.manager.snapshot.session?.refreshExpiresAt, isNull);
+    expect(second.manager.snapshot.session?.refreshIdleTtl, isNull);
+  });
+
   test('remote logout rejection never restores cleared local state', () async {
     final fixture = _Fixture();
     addTearDown(fixture.dispose);
@@ -1632,6 +1735,7 @@ SessionGrant _grant(
   String userId = _userId,
   String? activeHomeId,
   String csrfToken = 'csrf-token',
+  bool durable = false,
 }) => SessionGrant(
   metadata: SessionMetadata(
     sessionId: sessionId,
@@ -1639,15 +1743,25 @@ SessionGrant _grant(
     installationId: installationId,
     userId: userId,
     accessExpiresAt: now.add(const Duration(minutes: 15)),
-    refreshExpiresAt: now.add(
-      Duration(days: transport == ClientSessionTransport.webCookie ? 30 : 60),
-    ),
-    idleExpiresAt: now.add(
-      Duration(days: transport == ClientSessionTransport.webCookie ? 30 : 60),
-    ),
-    refreshIdleTtl: Duration(
-      days: transport == ClientSessionTransport.webCookie ? 30 : 60,
-    ),
+    refreshExpiresAt: durable
+        ? null
+        : now.add(
+            Duration(
+              days: transport == ClientSessionTransport.webCookie ? 30 : 60,
+            ),
+          ),
+    idleExpiresAt: durable
+        ? null
+        : now.add(
+            Duration(
+              days: transport == ClientSessionTransport.webCookie ? 30 : 60,
+            ),
+          ),
+    refreshIdleTtl: durable
+        ? null
+        : Duration(
+            days: transport == ClientSessionTransport.webCookie ? 30 : 60,
+          ),
     transport: transport,
     activeHomeId: activeHomeId,
   ),

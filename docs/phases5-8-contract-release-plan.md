@@ -1,7 +1,7 @@
 # Phases 5–8 backend contract release plan
 
 > Historical API 1.13.2 plan retained for decision traceability. The active
-> contract is API 1.18.0; use `docs/contracts.md` for current operations,
+> contract is API 1.19.0; use `docs/contracts.md` for current operations,
 > checksums, and the homeowner-only generation boundary.
 
 ## Decision

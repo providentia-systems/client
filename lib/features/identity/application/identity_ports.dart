@@ -172,20 +172,7 @@ class LocalSessionCoordination implements SessionCoordinationPort {
   Future<void> dispose() async {}
 }
 
-/// Development-only compatibility. Production composition never exposes it.
-abstract interface class DevelopmentPasswordIdentityTransportPort {
-  Future<SessionGrant> loginWithPassword({
-    required String email,
-    required String password,
-    required DeviceDescriptor device,
-  });
-}
-
-enum BrowserCookieMutationKind {
-  loginLinkExchange,
-  sessionRefresh,
-  developmentLogin,
-}
+enum BrowserCookieMutationKind { loginLinkExchange, sessionRefresh }
 
 /// Non-secret crash journal for an origin-wide browser cookie mutation.
 ///

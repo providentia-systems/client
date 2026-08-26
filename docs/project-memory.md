@@ -44,12 +44,20 @@
 Domain, app-store, and trademark due diligence remains mandatory before public
 launch. It does not reopen the owner-selected name.
 
-## Current integration note — 2026-08-25
+## Current integration note — 2026-08-26
 
-- The client pins the reviewed OpenAPI `1.18.0` boundary at SHA-256
-  `fb7f18cc8d2e0f7aaf3ec9f1bd3039316c6f44af0023110936778a8d616a6759`.
-  The canonical contract contains 177 operations; the default-deny homeowner
-  facade generates 145 and excludes every admin/operator/moderation method.
+- The client pins the reviewed OpenAPI `1.19.0` boundary at SHA-256
+  `7e13d550e7a4438297766f654fadbd1e75894efac989229da6fcd0d9f7f97dda`.
+  The canonical contract contains 172 operations; the default-deny homeowner
+  facade generates 140 and excludes every admin/operator/moderation method.
+- API 1.19.0 has no human-account password surface: registration, password
+  login, email verification, and password reset are gone from the contract,
+  and the client's development-password transport, controller, UI, and
+  runtime define were removed with it. Trusted-device sessions are durable —
+  null idle/refresh expiry means signed in until explicit sign-out or
+  revocation — while `requestedSessionIdleSeconds` still bounds a session
+  deliberately. Revision-guarded `removeHomeMembership` joined the homeowner
+  facade.
 - Product onboarding is email-only login-link authentication. The originating
   client owns a private poll token, state, and PKCE verifier. The emailed
   fragment-secret homeowner link opens this Flutter client, which proves,

@@ -131,7 +131,7 @@ function validateContract(document) {
   }
   if (
     document.info?.title !== 'Providentia API' ||
-    document.info?.version !== '1.18.0'
+    document.info?.version !== '1.19.0'
   ) {
     throw new Error('Unexpected API identity or version.');
   }
@@ -143,7 +143,6 @@ function validateContract(document) {
     ['get', '/metrics', 'getMetrics'],
     ['get', '/api/v1/homes/{homeId}/sync/pull', 'pullHomeSynchronization'],
     ['get', '/api/v1/homes/{homeId}/sync/bootstrap', 'bootstrapHomeSynchronization'],
-    ['post', '/api/v1/auth/login', 'login'],
     ['post', '/api/v1/auth/login-links', 'startLoginLink'],
     ['post', '/api/v1/auth/login-links/{requestId}/proof', 'proveLoginLinkApproval'],
     ['post', '/api/v1/auth/login-links/{requestId}/review', 'reviewLoginLinkApproval'],
@@ -153,11 +152,8 @@ function validateContract(document) {
     ['post', '/api/v1/auth/login-links/{requestId}/cancel', 'cancelLoginLink'],
     ['post', '/api/v1/auth/refresh', 'refreshSession'],
     ['post', '/api/v1/auth/logout', 'logout'],
-    ['post', '/api/v1/auth/verify-email', 'verifyEmail'],
-    ['post', '/api/v1/auth/verify-email/resend', 'resendEmailVerification'],
-    ['post', '/api/v1/auth/password-reset/request', 'requestPasswordReset'],
-    ['post', '/api/v1/auth/password-reset/complete', 'completePasswordReset'],
     ['post', '/api/v1/auth/step-up-links', 'requestStepUpLink'],
+    ['delete', '/api/v1/homes/{homeId}/memberships/{userId}', 'removeHomeMembership'],
     ['get', '/api/v1/me', 'getCurrentUser'],
     ['get', '/api/v1/me/home-invitations', 'listPendingHomeInvitations'],
     ['get', '/api/v1/platform/administrators', 'listPlatformAdministrators'],
@@ -198,8 +194,48 @@ function validateContract(document) {
       operationIds.add(operation.operationId);
     }
   }
-  if (operationIds.size !== 177) {
-    throw new Error(`Expected the API 1.18 surface, found ${operationIds.size} operations.`);
+  if (operationIds.size !== 172) {
+    throw new Error(`Expected the API 1.19 surface, found ${operationIds.size} operations.`);
+  }
+
+  // API 1.19 removed every human-account password and email-verification
+  // surface. Login links are the only human authentication; regenerating
+  // against a contract that reintroduces one is a deliberate decision.
+  for (const removedPath of [
+    '/api/v1/auth/register',
+    '/api/v1/auth/login',
+    '/api/v1/auth/verify-email',
+    '/api/v1/auth/verify-email/resend',
+    '/api/v1/auth/password-reset/request',
+    '/api/v1/auth/password-reset/complete',
+  ]) {
+    if (document.paths?.[removedPath]) {
+      throw new Error(`Removed password/verification path returned: ${removedPath}.`);
+    }
+  }
+  for (const removedOperationId of [
+    'registerAccount',
+    'login',
+    'verifyEmail',
+    'resendEmailVerification',
+    'requestPasswordReset',
+    'completePasswordReset',
+  ]) {
+    if (operationIds.has(removedOperationId)) {
+      throw new Error(`Removed operation returned: ${removedOperationId}.`);
+    }
+  }
+  for (const removedSchema of [
+    'RegisterRequest',
+    'RegisterResponse',
+    'LoginRequest',
+    'PasswordResetCompleteRequest',
+    'ApplicationEmailRequest',
+    'ApplicationTokenRequest',
+  ]) {
+    if (document.components?.schemas?.[removedSchema]) {
+      throw new Error(`Removed schema returned: ${removedSchema}.`);
+    }
   }
 
   for (const schema of [
@@ -225,9 +261,6 @@ function validateContract(document) {
     'LoginLinkApprovalReview',
     'LoginLinkDecisionRequest',
     'LoginLinkDecisionReceived',
-    'ApplicationEmailRequest',
-    'ApplicationTokenRequest',
-    'PasswordResetCompleteRequest',
     'StepUpRequest',
     'LoginLinkExchangeRequest',
     'CurrentUserBootstrap',
@@ -245,6 +278,7 @@ function validateContract(document) {
     'SyncReceiptLineUnresolvePayload',
     'ShoppingList',
     'AiExtraction',
+    'AiProviderProfile',
     'CatalogWorkbench',
     'ShoppingSuggestion',
     'HomeReport',
@@ -411,6 +445,31 @@ function validateContract(document) {
     'createdAt',
     'lastSeenAt',
   ]);
+  // Durable trusted-device sessions: a null expiry means the session lives
+  // until explicit sign-out, revocation, or an account action.
+  for (const [schemaName, nullableField] of [
+    ['SessionCredentials', 'idleExpiresAt'],
+    ['SessionCredentials', 'refreshExpiresAt'],
+    ['SessionCredentials', 'refreshIdleTtlSeconds'],
+    ['DeviceSession', 'idleExpiresAt'],
+    ['DeviceSession', 'refreshExpiresAt'],
+  ]) {
+    const property =
+      document.components.schemas[schemaName].properties?.[nullableField];
+    if (!Array.isArray(property?.type) || !property.type.includes('null')) {
+      throw new Error(
+        `${schemaName}.${nullableField} must be nullable for durable sessions.`,
+      );
+    }
+  }
+  const requestedIdle =
+    document.components.schemas.LoginLinkStartRequest.properties
+      ?.requestedSessionIdleSeconds;
+  if (requestedIdle?.minimum !== 900 || requestedIdle?.maximum !== 5184000) {
+    throw new Error(
+      'requestedSessionIdleSeconds must stay optional within 900..5184000.',
+    );
+  }
   const receiptApprovalStatuses =
     document.components.schemas.ReceiptLine.properties?.approvalStatus?.enum ?? [];
   if (!receiptApprovalStatuses.includes('unresolved')) {
@@ -467,6 +526,35 @@ function validateContract(document) {
   }
   if (document.components.schemas.UpdateHomeRequest.properties?.locale?.maxLength !== 16) {
     throw new Error('UpdateHomeRequest locale boundary changed.');
+  }
+  const removeMembership =
+    document.paths['/api/v1/homes/{homeId}/memberships/{userId}']?.delete;
+  const expectedRevision = (removeMembership?.parameters ?? []).find(
+    (parameter) => parameter?.name === 'expectedRevision',
+  );
+  if (
+    removeMembership?.operationId !== 'removeHomeMembership' ||
+    expectedRevision?.in !== 'query' ||
+    expectedRevision?.required !== true ||
+    expectedRevision?.schema?.type !== 'integer'
+  ) {
+    throw new Error(
+      'removeHomeMembership must require its integer expectedRevision query.',
+    );
+  }
+  const providerProfile = document.components.schemas.AiProviderProfile;
+  const ownerScope = providerProfile.properties?.ownerScope;
+  const endpoint = providerProfile.properties?.endpoint;
+  if (
+    JSON.stringify(ownerScope?.enum) !== JSON.stringify(['private', 'home']) ||
+    !(providerProfile.required ?? []).includes('ownerScope') ||
+    !Array.isArray(endpoint?.type) ||
+    !endpoint.type.includes('null') ||
+    endpoint?.maxLength !== 300
+  ) {
+    throw new Error(
+      'AiProviderProfile must expose ownerScope and its nullable endpoint.',
+    );
   }
 }
 

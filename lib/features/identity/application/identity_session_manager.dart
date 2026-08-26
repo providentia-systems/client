@@ -141,9 +141,6 @@ final class IdentitySessionManager implements SessionAuthorizer {
   @override
   ClientSessionTransport get sessionTransport => _transport.sessionTransport;
 
-  bool get supportsDevelopmentPassword =>
-      _transport is DevelopmentPasswordIdentityTransportPort;
-
   Future<void> restore() {
     _ensureOpen();
     final existing = _restoreInFlight;
@@ -257,72 +254,6 @@ final class IdentitySessionManager implements SessionAuthorizer {
     return requestLoginLink(email).then<void>((_) {});
   }
 
-  Future<void> signInWithPassword({
-    required String email,
-    required String password,
-  }) {
-    _ensureOpen();
-    if (_transport is! DevelopmentPasswordIdentityTransportPort) {
-      throw UnsupportedError('Development password sign-in is unavailable.');
-    }
-    final developmentTransport =
-        _transport as DevelopmentPasswordIdentityTransportPort;
-    final normalized = normalizedEmail(email);
-    if (password.isEmpty) {
-      throw ArgumentError('A password is required.');
-    }
-    final previousPending = _pendingLoginLink;
-    final previousSecrets = _secrets;
-    final generation = _beginAuthentication();
-    _pendingLoginLink = null;
-    _secrets = null;
-    if (sessionTransport == ClientSessionTransport.webCookie) {
-      _publishSignedOutSafely();
-    }
-    _emit(
-      IdentitySessionSnapshot(
-        status: IdentitySessionStatus.requestingLoginLink,
-      ),
-    );
-    return _serializeMutation<void>(() async {
-      await _retireSession(previousSecrets);
-      await _replacePendingRequest(previousPending);
-      if (!_isCurrent(generation)) {
-        return;
-      }
-      try {
-        await _withCookieMutationLock<void>(() async {
-          if (!_isCurrent(generation)) return;
-          final cookieMutation = await _beginBrowserCookieMutation(
-            BrowserCookieMutationKind.developmentLogin,
-            'development-login:$generation',
-          );
-          final grant = await developmentTransport
-              .loginWithPassword(
-                email: normalized,
-                password: password,
-                device: _device,
-              )
-              .timeout(requestTimeout);
-          await _acceptGrant(grant, generation, cookieMutation: cookieMutation);
-        });
-      } on TimeoutException {
-        if (_isCurrent(generation)) {
-          _emitFailure('The identity service did not respond. Try again.');
-        }
-        throw const IdentityTransportException(
-          kind: IdentityFailureKind.network,
-          safeMessage: 'The identity service did not respond. Try again.',
-        );
-      } on IdentityTransportException catch (error) {
-        if (_isCurrent(generation)) {
-          _emitFailure(error.safeMessage);
-        }
-        rethrow;
-      }
-    });
-  }
-
   @override
   Future<bool> ensureFresh() {
     _ensureOpen();
@@ -332,9 +263,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
   Future<bool> _ensureFresh() async {
     final session = _snapshot.session;
     final now = _clock().toUtc();
-    if (session != null &&
-        (!session.idleExpiresAt.isAfter(now) ||
-            !session.refreshExpiresAt.isAfter(now))) {
+    if (session != null && session.isExpiredAt(now)) {
       await _clearSession();
       _emit(
         IdentitySessionSnapshot(
@@ -361,9 +290,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
   Future<bool> _forceRecoveryRefresh() async {
     final session = _snapshot.session;
     final now = _clock().toUtc();
-    if (session == null ||
-        !session.idleExpiresAt.isAfter(now) ||
-        !session.refreshExpiresAt.isAfter(now)) {
+    if (session == null || session.isExpiredAt(now)) {
       await _clearSession();
       _emit(
         IdentitySessionSnapshot(
@@ -834,8 +761,8 @@ final class IdentitySessionManager implements SessionAuthorizer {
       metadata.installationId,
       metadata.userId,
       metadata.accessExpiresAt.microsecondsSinceEpoch,
-      metadata.refreshExpiresAt.microsecondsSinceEpoch,
-      metadata.idleExpiresAt.microsecondsSinceEpoch,
+      metadata.refreshExpiresAt?.microsecondsSinceEpoch,
+      metadata.idleExpiresAt?.microsecondsSinceEpoch,
       metadata.activeHomeId,
       grant.secrets.csrfToken,
     ].join('|');
@@ -870,8 +797,8 @@ final class IdentitySessionManager implements SessionAuthorizer {
       metadata.installationId,
       metadata.userId,
       metadata.accessExpiresAt.microsecondsSinceEpoch,
-      metadata.refreshExpiresAt.microsecondsSinceEpoch,
-      metadata.idleExpiresAt.microsecondsSinceEpoch,
+      metadata.refreshExpiresAt?.microsecondsSinceEpoch,
+      metadata.idleExpiresAt?.microsecondsSinceEpoch,
       metadata.activeHomeId,
       _secrets?.csrfToken,
     ].join('|');

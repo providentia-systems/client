@@ -10,15 +10,17 @@ architecture tests, and a full CI build matrix.
 Phases 5–8 add household inventory, count sessions, purchase history, shopping
 lists, AI review policies, private catalog data, explainable suggestions, price
 intelligence, reporting, and evaluation. The client pins the backend's API
-`1.18.0` contract: all 177 canonical operations remain reviewable, while the
-default-deny homeowner generator exposes only 145 callable operations. Admin,
+`1.19.0` contract: all 172 canonical operations remain reviewable, while the
+default-deny homeowner generator exposes only 140 callable operations. Admin,
 operator, billing-operator, catalog-moderation, and platform-administrator
 operations are excluded from the generated homeowner package and runtime. The
 separate `providentia-systems/admin` Flutter repository owns those staff
 surfaces.
 
-Email-only login-link onboarding, app-owned cross-device approval, persistent
-web/native sessions, current-user bootstrap, multiple homes, recipient
+Email-only login-link onboarding — the only human authentication, with no
+password surface anywhere — app-owned cross-device approval, durable
+web/native trusted-device sessions that stay signed in until explicit
+sign-out or revocation, current-user bootstrap, multiple homes, recipient
 invitations, home governance, and signed-in-device management are composed in
 this application. Approval links open the Flutter homeowner route, keep the
 fragment capability in memory only, review the requesting device, and require
@@ -45,7 +47,7 @@ Household AI is likewise production-composed from Account & access behind the
 active home's exact `ai.read` permission. Receipt intake re-encodes one to eight
 ordered photos or locally rasterized PDF pages. Stock counting accepts one to
 eight images from the camera, gallery, or file picker on supported targets and
-uses API 1.18 schema-v2 quantity ranges. Each route owns and clears transient
+uses API 1.19 schema-v2 quantity ranges. Each route owns and clears transient
 bytes, binds every operation to exact `ai.read`/`ai.use`/`ai.manage`
 capabilities, and produces only a reviewed handoff. A server candidate is
 accepted before its confirmed `photo-confirmed` count is recorded through the

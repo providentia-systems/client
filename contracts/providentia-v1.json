@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Providentia API",
-    "version": "1.18.0",
+    "version": "1.19.0",
     "summary": "Authoritative Providentia backend contract through the production-readiness programme",
     "description": "Bounded identity, multi-home tenancy, published global catalog reads, and home-scoped offline synchronization.\n\nVersion 1.4 adds the Phase 5 inventory ledger, counts, purchasing review, shopping lists, and dashboard projections.\n\nVersion 1.5 adds privacy-controlled, human-reviewed AI extraction.\n\nVersion 1.6 adds sanitized catalog proposals, role-separated moderation, icon metadata, redirects, and reversible product merges.\n\nVersion 1.8 adds email-only login-link authentication and durable encrypted notification delivery.\n\nVersion 1.9 adds revisioned household permissions, revocable invitations, and accepted ownership transfer with step-up confirmation.\n\nVersion 1.10 adds typed pantry synchronization, catalog sharing/imports, data rights, commercial controls, multi-provider AI orchestration, encrypted private media, and production acceptance surfaces.\n\nVersion 1.11 adds cross-device login-link approval with origin-client polling and PKCE exchange, current-user bootstrap, recipient invitation acceptance, platform-administrator management, and explicit sliding-session metadata.\n\nVersion 1.11.1 exposes the installation UUID separately from the account-scoped device UUID so clients can validate login-link session binding without rejecting valid sessions.\n\nVersion 1.12 publishes only moderator-approved, consent-bound catalog contribution facts through a bounded attribution-free global projection.\n\nVersion 1.13 adds revision-bound, idempotent stock-count cancellation to the online API and protocol-v2 synchronization command set, publishes a precise AI media-handling disclosure that distinguishes transient direct extraction from explicit encrypted private-media storage, and provides a typed, deterministic, paged home item master for offline caching.\n\nVersion 1.13.1 documents the non-disclosing 404 response used when a home is revoked or foreign, allowing clients to purge stale private projections instead of retrying indefinitely.\n\nVersion 1.13.2 exhaustively documents non-disclosing home authorization for AI and shopping operations and adds a revisioned receipt-line unresolved decision across ordinary HTTP and protocol-v2 synchronization; receipt commit processes approved lines while retaining unresolved raw lines without price or stock effects.\n\nVersion 1.14 adds revision-bound home-private categories and products to the local-first inventory protocol, plus a privacy-safe Linux administrator control plane for account lifecycle and platform roles. Billing enforcement remains disabled by configuration during the free stabilization phase.\n\nVersion 1.15 adds consent-bound product-image contributions with server-side sanitization, encrypted moderation quarantine, reviewer-only no-store previews, explicit curator publication, immutable content-addressed public assets, and typed published catalog search results.\n\nVersion 1.16 removes every interactive backend page, binds each login-link request to either the homeowner or administrator application, and exposes single-use approval proof, review, and decision JSON operations for client-owned deep-link handling. Metrics are disabled by default and require a dedicated bearer credential when explicitly enabled.\n\nVersion 1.17 binds verification, password-reset, and step-up credentials to the originating application, moves every emailed account capability into configured Client/Admin URI fragments, and separates receipt quantities from validated stock-count minimum/maximum ranges in extraction schema v2.\n\nVersion 1.18 makes stock-count line writes usable as compare-and-swap operations: revision 0 creates a line, a matching positive revision updates it, and successful writes return the complete line representation."
   },
@@ -111,43 +111,6 @@
           },
           "404": {
             "description": "Metrics are disabled or the dedicated credential is absent or invalid"
-          }
-        }
-      }
-    },
-    "/api/v1/auth/register": {
-      "post": {
-        "operationId": "registerAccount",
-        "security": [],
-        "tags": [
-          "Identity"
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RegisterRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "202": {
-            "description": "Generic accepted response whether the account is new or already exists",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RegisterResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "429": {
-            "$ref": "#/components/responses/Problem"
           }
         }
       }
@@ -513,94 +476,6 @@
         }
       }
     },
-    "/api/v1/auth/verify-email": {
-      "post": {
-        "operationId": "verifyEmail",
-        "security": [],
-        "tags": [
-          "Identity"
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ApplicationTokenRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "204": {
-            "description": "Verified"
-          },
-          "422": {
-            "$ref": "#/components/responses/Problem"
-          }
-        }
-      }
-    },
-    "/api/v1/auth/verify-email/resend": {
-      "post": {
-        "operationId": "resendEmailVerification",
-        "security": [],
-        "tags": [
-          "Identity"
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ApplicationEmailRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "202": {
-            "description": "Accepted without account enumeration"
-          }
-        }
-      }
-    },
-    "/api/v1/auth/login": {
-      "post": {
-        "operationId": "login",
-        "security": [],
-        "tags": [
-          "Identity"
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LoginRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Native credentials or secure cookie session issued",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SessionCredentials"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "429": {
-            "$ref": "#/components/responses/Problem"
-          }
-        }
-      }
-    },
     "/api/v1/auth/refresh": {
       "post": {
         "operationId": "refreshSession",
@@ -668,57 +543,6 @@
           },
           "403": {
             "description": "Web CSRF proof rejected; cookies cleared"
-          }
-        }
-      }
-    },
-    "/api/v1/auth/password-reset/request": {
-      "post": {
-        "operationId": "requestPasswordReset",
-        "security": [],
-        "tags": [
-          "Identity"
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ApplicationEmailRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "202": {
-            "description": "Accepted without account enumeration"
-          }
-        }
-      }
-    },
-    "/api/v1/auth/password-reset/complete": {
-      "post": {
-        "operationId": "completePasswordReset",
-        "security": [],
-        "tags": [
-          "Identity"
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PasswordResetCompleteRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "204": {
-            "description": "Password changed and all sessions revoked"
-          },
-          "422": {
-            "$ref": "#/components/responses/Problem"
           }
         }
       }
@@ -1264,6 +1088,49 @@
             "description": "Role changed"
           },
           "409": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "removeHomeMembership",
+        "summary": "Remove another member's active home membership",
+        "description": "Owner or policy-authorized manager removal of an active membership. The owner membership can only change through the explicit ownership transfer, a manager can be removed only by the owner, and the caller must use the leave operation for their own membership. Removal immediately revokes the member's access to the home and clears it as their active home.",
+        "tags": [
+          "Homes"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/UserId"
+          },
+          {
+            "name": "expectedRevision",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "The membership revision the caller last read; the removal fails with a conflict when it changed."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The membership was removed and the member's access to the home was revoked."
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
             "$ref": "#/components/responses/Problem"
           }
         }
@@ -8501,58 +8368,6 @@
           }
         }
       },
-      "RegisterRequest": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "email",
-          "password",
-          "displayName"
-        ],
-        "properties": {
-          "email": {
-            "type": "string",
-            "format": "email"
-          },
-          "password": {
-            "type": "string",
-            "minLength": 12,
-            "maxLength": 1024
-          },
-          "displayName": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 120
-          },
-          "locale": {
-            "type": "string"
-          },
-          "timezone": {
-            "type": "string"
-          }
-        }
-      },
-      "RegisterResponse": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "accepted",
-          "verificationRequired"
-        ],
-        "properties": {
-          "accepted": {
-            "const": true
-          },
-          "verificationRequired": {
-            "const": true
-          },
-          "developmentVerificationToken": {
-            "type": "string",
-            "readOnly": true,
-            "description": "Present only in an explicitly enabled non-production development profile."
-          }
-        }
-      },
       "LoginApplicationKind": {
         "type": "string",
         "enum": [
@@ -8636,7 +8451,7 @@
             "type": "integer",
             "minimum": 900,
             "maximum": 5184000,
-            "description": "Optional client request for a shorter idle window. The server always caps it at the transport policy: 30 days for web and 60 days for native."
+            "description": "Optional client request for a shorter idle window. The server always caps it at the transport policy: 30 days for web and 60 days for native . Omit it to keep the trusted installation signed in until explicit revocation when the deployment imposes no idle ceiling."
           }
         }
       },
@@ -8665,6 +8480,11 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 30
+          },
+          "developmentApprovalToken": {
+            "type": "string",
+            "description": "The emailed approval token, echoed only when the deployment enables EXPOSE_DEVELOPMENT_TOKENS for development and acceptance environments. Never enabled in production.",
+            "readOnly": true
           }
         },
         "description": "Generic accepted response. The private poll token and PKCE verifier are client-generated and are never returned by the server."
@@ -8949,70 +8769,6 @@
           }
         }
       },
-      "ApplicationEmailRequest": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "applicationKind",
-          "email"
-        ],
-        "properties": {
-          "applicationKind": {
-            "$ref": "#/components/schemas/LoginApplicationKind"
-          },
-          "email": {
-            "type": "string",
-            "format": "email"
-          }
-        }
-      },
-      "ApplicationTokenRequest": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "applicationKind",
-          "token"
-        ],
-        "properties": {
-          "applicationKind": {
-            "$ref": "#/components/schemas/LoginApplicationKind"
-          },
-          "token": {
-            "type": "string",
-            "minLength": 40,
-            "maxLength": 128,
-            "pattern": "^[A-Za-z0-9_-]+$",
-            "writeOnly": true
-          }
-        }
-      },
-      "PasswordResetCompleteRequest": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "applicationKind",
-          "token",
-          "password"
-        ],
-        "properties": {
-          "applicationKind": {
-            "$ref": "#/components/schemas/LoginApplicationKind"
-          },
-          "token": {
-            "type": "string",
-            "minLength": 40,
-            "maxLength": 128,
-            "pattern": "^[A-Za-z0-9_-]+$",
-            "writeOnly": true
-          },
-          "password": {
-            "type": "string",
-            "minLength": 12,
-            "maxLength": 1024,
-            "writeOnly": true
-          }
-        }
-      },
       "LogoutRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -9022,46 +8778,6 @@
             "minLength": 40,
             "writeOnly": true,
             "description": "Native rotating refresh credential. Web clients omit this and use the HttpOnly refresh cookie plus CSRF."
-          }
-        }
-      },
-      "LoginRequest": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "email",
-          "password",
-          "deviceId",
-          "deviceName",
-          "platform",
-          "transport"
-        ],
-        "properties": {
-          "email": {
-            "type": "string",
-            "format": "email"
-          },
-          "password": {
-            "type": "string"
-          },
-          "deviceId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "deviceName": {
-            "type": "string"
-          },
-          "platform": {
-            "type": "string"
-          },
-          "transport": {
-            "$ref": "#/components/schemas/SessionTransport"
-          },
-          "requestedSessionIdleSeconds": {
-            "type": "integer",
-            "minimum": 900,
-            "maximum": 5184000,
-            "description": "Optional request for a shorter idle window, capped by the selected transport policy."
           }
         }
       },
@@ -9119,20 +8835,29 @@
             "format": "date-time"
           },
           "refreshExpiresAt": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "date-time",
-            "description": "Expiry of the currently issued refresh credential or persistent web refresh cookie."
+            "description": "Expiry of the currently issued refresh credential or persistent web refresh cookie. Null means the trusted-device session has no idle expiry and lives until it is explicitly revoked."
           },
           "idleExpiresAt": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "date-time",
-            "description": "Server-enforced sliding inactivity deadline for this session."
+            "description": "Server-enforced sliding inactivity deadline for this session. Null means the session stays signed in until explicit sign-out, device or session revocation, account disablement, credential-rotation failure, or a named security invalidation."
           },
           "refreshIdleTtlSeconds": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "minimum": 900,
             "maximum": 5184000,
-            "description": "Effective server-enforced sliding inactivity window selected for this session."
+            "description": "Effective server-enforced sliding inactivity window selected for this session. Null means no inactivity ceiling applies."
           },
           "transport": {
             "$ref": "#/components/schemas/SessionTransport"
@@ -9206,11 +8931,17 @@
             "format": "date-time"
           },
           "refreshExpiresAt": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "date-time"
           },
           "idleExpiresAt": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "date-time"
           },
           "revokedAt": {
@@ -14336,6 +14067,8 @@
           "label",
           "provider",
           "model",
+          "ownerScope",
+          "endpoint",
           "credentialConfigured",
           "lastFour",
           "estimatedCostMicros",
@@ -14364,6 +14097,22 @@
           "model": {
             "type": "string",
             "maxLength": 120
+          },
+          "ownerScope": {
+            "description": "private profiles belong to one person and are visible only to them; home profiles are deliberately shared by the home owner. Listings never contain another member's private profiles, so no owner identifier is exposed.",
+            "type": "string",
+            "enum": [
+              "private",
+              "home"
+            ]
+          },
+          "endpoint": {
+            "description": "Profile-owned base endpoint for the openai-compatible and ollama providers, owned at the same scope as the credential; null for every other provider or when the deployment endpoint is used.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 300
           },
           "credentialConfigured": {
             "type": "boolean"
@@ -14422,6 +14171,23 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 120
+          },
+          "ownerScope": {
+            "description": "private (the default) stores the profile for the requesting person only; home requires the home-owner role and deliberately shares the profile with the home. Sharing is never inferred from storage scope.",
+            "type": "string",
+            "enum": [
+              "private",
+              "home"
+            ],
+            "default": "private"
+          },
+          "endpoint": {
+            "description": "Custom base endpoint, accepted only for the openai-compatible and ollama providers and owned at the same scope as the credential. It must be an absolute HTTPS URL without userinfo, query, or fragment, never a literal private, loopback, or link-local address; only when the deployment enables AI_ALLOW_PRIVATE_NETWORK_ENDPOINTS may an ollama profile use plain HTTP and private or loopback hosts.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 300
           },
           "credential": {
             "type": "string",

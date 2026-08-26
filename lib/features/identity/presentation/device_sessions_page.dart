@@ -50,7 +50,7 @@ final class _DeviceSessionsPageState extends State<DeviceSessionsPage> {
               padding: const EdgeInsets.all(16),
               children: <Widget>[
                 const Text(
-                  'Sessions renew while you use Providentia. Web sessions expire after 30 days of inactivity; app sessions expire after 60 days.',
+                  'Trusted devices stay signed in until you sign out or revoke them here. A session you deliberately bounded expires after its inactivity window instead.',
                 ),
                 const SizedBox(height: 16),
                 if (sessions.isEmpty)
@@ -81,6 +81,10 @@ final class _DeviceSessionsPageState extends State<DeviceSessionsPage> {
       ClientSessionTransport.nativeBearer => 'App',
       ClientSessionTransport.webCookie => 'Web',
     };
+    final idleExpiresAt = session.idleExpiresAt;
+    final expiry = idleExpiresAt == null
+        ? 'Signed in until you sign out'
+        : 'Idle deadline ${formatter.format(idleExpiresAt.toLocal())}';
     return Card(
       child: ListTile(
         key: Key('device-session-${session.id}'),
@@ -95,7 +99,7 @@ final class _DeviceSessionsPageState extends State<DeviceSessionsPage> {
         subtitle: Text(
           '${session.platform} · $transport\n'
           'Last used ${formatter.format(session.lastSeenAt.toLocal())}\n'
-          'Idle deadline ${formatter.format(session.idleExpiresAt.toLocal())}',
+          '$expiry',
         ),
         isThreeLine: true,
         trailing: IconButton(
