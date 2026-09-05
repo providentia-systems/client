@@ -99,15 +99,6 @@ final class HomesController extends ChangeNotifier {
     }
   }
 
-  Future<StepUpLinkReceipt?> requestOwnershipTransferStepUp() async {
-    try {
-      return await _manager.requestOwnershipTransferStepUp();
-    } on StateError {
-      _localFailure('Select a home before transferring its ownership.');
-      return null;
-    }
-  }
-
   Future<void> proposeOwnershipTransfer({
     required HomeMembership target,
     required String stepUpToken,
@@ -173,6 +164,16 @@ final class HomesController extends ChangeNotifier {
       await _manager.revokeInvitation(invitation);
     } on StateError catch (error) {
       _localFailure(error.message.toString());
+    }
+  }
+
+  Future<void> declinePendingInvitation(
+    RecipientHomeInvitation invitation,
+  ) async {
+    try {
+      await _manager.declinePendingInvitation(invitation);
+    } on StateError {
+      _localFailure('That invitation is no longer available. Refresh first.');
     }
   }
 

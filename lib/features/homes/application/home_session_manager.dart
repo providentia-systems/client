@@ -319,23 +319,12 @@ final class HomeSessionManager {
     final active = _requireActiveHome();
     final generation = ++_generation;
     try {
-      final permissionPolicies = await _transport.listPermissionPolicies(
-        active.id,
-      );
-      HomePermissionPolicy? activePolicy;
-      for (final policy in permissionPolicies) {
-        if (policy.role == active.role) {
-          activePolicy = policy;
-          break;
-        }
-      }
-      final effectivePermissions = active.role == HomeRole.owner
-          ? const <String>{
-              'members.read',
-              'members.invite',
-              'ownership.transfer',
-            }
-          : activePolicy?.permissions ?? const <String>{};
+      final refreshed = await _transport.getHome(active.id);
+      final effectivePermissions = refreshed.effectivePermissions;
+      final permissionPolicies =
+          effectivePermissions.contains('permissions.manage')
+          ? await _transport.listPermissionPolicies(active.id)
+          : const <HomePermissionPolicy>[];
       final memberships = effectivePermissions.contains('members.read')
           ? await _transport.listMemberships(active.id)
           : const <HomeMembership>[];
@@ -356,6 +345,7 @@ final class HomeSessionManager {
       }
       _emit(
         _snapshot.copyWith(
+          activeHome: refreshed,
           memberships: memberships,
           invitations: invitations,
           permissionPolicies: permissionPolicies,
@@ -423,20 +413,6 @@ final class HomeSessionManager {
   /// Requests the emailed single-use confirmation that authorizes proposing
   /// an ownership transfer. Returns null when the request failed; the failure
   /// is surfaced through the snapshot's safe message.
-  Future<StepUpLinkReceipt?> requestOwnershipTransferStepUp() async {
-    final active = _requireActiveHome();
-    try {
-      return await _transport.requestStepUpLink();
-    } on HomeTransportException catch (error) {
-      await _handleTransportFailure(error, fallbackHomeId: active.id);
-      return null;
-    } on Exception {
-      _handleUnexpectedFailure(
-        'The ownership confirmation email could not be requested safely.',
-      );
-      return null;
-    }
-  }
 
   Future<void> proposeOwnershipTransfer({
     required HomeMembership target,
@@ -647,6 +623,33 @@ final class HomeSessionManager {
     }
   }
 
+  Future<void> declinePendingInvitation(
+    RecipientHomeInvitation invitation,
+  ) async {
+    _ensureOpen();
+    final generation = ++_generation;
+    try {
+      await _transport.declinePendingInvitation(
+        invitationId: invitation.id,
+        expectedRevision: invitation.revision,
+      );
+      final pending = await _transport.listPendingInvitations();
+      if (generation == _generation) {
+        _emit(
+          _snapshot.copyWith(pendingInvitations: pending, clearMessage: true),
+        );
+      }
+    } on HomeTransportException catch (error) {
+      if (generation == _generation) await _handleTransportFailure(error);
+    } on Exception {
+      if (generation == _generation) {
+        _handleUnexpectedFailure(
+          'The invitation could not be declined. Refresh and retry.',
+        );
+      }
+    }
+  }
+
   Future<void> acceptPendingInvitation(
     RecipientHomeInvitation invitation,
   ) async {
@@ -817,7 +820,7 @@ final class HomeSessionManager {
     try {
       late final HomeSummary selected;
       if (!notifyBackend) {
-        selected = homes.firstWhere((home) => home.id == homeId);
+        selected = await _transport.getHome(homeId);
       } else if (_coordinateActiveHomeMutation case final coordinate?) {
         selected = await coordinate(
           homeId: homeId,
@@ -842,12 +845,10 @@ final class HomeSessionManager {
           safeMessage: 'The selected home could not be authorized.',
         );
       }
-      // A non-owner role has no client-side capability until its current,
-      // backend-published policy has been loaded. Fetching this for owners as
-      // well keeps governance state consistent and revalidates home.read.
-      final permissionPolicies = await _transport.listPermissionPolicies(
-        selected.id,
-      );
+      final permissionPolicies =
+          selected.effectivePermissions.contains('permissions.manage')
+          ? await _transport.listPermissionPolicies(selected.id)
+          : const <HomePermissionPolicy>[];
       if (generation != _generation) {
         return;
       }

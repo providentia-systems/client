@@ -30,6 +30,8 @@ final class HomeTransportException implements Exception {
 abstract interface class HomeTransportPort {
   Future<List<HomeSummary>> listHomes();
 
+  Future<HomeSummary> getHome(String homeId);
+
   Future<HomeSummary> createHome(CreateHomeCommand command);
 
   Future<HomeSummary> switchActiveHome(String homeId);
@@ -68,6 +70,11 @@ abstract interface class HomeTransportPort {
 
   Future<List<RecipientHomeInvitation>> listPendingInvitations();
 
+  Future<void> declinePendingInvitation({
+    required String invitationId,
+    required int expectedRevision,
+  });
+
   Future<HomeSummary> acceptPendingInvitation({
     required String invitationId,
     required int expectedRevision,
@@ -80,11 +87,6 @@ abstract interface class HomeTransportPort {
   });
 
   Future<List<HomeOwnershipTransfer>> listHomeOwnershipTransfers(String homeId);
-
-  /// Requests the single-use ownership-transfer confirmation email for the
-  /// signed-in account. The token itself arrives out of band; development
-  /// profiles may echo it in the receipt.
-  Future<StepUpLinkReceipt> requestStepUpLink();
 
   Future<HomeOwnershipTransfer> proposeHomeOwnershipTransfer({
     required String homeId,

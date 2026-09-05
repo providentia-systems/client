@@ -5,11 +5,14 @@ import 'package:providentia/features/homes/presentation/home_governance_page.dar
 import 'package:providentia/features/homes/presentation/homes_controller.dart';
 import 'package:providentia/features/identity/presentation/device_sessions_page.dart';
 import 'package:providentia/features/identity/presentation/identity_controller.dart';
+import 'package:providentia/features/profile/profile_port.dart';
 
 final class AccountAccessPage extends StatelessWidget {
   const AccountAccessPage({
     required this.identityController,
+    required this.profilePort,
     required this.homesController,
+    this.profilePageBuilder,
     this.catalogSharingPageBuilder,
     this.catalogContributionPageBuilder,
     this.catalogProductImageContributionPageBuilder,
@@ -22,7 +25,9 @@ final class AccountAccessPage extends StatelessWidget {
   });
 
   final IdentityController identityController;
+  final ProfilePort profilePort;
   final HomesController homesController;
+  final WidgetBuilder? profilePageBuilder;
   final WidgetBuilder? catalogSharingPageBuilder;
   final WidgetBuilder? catalogContributionPageBuilder;
   final WidgetBuilder? catalogProductImageContributionPageBuilder;
@@ -61,6 +66,14 @@ final class AccountAccessPage extends StatelessWidget {
                   : '${home.name} · ${home.role.name}',
             ),
           ),
+          if (profilePageBuilder != null)
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: const Text('Profile, avatar and email addresses'),
+              onTap: () => Navigator.of(
+                context,
+              ).push(MaterialPageRoute<void>(builder: profilePageBuilder!)),
+            ),
           const Divider(),
           ListTile(
             key: const Key('open-signed-in-devices'),
@@ -89,6 +102,7 @@ final class AccountAccessPage extends StatelessWidget {
               onTap: () => Navigator.of(context).push<void>(
                 MaterialPageRoute<void>(
                   builder: (_) => HomeGovernancePage(
+                    profilePort: profilePort,
                     controller: homesController,
                     currentUserId: user.userId,
                   ),

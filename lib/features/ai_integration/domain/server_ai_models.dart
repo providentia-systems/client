@@ -76,8 +76,12 @@ final class AiHomeCapabilities {
     return AiHomeCapabilities(
       homeId: normalizedHomeId,
       mayRead: permissions.contains('ai.read'),
-      mayUse: permissions.contains('ai.use'),
-      mayManage: permissions.contains('ai.manage'),
+      mayUse:
+          permissions.contains('ai.use') &&
+          permissions.contains('ai.credentials.use'),
+      mayManage:
+          permissions.contains('ai.manage') &&
+          permissions.contains('ai.credentials.use'),
       // Only the immutable owner policy carries ownership.transfer, so its
       // presence identifies the home owner without a cross-feature dependency.
       // The backend still enforces the owner role on every share command.

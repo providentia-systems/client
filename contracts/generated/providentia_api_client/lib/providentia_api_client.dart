@@ -1,6 +1,6 @@
 // GENERATED FILE - DO NOT EDIT.
 // Source: contracts/providentia-v1.json
-// Contract SHA-256: 7e13d550e7a4438297766f654fadbd1e75894efac989229da6fcd0d9f7f97dda
+// Contract SHA-256: 764f1b850a150f805eb178bf85cba802ba6b3ee35dcfbfae24a179049a7d55a7
 // ignore_for_file: use_null_aware_elements
 
 library;
@@ -467,12 +467,6 @@ final class ProvidentiaApiClient {
   final Map<String, String> _defaultHeaders;
 
   static const Map<String, ApiOperation> operations = <String, ApiOperation>{
-    "acceptHomeInvitation": ApiOperation(
-      operationId: "acceptHomeInvitation",
-      method: "POST",
-      pathTemplate: "/api/v1/home-invitations/accept",
-      multipart: false,
-    ),
     "acceptHomeInvitationById": ApiOperation(
       operationId: "acceptHomeInvitationById",
       method: "POST",
@@ -505,12 +499,6 @@ final class ProvidentiaApiClient {
       pathTemplate: "/api/v1/data-governance-requests/{requestId}/cancel",
       multipart: false,
     ),
-    "cancelLoginLink": ApiOperation(
-      operationId: "cancelLoginLink",
-      method: "POST",
-      pathTemplate: "/api/v1/auth/login-links/{requestId}/cancel",
-      multipart: false,
-    ),
     "cancelStockCountSession": ApiOperation(
       operationId: "cancelStockCountSession",
       method: "POST",
@@ -535,6 +523,12 @@ final class ProvidentiaApiClient {
       operationId: "commitReceipt",
       method: "POST",
       pathTemplate: "/api/v1/homes/{homeId}/receipts/{receiptId}/commit",
+      multipart: false,
+    ),
+    "completeAccountOnboarding": ApiOperation(
+      operationId: "completeAccountOnboarding",
+      method: "POST",
+      pathTemplate: "/api/v1/me/onboarding",
       multipart: false,
     ),
     "confirmHomeCatalogImport": ApiOperation(
@@ -664,10 +658,10 @@ final class ProvidentiaApiClient {
       pathTemplate: "/api/v1/homes/{homeId}/suggestion-backtests",
       multipart: false,
     ),
-    "decideLoginLinkApproval": ApiOperation(
-      operationId: "decideLoginLinkApproval",
+    "declineHomeInvitation": ApiOperation(
+      operationId: "declineHomeInvitation",
       method: "POST",
-      pathTemplate: "/api/v1/auth/login-links/{requestId}/decision",
+      pathTemplate: "/api/v1/me/home-invitations/{invitationId}/decline",
       multipart: false,
     ),
     "deleteAiProviderCredential": ApiOperation(
@@ -680,6 +674,18 @@ final class ProvidentiaApiClient {
       operationId: "deleteAiProviderProfile",
       method: "DELETE",
       pathTemplate: "/api/v1/homes/{homeId}/ai/profiles/{profileId}",
+      multipart: false,
+    ),
+    "deleteHomeImage": ApiOperation(
+      operationId: "deleteHomeImage",
+      method: "DELETE",
+      pathTemplate: "/api/v1/homes/{homeId}/image",
+      multipart: false,
+    ),
+    "deleteOwnAvatar": ApiOperation(
+      operationId: "deleteOwnAvatar",
+      method: "DELETE",
+      pathTemplate: "/api/v1/me/avatar",
       multipart: false,
     ),
     "deletePrivateAiMedia": ApiOperation(
@@ -700,16 +706,16 @@ final class ProvidentiaApiClient {
       pathTemplate: "/api/v1/homes/{homeId}/ai/media/{assetId}",
       multipart: false,
     ),
-    "exchangeLoginLink": ApiOperation(
-      operationId: "exchangeLoginLink",
-      method: "POST",
-      pathTemplate: "/api/v1/auth/login-links/{requestId}/exchange",
-      multipart: false,
-    ),
     "exportPrivateAiMediaMetadata": ApiOperation(
       operationId: "exportPrivateAiMediaMetadata",
       method: "GET",
       pathTemplate: "/api/v1/homes/{homeId}/ai/media/export",
+      multipart: false,
+    ),
+    "getAccountProfile": ApiOperation(
+      operationId: "getAccountProfile",
+      method: "GET",
+      pathTemplate: "/api/v1/me/profile",
       multipart: false,
     ),
     "getAiExtraction": ApiOperation(
@@ -748,6 +754,12 @@ final class ProvidentiaApiClient {
       pathTemplate: "/api/v1/homes/{homeId}/reports/consumption",
       multipart: false,
     ),
+    "getCountryPrivacyPolicy": ApiOperation(
+      operationId: "getCountryPrivacyPolicy",
+      method: "GET",
+      pathTemplate: "/api/v1/countries/{countryCode}/policy",
+      multipart: false,
+    ),
     "getCurrentUser": ApiOperation(
       operationId: "getCurrentUser",
       method: "GET",
@@ -778,6 +790,18 @@ final class ProvidentiaApiClient {
       pathTemplate: "/api/v1/homes/{homeId}/dashboard",
       multipart: false,
     ),
+    "getHomeImage": ApiOperation(
+      operationId: "getHomeImage",
+      method: "GET",
+      pathTemplate: "/api/v1/homes/{homeId}/image",
+      multipart: false,
+    ),
+    "getHomeProfile": ApiOperation(
+      operationId: "getHomeProfile",
+      method: "GET",
+      pathTemplate: "/api/v1/homes/{homeId}/profile",
+      multipart: false,
+    ),
     "getInventoryReport": ApiOperation(
       operationId: "getInventoryReport",
       method: "GET",
@@ -790,10 +814,16 @@ final class ProvidentiaApiClient {
       pathTemplate: "/health/live",
       multipart: false,
     ),
-    "getLoginLinkStatus": ApiOperation(
-      operationId: "getLoginLinkStatus",
-      method: "POST",
-      pathTemplate: "/api/v1/auth/login-links/{requestId}/status",
+    "getMemberPermissionOverrides": ApiOperation(
+      operationId: "getMemberPermissionOverrides",
+      method: "GET",
+      pathTemplate: "/api/v1/homes/{homeId}/memberships/{userId}/permissions",
+      multipart: false,
+    ),
+    "getOwnAvatar": ApiOperation(
+      operationId: "getOwnAvatar",
+      method: "GET",
+      pathTemplate: "/api/v1/me/avatar",
       multipart: false,
     ),
     "getPublishedCatalogAsset": ApiOperation(
@@ -875,6 +905,12 @@ final class ProvidentiaApiClient {
       pathTemplate: "/api/v1/system/info",
       multipart: false,
     ),
+    "getUserAvatar": ApiOperation(
+      operationId: "getUserAvatar",
+      method: "GET",
+      pathTemplate: "/api/v1/users/{userId}/avatar",
+      multipart: false,
+    ),
     "issueDataExportDownloadToken": ApiOperation(
       operationId: "issueDataExportDownloadToken",
       method: "POST",
@@ -906,10 +942,28 @@ final class ProvidentiaApiClient {
       pathTemplate: "/api/v1/billing/plans",
       multipart: false,
     ),
+    "listAvailableCountries": ApiOperation(
+      operationId: "listAvailableCountries",
+      method: "GET",
+      pathTemplate: "/api/v1/countries",
+      multipart: false,
+    ),
     "listConsumptionEstimates": ApiOperation(
       operationId: "listConsumptionEstimates",
       method: "GET",
       pathTemplate: "/api/v1/homes/{homeId}/consumption-estimates",
+      multipart: false,
+    ),
+    "listCountryCities": ApiOperation(
+      operationId: "listCountryCities",
+      method: "GET",
+      pathTemplate: "/api/v1/countries/{countryCode}/cities",
+      multipart: false,
+    ),
+    "listCountryStates": ApiOperation(
+      operationId: "listCountryStates",
+      method: "GET",
+      pathTemplate: "/api/v1/countries/{countryCode}/states",
       multipart: false,
     ),
     "listDeviceSessions": ApiOperation(
@@ -1056,16 +1110,16 @@ final class ProvidentiaApiClient {
       pathTemplate: "/api/v1/auth/logout",
       multipart: false,
     ),
+    "makeAccountEmailPrimary": ApiOperation(
+      operationId: "makeAccountEmailPrimary",
+      method: "POST",
+      pathTemplate: "/api/v1/me/emails/{emailId}/primary",
+      multipart: false,
+    ),
     "proposeHomeOwnershipTransfer": ApiOperation(
       operationId: "proposeHomeOwnershipTransfer",
       method: "POST",
       pathTemplate: "/api/v1/homes/{homeId}/ownership-transfers",
-      multipart: false,
-    ),
-    "proveLoginLinkApproval": ApiOperation(
-      operationId: "proveLoginLinkApproval",
-      method: "POST",
-      pathTemplate: "/api/v1/auth/login-links/{requestId}/proof",
       multipart: false,
     ),
     "pullHomeSynchronization": ApiOperation(
@@ -1104,10 +1158,22 @@ final class ProvidentiaApiClient {
       pathTemplate: "/api/v1/homes/{homeId}/catalog-contributions/consent",
       multipart: false,
     ),
+    "putHomeImage": ApiOperation(
+      operationId: "putHomeImage",
+      method: "PUT",
+      pathTemplate: "/api/v1/homes/{homeId}/image",
+      multipart: false,
+    ),
     "putHomePermissionPolicy": ApiOperation(
       operationId: "putHomePermissionPolicy",
       method: "PUT",
       pathTemplate: "/api/v1/homes/{homeId}/permission-policies/{role}",
+      multipart: false,
+    ),
+    "putOwnAvatar": ApiOperation(
+      operationId: "putOwnAvatar",
+      method: "PUT",
+      pathTemplate: "/api/v1/me/avatar",
       multipart: false,
     ),
     "putStockCountLine": ApiOperation(
@@ -1142,6 +1208,12 @@ final class ProvidentiaApiClient {
           "/api/v1/homes/{homeId}/ownership-transfers/{transferId}/reject",
       multipart: false,
     ),
+    "removeAccountEmail": ApiOperation(
+      operationId: "removeAccountEmail",
+      method: "POST",
+      pathTemplate: "/api/v1/me/emails/{emailId}/remove",
+      multipart: false,
+    ),
     "removeHomeMembership": ApiOperation(
       operationId: "removeHomeMembership",
       method: "DELETE",
@@ -1154,10 +1226,22 @@ final class ProvidentiaApiClient {
       pathTemplate: "/api/v1/account/data-exports",
       multipart: false,
     ),
+    "requestAccountEmailCode": ApiOperation(
+      operationId: "requestAccountEmailCode",
+      method: "POST",
+      pathTemplate: "/api/v1/me/emails/codes",
+      multipart: false,
+    ),
     "requestAccountErasure": ApiOperation(
       operationId: "requestAccountErasure",
       method: "POST",
       pathTemplate: "/api/v1/account/erasure-requests",
+      multipart: false,
+    ),
+    "requestEmailCode": ApiOperation(
+      operationId: "requestEmailCode",
+      method: "POST",
+      pathTemplate: "/api/v1/auth/email-codes",
       multipart: false,
     ),
     "requestHomeDataExport": ApiOperation(
@@ -1172,10 +1256,10 @@ final class ProvidentiaApiClient {
       pathTemplate: "/api/v1/homes/{homeId}/erasure-requests",
       multipart: false,
     ),
-    "requestStepUpLink": ApiOperation(
-      operationId: "requestStepUpLink",
+    "requestSecurityCode": ApiOperation(
+      operationId: "requestSecurityCode",
       method: "POST",
-      pathTemplate: "/api/v1/auth/step-up-links",
+      pathTemplate: "/api/v1/me/security-codes",
       multipart: false,
     ),
     "reviewAiExtractionCandidate": ApiOperation(
@@ -1197,12 +1281,6 @@ final class ProvidentiaApiClient {
       method: "PUT",
       pathTemplate:
           "/api/v1/homes/{homeId}/ai/extractions/{extractionId}/observations/{decisionId}",
-      multipart: false,
-    ),
-    "reviewLoginLinkApproval": ApiOperation(
-      operationId: "reviewLoginLinkApproval",
-      method: "POST",
-      pathTemplate: "/api/v1/auth/login-links/{requestId}/review",
       multipart: false,
     ),
     "revokeAiProviderProfileCredential": ApiOperation(
@@ -1236,6 +1314,12 @@ final class ProvidentiaApiClient {
       pathTemplate: "/api/v1/catalog/products",
       multipart: false,
     ),
+    "selectGravatar": ApiOperation(
+      operationId: "selectGravatar",
+      method: "POST",
+      pathTemplate: "/api/v1/me/avatar/gravatar",
+      multipart: false,
+    ),
     "setShoppingListLineChecked": ApiOperation(
       operationId: "setShoppingListLineChecked",
       method: "PUT",
@@ -1247,12 +1331,6 @@ final class ProvidentiaApiClient {
       operationId: "stageHomeCatalogImport",
       method: "POST",
       pathTemplate: "/api/v1/homes/{homeId}/catalog-imports",
-      multipart: false,
-    ),
-    "startLoginLink": ApiOperation(
-      operationId: "startLoginLink",
-      method: "POST",
-      pathTemplate: "/api/v1/auth/login-links",
       multipart: false,
     ),
     "startStockCountSession": ApiOperation(
@@ -1286,6 +1364,12 @@ final class ProvidentiaApiClient {
           "/api/v1/homes/{homeId}/receipts/{receiptId}/lines/{lineId}/unresolve",
       multipart: false,
     ),
+    "updateAccountProfile": ApiOperation(
+      operationId: "updateAccountProfile",
+      method: "PATCH",
+      pathTemplate: "/api/v1/me/profile",
+      multipart: false,
+    ),
     "updateAiProviderProfile": ApiOperation(
       operationId: "updateAiProviderProfile",
       method: "PUT",
@@ -1310,6 +1394,18 @@ final class ProvidentiaApiClient {
       pathTemplate: "/api/v1/homes/{homeId}/products/{homeProductId}",
       multipart: false,
     ),
+    "updateHomeProfile": ApiOperation(
+      operationId: "updateHomeProfile",
+      method: "PUT",
+      pathTemplate: "/api/v1/homes/{homeId}/profile",
+      multipart: false,
+    ),
+    "updateMemberPermissionOverrides": ApiOperation(
+      operationId: "updateMemberPermissionOverrides",
+      method: "PUT",
+      pathTemplate: "/api/v1/homes/{homeId}/memberships/{userId}/permissions",
+      multipart: false,
+    ),
     "updatePrivateAiMediaRetention": ApiOperation(
       operationId: "updatePrivateAiMediaRetention",
       method: "PUT",
@@ -1321,6 +1417,24 @@ final class ProvidentiaApiClient {
       method: "POST",
       pathTemplate: "/api/v1/homes/{homeId}/ai/media",
       multipart: true,
+    ),
+    "verifyAccountEmail": ApiOperation(
+      operationId: "verifyAccountEmail",
+      method: "POST",
+      pathTemplate: "/api/v1/me/emails/verify",
+      multipart: false,
+    ),
+    "verifyEmailCode": ApiOperation(
+      operationId: "verifyEmailCode",
+      method: "POST",
+      pathTemplate: "/api/v1/auth/email-codes/verify",
+      multipart: false,
+    ),
+    "verifySecurityCode": ApiOperation(
+      operationId: "verifySecurityCode",
+      method: "POST",
+      pathTemplate: "/api/v1/me/security-codes/verify",
+      multipart: false,
     ),
   };
 
@@ -1500,20 +1614,6 @@ final class ProvidentiaApiClient {
     );
   }
 
-  Future<ApiResponse> acceptHomeInvitation({
-    required Map<String, Object?> body,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "acceptHomeInvitation",
-      pathParameters: const <String, String>{},
-      query: query,
-      headers: headers,
-      body: body,
-    );
-  }
-
   Future<ApiResponse> acceptHomeInvitationById({
     required String invitationId,
     required Map<String, Object?> body,
@@ -1577,21 +1677,6 @@ final class ProvidentiaApiClient {
   }) {
     return invokeOperation(
       operationId: "cancelDataGovernanceRequest",
-      pathParameters: <String, String>{"requestId": requestId},
-      query: query,
-      headers: headers,
-      body: body,
-    );
-  }
-
-  Future<ApiResponse> cancelLoginLink({
-    required String requestId,
-    required Map<String, Object?> body,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "cancelLoginLink",
       pathParameters: <String, String>{"requestId": requestId},
       query: query,
       headers: headers,
@@ -1666,6 +1751,20 @@ final class ProvidentiaApiClient {
         "homeId": homeId,
         "receiptId": receiptId,
       },
+      query: query,
+      headers: headers,
+      body: body,
+    );
+  }
+
+  Future<ApiResponse> completeAccountOnboarding({
+    required Map<String, Object?> body,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "completeAccountOnboarding",
+      pathParameters: const <String, String>{},
       query: query,
       headers: headers,
       body: body,
@@ -2000,15 +2099,15 @@ final class ProvidentiaApiClient {
     );
   }
 
-  Future<ApiResponse> decideLoginLinkApproval({
-    required String requestId,
+  Future<ApiResponse> declineHomeInvitation({
+    required String invitationId,
     required Map<String, Object?> body,
     Map<String, String>? query,
     Map<String, String> headers = const <String, String>{},
   }) {
     return invokeOperation(
-      operationId: "decideLoginLinkApproval",
-      pathParameters: <String, String>{"requestId": requestId},
+      operationId: "declineHomeInvitation",
+      pathParameters: <String, String>{"invitationId": invitationId},
       query: query,
       headers: headers,
       body: body,
@@ -2045,6 +2144,35 @@ final class ProvidentiaApiClient {
         "homeId": homeId,
         "profileId": profileId,
       },
+      query: query,
+      headers: headers,
+      body: body,
+    );
+  }
+
+  Future<ApiResponse> deleteHomeImage({
+    required String homeId,
+    required Map<String, Object?> body,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "deleteHomeImage",
+      pathParameters: <String, String>{"homeId": homeId},
+      query: query,
+      headers: headers,
+      body: body,
+    );
+  }
+
+  Future<ApiResponse> deleteOwnAvatar({
+    required Map<String, Object?> body,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "deleteOwnAvatar",
+      pathParameters: const <String, String>{},
       query: query,
       headers: headers,
       body: body,
@@ -2094,21 +2222,6 @@ final class ProvidentiaApiClient {
     );
   }
 
-  Future<ApiResponse> exchangeLoginLink({
-    required String requestId,
-    required Map<String, Object?> body,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "exchangeLoginLink",
-      pathParameters: <String, String>{"requestId": requestId},
-      query: query,
-      headers: headers,
-      body: body,
-    );
-  }
-
   Future<ApiResponse> exportPrivateAiMediaMetadata({
     required String homeId,
     Map<String, String>? query,
@@ -2117,6 +2230,18 @@ final class ProvidentiaApiClient {
     return invokeOperation(
       operationId: "exportPrivateAiMediaMetadata",
       pathParameters: <String, String>{"homeId": homeId},
+      query: query,
+      headers: headers,
+    );
+  }
+
+  Future<ApiResponse> getAccountProfile({
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "getAccountProfile",
+      pathParameters: const <String, String>{},
       query: query,
       headers: headers,
     );
@@ -2204,6 +2329,19 @@ final class ProvidentiaApiClient {
     );
   }
 
+  Future<ApiResponse> getCountryPrivacyPolicy({
+    required String countryCode,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "getCountryPrivacyPolicy",
+      pathParameters: <String, String>{"countryCode": countryCode},
+      query: query,
+      headers: headers,
+    );
+  }
+
   Future<ApiResponse> getCurrentUser({
     Map<String, String>? query,
     Map<String, String> headers = const <String, String>{},
@@ -2269,6 +2407,32 @@ final class ProvidentiaApiClient {
     );
   }
 
+  Future<ApiResponse> getHomeImage({
+    required String homeId,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "getHomeImage",
+      pathParameters: <String, String>{"homeId": homeId},
+      query: query,
+      headers: headers,
+    );
+  }
+
+  Future<ApiResponse> getHomeProfile({
+    required String homeId,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "getHomeProfile",
+      pathParameters: <String, String>{"homeId": homeId},
+      query: query,
+      headers: headers,
+    );
+  }
+
   Future<ApiResponse> getInventoryReport({
     required String homeId,
     Map<String, String>? query,
@@ -2282,18 +2446,29 @@ final class ProvidentiaApiClient {
     );
   }
 
-  Future<ApiResponse> getLoginLinkStatus({
-    required String requestId,
-    required Map<String, Object?> body,
+  Future<ApiResponse> getMemberPermissionOverrides({
+    required String homeId,
+    required String userId,
     Map<String, String>? query,
     Map<String, String> headers = const <String, String>{},
   }) {
     return invokeOperation(
-      operationId: "getLoginLinkStatus",
-      pathParameters: <String, String>{"requestId": requestId},
+      operationId: "getMemberPermissionOverrides",
+      pathParameters: <String, String>{"homeId": homeId, "userId": userId},
       query: query,
       headers: headers,
-      body: body,
+    );
+  }
+
+  Future<ApiResponse> getOwnAvatar({
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "getOwnAvatar",
+      pathParameters: const <String, String>{},
+      query: query,
+      headers: headers,
     );
   }
 
@@ -2463,6 +2638,19 @@ final class ProvidentiaApiClient {
     );
   }
 
+  Future<ApiResponse> getUserAvatar({
+    required String userId,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "getUserAvatar",
+      pathParameters: <String, String>{"userId": userId},
+      query: query,
+      headers: headers,
+    );
+  }
+
   Future<ApiResponse> issueDataExportDownloadToken({
     required String requestId,
     required Map<String, Object?> body,
@@ -2528,6 +2716,18 @@ final class ProvidentiaApiClient {
     );
   }
 
+  Future<ApiResponse> listAvailableCountries({
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "listAvailableCountries",
+      pathParameters: const <String, String>{},
+      query: query,
+      headers: headers,
+    );
+  }
+
   Future<ApiResponse> listConsumptionEstimates({
     required String homeId,
     Map<String, String>? query,
@@ -2536,6 +2736,32 @@ final class ProvidentiaApiClient {
     return invokeOperation(
       operationId: "listConsumptionEstimates",
       pathParameters: <String, String>{"homeId": homeId},
+      query: query,
+      headers: headers,
+    );
+  }
+
+  Future<ApiResponse> listCountryCities({
+    required String countryCode,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "listCountryCities",
+      pathParameters: <String, String>{"countryCode": countryCode},
+      query: query,
+      headers: headers,
+    );
+  }
+
+  Future<ApiResponse> listCountryStates({
+    required String countryCode,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "listCountryStates",
+      pathParameters: <String, String>{"countryCode": countryCode},
       query: query,
       headers: headers,
     );
@@ -2849,6 +3075,21 @@ final class ProvidentiaApiClient {
     );
   }
 
+  Future<ApiResponse> makeAccountEmailPrimary({
+    required String emailId,
+    required Map<String, Object?> body,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "makeAccountEmailPrimary",
+      pathParameters: <String, String>{"emailId": emailId},
+      query: query,
+      headers: headers,
+      body: body,
+    );
+  }
+
   Future<ApiResponse> proposeHomeOwnershipTransfer({
     required String homeId,
     required Map<String, Object?> body,
@@ -2858,21 +3099,6 @@ final class ProvidentiaApiClient {
     return invokeOperation(
       operationId: "proposeHomeOwnershipTransfer",
       pathParameters: <String, String>{"homeId": homeId},
-      query: query,
-      headers: headers,
-      body: body,
-    );
-  }
-
-  Future<ApiResponse> proveLoginLinkApproval({
-    required String requestId,
-    required Map<String, Object?> body,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "proveLoginLinkApproval",
-      pathParameters: <String, String>{"requestId": requestId},
       query: query,
       headers: headers,
       body: body,
@@ -2943,6 +3169,21 @@ final class ProvidentiaApiClient {
     );
   }
 
+  Future<ApiResponse> putHomeImage({
+    required String homeId,
+    required Map<String, Object?> body,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "putHomeImage",
+      pathParameters: <String, String>{"homeId": homeId},
+      query: query,
+      headers: headers,
+      body: body,
+    );
+  }
+
   Future<ApiResponse> putHomePermissionPolicy({
     required String homeId,
     required String role,
@@ -2953,6 +3194,20 @@ final class ProvidentiaApiClient {
     return invokeOperation(
       operationId: "putHomePermissionPolicy",
       pathParameters: <String, String>{"homeId": homeId, "role": role},
+      query: query,
+      headers: headers,
+      body: body,
+    );
+  }
+
+  Future<ApiResponse> putOwnAvatar({
+    required Map<String, Object?> body,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "putOwnAvatar",
+      pathParameters: const <String, String>{},
       query: query,
       headers: headers,
       body: body,
@@ -3045,6 +3300,21 @@ final class ProvidentiaApiClient {
     );
   }
 
+  Future<ApiResponse> removeAccountEmail({
+    required String emailId,
+    required Map<String, Object?> body,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "removeAccountEmail",
+      pathParameters: <String, String>{"emailId": emailId},
+      query: query,
+      headers: headers,
+      body: body,
+    );
+  }
+
   Future<ApiResponse> removeHomeMembership({
     required String homeId,
     required String userId,
@@ -3071,6 +3341,20 @@ final class ProvidentiaApiClient {
     );
   }
 
+  Future<ApiResponse> requestAccountEmailCode({
+    required Map<String, Object?> body,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "requestAccountEmailCode",
+      pathParameters: const <String, String>{},
+      query: query,
+      headers: headers,
+      body: body,
+    );
+  }
+
   Future<ApiResponse> requestAccountErasure({
     Map<String, String>? query,
     Map<String, String> headers = const <String, String>{},
@@ -3080,6 +3364,20 @@ final class ProvidentiaApiClient {
       pathParameters: const <String, String>{},
       query: query,
       headers: headers,
+    );
+  }
+
+  Future<ApiResponse> requestEmailCode({
+    required Map<String, Object?> body,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "requestEmailCode",
+      pathParameters: const <String, String>{},
+      query: query,
+      headers: headers,
+      body: body,
     );
   }
 
@@ -3109,13 +3407,13 @@ final class ProvidentiaApiClient {
     );
   }
 
-  Future<ApiResponse> requestStepUpLink({
+  Future<ApiResponse> requestSecurityCode({
     required Map<String, Object?> body,
     Map<String, String>? query,
     Map<String, String> headers = const <String, String>{},
   }) {
     return invokeOperation(
-      operationId: "requestStepUpLink",
+      operationId: "requestSecurityCode",
       pathParameters: const <String, String>{},
       query: query,
       headers: headers,
@@ -3180,21 +3478,6 @@ final class ProvidentiaApiClient {
         "extractionId": extractionId,
         "decisionId": decisionId,
       },
-      query: query,
-      headers: headers,
-      body: body,
-    );
-  }
-
-  Future<ApiResponse> reviewLoginLinkApproval({
-    required String requestId,
-    required Map<String, Object?> body,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "reviewLoginLinkApproval",
-      pathParameters: <String, String>{"requestId": requestId},
       query: query,
       headers: headers,
       body: body,
@@ -3283,6 +3566,20 @@ final class ProvidentiaApiClient {
     );
   }
 
+  Future<ApiResponse> selectGravatar({
+    required Map<String, Object?> body,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "selectGravatar",
+      pathParameters: const <String, String>{},
+      query: query,
+      headers: headers,
+      body: body,
+    );
+  }
+
   Future<ApiResponse> setShoppingListLineChecked({
     required String homeId,
     required String listId,
@@ -3313,20 +3610,6 @@ final class ProvidentiaApiClient {
     return invokeOperation(
       operationId: "stageHomeCatalogImport",
       pathParameters: <String, String>{"homeId": homeId},
-      query: query,
-      headers: headers,
-      body: body,
-    );
-  }
-
-  Future<ApiResponse> startLoginLink({
-    required Map<String, Object?> body,
-    Map<String, String>? query,
-    Map<String, String> headers = const <String, String>{},
-  }) {
-    return invokeOperation(
-      operationId: "startLoginLink",
-      pathParameters: const <String, String>{},
       query: query,
       headers: headers,
       body: body,
@@ -3411,6 +3694,20 @@ final class ProvidentiaApiClient {
     );
   }
 
+  Future<ApiResponse> updateAccountProfile({
+    required Map<String, Object?> body,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "updateAccountProfile",
+      pathParameters: const <String, String>{},
+      query: query,
+      headers: headers,
+      body: body,
+    );
+  }
+
   Future<ApiResponse> updateAiProviderProfile({
     required String homeId,
     required String profileId,
@@ -3483,6 +3780,37 @@ final class ProvidentiaApiClient {
     );
   }
 
+  Future<ApiResponse> updateHomeProfile({
+    required String homeId,
+    required Map<String, Object?> body,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "updateHomeProfile",
+      pathParameters: <String, String>{"homeId": homeId},
+      query: query,
+      headers: headers,
+      body: body,
+    );
+  }
+
+  Future<ApiResponse> updateMemberPermissionOverrides({
+    required String homeId,
+    required String userId,
+    required Map<String, Object?> body,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "updateMemberPermissionOverrides",
+      pathParameters: <String, String>{"homeId": homeId, "userId": userId},
+      query: query,
+      headers: headers,
+      body: body,
+    );
+  }
+
   Future<ApiResponse> updatePrivateAiMediaRetention({
     required String homeId,
     required String assetId,
@@ -3513,6 +3841,48 @@ final class ProvidentiaApiClient {
       headers: headers,
       formFields: formFields,
       files: files,
+    );
+  }
+
+  Future<ApiResponse> verifyAccountEmail({
+    required Map<String, Object?> body,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "verifyAccountEmail",
+      pathParameters: const <String, String>{},
+      query: query,
+      headers: headers,
+      body: body,
+    );
+  }
+
+  Future<ApiResponse> verifyEmailCode({
+    required Map<String, Object?> body,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "verifyEmailCode",
+      pathParameters: const <String, String>{},
+      query: query,
+      headers: headers,
+      body: body,
+    );
+  }
+
+  Future<ApiResponse> verifySecurityCode({
+    required Map<String, Object?> body,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "verifySecurityCode",
+      pathParameters: const <String, String>{},
+      query: query,
+      headers: headers,
+      body: body,
     );
   }
 
@@ -3589,6 +3959,7 @@ final class ProvidentiaApiClient {
 
 Object? _decodeResponseBody(http.Response response) {
   final contentType = response.headers['content-type']?.toLowerCase() ?? '';
+  if (contentType.startsWith('image/')) return response.bodyBytes;
   final source = utf8.decode(response.bodyBytes);
   if (contentType.contains('json') ||
       source.startsWith('{') ||

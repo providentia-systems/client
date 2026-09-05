@@ -4,15 +4,22 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:providentia/features/homes/domain/home_models.dart';
 import 'package:providentia/features/homes/presentation/homes_controller.dart';
+import 'package:providentia/features/profile/email_confirmation_dialog.dart';
+import 'package:providentia/features/profile/profile_port.dart';
+
+import 'home_profile_page.dart';
+import 'member_permissions_page.dart';
 
 final class HomeGovernancePage extends StatefulWidget {
   const HomeGovernancePage({
     required this.controller,
+    required this.profilePort,
     required this.currentUserId,
     super.key,
   });
 
   final HomesController controller;
+  final ProfilePort profilePort;
   final String currentUserId;
 
   @override
@@ -77,6 +84,25 @@ final class _HomeGovernancePageState extends State<HomeGovernancePage> {
                 ),
                 const SizedBox(height: 4),
                 Text('Your role: ${home.role.name}'),
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    await Navigator.push<void>(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => HomeProfilePage(
+                          port: widget.profilePort,
+                          homeId: home.id,
+                          mayEdit: permissions.contains(
+                            HomePermissions.homeManage,
+                          ),
+                        ),
+                      ),
+                    );
+                    await widget.controller.refreshGovernance();
+                  },
+                  icon: const Icon(Icons.home_outlined),
+                  label: const Text('Home profile and photo'),
+                ),
                 if (permissions.contains(
                   HomePermissions.homeManage,
                 )) ...<Widget>[
@@ -151,8 +177,9 @@ final class _HomeGovernancePageState extends State<HomeGovernancePage> {
                     initialValue: _inviteRole,
                     decoration: const InputDecoration(labelText: 'Role'),
                     items:
-                        const <HomeRole>[
-                              HomeRole.manager,
+                        <HomeRole>[
+                              if (home.role == HomeRole.owner) HomeRole.owner,
+                              if (home.role == HomeRole.owner) HomeRole.manager,
                               HomeRole.member,
                               HomeRole.viewer,
                             ]
@@ -257,6 +284,26 @@ final class _HomeGovernancePageState extends State<HomeGovernancePage> {
             ? Row(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
+                  if (widget.controller.snapshot.effectivePermissions.contains(
+                    HomePermissions.permissionsManage,
+                  ))
+                    IconButton(
+                      tooltip: 'Individual permissions',
+                      icon: const Icon(Icons.tune),
+                      onPressed: () async {
+                        await Navigator.push<void>(
+                          context,
+                          MaterialPageRoute<void>(
+                            builder: (_) => MemberPermissionsPage(
+                              port: widget.profilePort,
+                              home: home,
+                              member: membership,
+                            ),
+                          ),
+                        );
+                        await widget.controller.refreshGovernance();
+                      },
+                    ),
                   DropdownButton<HomeRole>(
                     value: membership.role,
                     items:
@@ -474,63 +521,17 @@ final class _HomeGovernancePageState extends State<HomeGovernancePage> {
     return 'Household member';
   }
 
-  /// Requests the step-up confirmation email, asks the person to open it and
-  /// paste the single-use code, then proposes the transfer with the target's
-  /// expected membership revision. Development profiles prefill the code.
   Future<void> _proposeOwnership(HomeMembership target) async {
-    final receipt = await widget.controller.requestOwnershipTransferStepUp();
-    if (receipt == null || !mounted) {
-      return;
-    }
-    final token = TextEditingController(
-      text: receipt.developmentStepUpToken ?? '',
+    final confirmation = await confirmAccountEmail(
+      context,
+      widget.profilePort,
+      action: 'ownership-transfer',
     );
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Confirm ownership transfer'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(
-              'We emailed you a single-use confirmation code. Open the email '
-              'and paste the code here to propose transferring ownership of '
-              'this home to ${target.displayName}. Ownership only changes '
-              'after they accept.',
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              key: const Key('ownership-step-up-token'),
-              controller: token,
-              decoration: const InputDecoration(
-                labelText: 'Confirmation code',
-                prefixIcon: Icon(Icons.mark_email_read_outlined),
-              ),
-            ),
-          ],
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            key: const Key('confirm-ownership-transfer'),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Propose transfer'),
-          ),
-        ],
-      ),
+    if (confirmation == null || !mounted) return;
+    await widget.controller.proposeOwnershipTransfer(
+      target: target,
+      stepUpToken: '${confirmation['proofToken']}',
     );
-    final code = token.text;
-    token.dispose();
-    if (confirmed ?? false) {
-      await widget.controller.proposeOwnershipTransfer(
-        target: target,
-        stepUpToken: code,
-      );
-    }
   }
 
   Widget _sentInvitation(HomeInvitation invitation) => Card(
@@ -578,6 +579,17 @@ final class _HomeGovernancePageState extends State<HomeGovernancePage> {
             child: ListView(
               shrinkWrap: true,
               children: _knownPermissions
+                  .where(
+                    (permission) =>
+                        (widget
+                                        .controller
+                                        .snapshot
+                                        .activeHome
+                                        ?.access['delegablePermissions']
+                                    as List? ??
+                                <Object?>[])
+                            .contains(permission),
+                  )
                   .map(
                     (permission) => CheckboxListTile(
                       value: selected.contains(permission),
