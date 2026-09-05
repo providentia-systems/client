@@ -147,10 +147,12 @@ final class IdentitySessionManager implements SessionAuthorizer {
           'Secure session storage is unavailable.',
         );
       }
+      PendingEmailCode? issued;
       try {
         final pending = await _transport
             .requestEmailCode(email: normalized, device: _device)
             .timeout(requestTimeout);
+        issued = pending;
         if (!_isCurrent(generation)) {
           throw StateError('Superseded login request.');
         }
@@ -159,6 +161,10 @@ final class IdentitySessionManager implements SessionAuthorizer {
           await _pendingStore<void>(
             () => _pendingEmailCodeStore.write(pending, activate: true),
           );
+          if (!_isCurrent(generation)) {
+            await _pendingEmailCodeStore.clear(request: pending);
+            return;
+          }
           _pendingEmailCode = pending;
           _sessionCoordination.publishAuthenticationIntent(pending.requestId);
         });
@@ -168,9 +174,17 @@ final class IdentitySessionManager implements SessionAuthorizer {
         if (_isCurrent(generation)) _emitFailure(error.safeMessage);
         rethrow;
       } on Object {
+        if (issued != null) {
+          await _invalidatePendingStore(issued);
+        }
         if (_isCurrent(generation)) {
           _emitFailure(
             'The email code could not be requested. Please try again.',
+          );
+        }
+        if (issued != null) {
+          throw const IdentityCredentialStoreException(
+            'The email code request could not be secured on this device.',
           );
         }
         rethrow;
@@ -181,9 +195,10 @@ final class IdentitySessionManager implements SessionAuthorizer {
   Future<void> verifyEmailCode(String code) {
     _ensureOpen();
     final pending = _pendingEmailCode;
-    if (pending == null || !RegExp(r'^[0-9]{8}$').hasMatch(code)) {
+    if (!RegExp(r'^[0-9]{8}$').hasMatch(code)) {
       throw const FormatException('Enter the eight-digit email code.');
     }
+    if (pending == null) return Future<void>.value();
     final generation = _lifecycleGeneration;
     return _serializeMutation<void>(
       () => _withCookieMutationLock<void>(() async {
@@ -892,7 +907,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
           () => _pendingEmailCodeStore.invalidate(pending),
         );
       }
-      await _clearPendingStore(request: pending);
+      if (pending != null) await _clearPendingStore(request: pending);
     } on Object {
       if (_isCurrent(generation)) {
         _emitFailure(
@@ -907,6 +922,18 @@ final class IdentitySessionManager implements SessionAuthorizer {
     int generation,
     String code,
   ) async {
+    if (pending.isExpiredAt(_clock())) {
+      await _invalidatePendingStore(pending);
+      _pendingEmailCode = null;
+      _emit(
+        IdentitySessionSnapshot(
+          status: IdentitySessionStatus.emailCodeExpired,
+          loginEmail: pending.email,
+          safeMessage: 'This email code expired. Request a new code.',
+        ),
+      );
+      return;
+    }
     _emit(
       IdentitySessionSnapshot(
         status: IdentitySessionStatus.verifyingEmailCode,
@@ -915,6 +942,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
       ),
     );
     BrowserCookieMutationJournal? cookieMutation;
+    var credentialIssued = false;
     try {
       if (sessionTransport == ClientSessionTransport.webCookie) {
         if (await _resumeUnfinishedBrowserCookieMutation(generation)) return;
@@ -941,6 +969,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
       final grant = await _transport
           .verifyEmailCode(request: pending, code: code)
           .timeout(requestTimeout);
+      credentialIssued = true;
       if (!_isCurrent(generation)) {
         await _discardGrant(grant);
         return;
@@ -988,8 +1017,9 @@ final class IdentitySessionManager implements SessionAuthorizer {
       if (!_isCurrent(generation)) {
         return;
       }
-      if (error.kind == IdentityFailureKind.rateLimited ||
-          error.kind == IdentityFailureKind.validation) {
+      if (!credentialIssued &&
+          (error.kind == IdentityFailureKind.rateLimited ||
+              error.kind == IdentityFailureKind.validation)) {
         await _clearBrowserCookieMutation(cookieMutation);
         _emitWaiting(pending, message: error.safeMessage);
         return;
@@ -1593,7 +1623,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
   }
 
   Future<void> _replacePendingRequest(PendingEmailCode? pending) async {
-    await _clearPendingStore(request: pending);
+    if (pending != null) await _clearPendingStore(request: pending);
   }
 
   Future<void> _retireSession(

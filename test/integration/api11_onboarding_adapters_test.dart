@@ -19,50 +19,47 @@ import 'package:providentia/features/identity/infrastructure/api11_identity_tran
 import 'package:providentia_api_client/providentia_api_client.dart';
 
 void main() {
-  test('login-link start sends client-owned proof challenges', () async {
-    late Map<String, Object?> body;
-    final transport = Api11IdentityTransport(
-      _client((request) async {
-        expect(request.url.path, '/api/v1/auth/login-links');
-        body = jsonDecode(request.body) as Map<String, Object?>;
-        return _json(<String, Object?>{
-          'accepted': true,
-          'requestId': _requestId,
-          'expiresAt': '2026-08-09T12:15:00Z',
-          'pollIntervalSeconds': 3,
-        }, 202);
-      }),
-      sessionTransport: ClientSessionTransport.nativeBearer,
-    );
+  test(
+    'email code request binds the originating application and installation',
+    () async {
+      late Map<String, Object?> body;
+      final transport = Api11IdentityTransport(
+        _client((request) async {
+          expect(request.url.path, '/api/v1/auth/email-codes');
+          body = jsonDecode(request.body) as Map<String, Object?>;
+          return _json(<String, Object?>{
+            'bindingToken': _pollToken,
+            'challengeId': _requestId,
+            'expiresAt': '2026-08-09T12:15:00Z',
+            'resendAfterSeconds': 60,
+          }, 202);
+        }),
+        sessionTransport: ClientSessionTransport.nativeBearer,
+      );
 
-    final receipt = await transport.startLoginLink(
-      LoginLinkStartCommand(
-        requestId: _requestId,
+      final receipt = await transport.requestEmailCode(
         email: 'person@example.com',
-        pollChallenge: _challengeA,
-        codeChallenge: _challengeB,
-        state: _state,
         device: DeviceDescriptor(
           id: _installationId,
           name: 'Test phone',
           platform: 'android',
         ),
-        transport: ClientSessionTransport.nativeBearer,
-      ),
-    );
+      );
 
-    expect(body['requestId'], _requestId);
-    expect(body['pollChallenge'], _challengeA);
-    expect(body['codeChallenge'], _challengeB);
-    expect(body['codeChallengeMethod'], 'S256');
-    expect(body['installationId'], _installationId);
-    expect(body, isNot(contains('pollToken')));
-    expect(body, isNot(contains('codeVerifier')));
-    expect(receipt.pollInterval, const Duration(seconds: 3));
-  });
+      expect(body['installationId'], _installationId);
+      expect(body, isNot(contains('pollToken')));
+      expect(body, isNot(contains('codeVerifier')));
+      expect(receipt.requestId, _requestId);
+      expect(receipt.bindingToken, _pollToken);
+      expect(
+        receipt.resendAt.difference(receipt.createdAt),
+        const Duration(seconds: 60),
+      );
+    },
+  );
 
   test(
-    'login-link request identifier conflict requires a fresh request',
+    'email code conflict is reported without revealing credentials',
     () async {
       final transport = Api11IdentityTransport(
         _client(
@@ -72,19 +69,12 @@ void main() {
       );
 
       await expectLater(
-        transport.startLoginLink(
-          LoginLinkStartCommand(
-            requestId: _requestId,
-            email: 'person@example.com',
-            pollChallenge: _challengeA,
-            codeChallenge: _challengeB,
-            state: _state,
-            device: DeviceDescriptor(
-              id: _deviceId,
-              name: 'Test phone',
-              platform: 'android',
-            ),
-            transport: ClientSessionTransport.nativeBearer,
+        transport.requestEmailCode(
+          email: 'person@example.com',
+          device: DeviceDescriptor(
+            id: _deviceId,
+            name: 'Test phone',
+            platform: 'android',
           ),
         ),
         throwsA(
@@ -102,22 +92,22 @@ void main() {
     late Map<String, Object?> body;
     final transport = Api11IdentityTransport(
       _client((request) async {
-        expect(
-          request.url.path,
-          '/api/v1/auth/login-links/$_requestId/exchange',
-        );
+        expect(request.url.path, '/api/v1/auth/email-codes/verify');
         body = jsonDecode(request.body) as Map<String, Object?>;
         return _json(_nativeSessionJson(), 200);
       }),
       sessionTransport: ClientSessionTransport.nativeBearer,
     );
 
-    final grant = await transport.exchangeLoginLink(request: _pending());
+    final grant = await transport.verifyEmailCode(
+      request: _pending(),
+      code: '12345678',
+    );
 
     expect(body, <String, Object?>{
-      'pollToken': _pollToken,
-      'codeVerifier': _verifier,
-      'state': _state,
+      'bindingToken': _pollToken,
+      'challengeId': _requestId,
+      'code': '12345678',
     });
     expect(grant.metadata.refreshIdleTtl, const Duration(days: 60));
     expect(grant.metadata.idleExpiresAt, DateTime.utc(2026, 10, 8, 12));
@@ -141,7 +131,10 @@ void main() {
         sessionTransport: ClientSessionTransport.nativeBearer,
       );
 
-      final grant = await transport.exchangeLoginLink(request: _pending());
+      final grant = await transport.verifyEmailCode(
+        request: _pending(),
+        code: '12345678',
+      );
 
       expect(grant.metadata.refreshExpiresAt, isNull);
       expect(grant.metadata.idleExpiresAt, isNull);
@@ -170,7 +163,7 @@ void main() {
       );
 
       await expectLater(
-        transport.exchangeLoginLink(request: _pending()),
+        transport.verifyEmailCode(request: _pending(), code: '12345678'),
         throwsA(
           isA<IdentityTransportException>().having(
             (error) => error.kind,
@@ -252,7 +245,7 @@ void main() {
     );
 
     await expectLater(
-      transport.exchangeLoginLink(request: _pending()),
+      transport.verifyEmailCode(request: _pending(), code: '12345678'),
       throwsA(
         isA<IdentityTransportException>().having(
           (error) => error.kind,
@@ -278,7 +271,7 @@ void main() {
       );
 
       await expectLater(
-        transport.exchangeLoginLink(request: _pending()),
+        transport.verifyEmailCode(request: _pending(), code: '12345678'),
         throwsA(
           isA<IdentityTransportException>().having(
             (error) => error.kind,
@@ -299,19 +292,12 @@ void main() {
       );
 
       await expectLater(
-        transport.startLoginLink(
-          LoginLinkStartCommand(
-            requestId: _requestId,
-            email: 'person@example.com',
-            pollChallenge: _challengeA,
-            codeChallenge: _challengeB,
-            state: _state,
-            device: DeviceDescriptor(
-              id: _deviceId,
-              name: 'Test phone',
-              platform: 'android',
-            ),
-            transport: ClientSessionTransport.nativeBearer,
+        transport.requestEmailCode(
+          email: 'person@example.com',
+          device: DeviceDescriptor(
+            id: _deviceId,
+            name: 'Test phone',
+            platform: 'android',
           ),
         ),
         throwsA(
@@ -651,8 +637,8 @@ void main() {
     final manager = IdentitySessionManager(
       transport: transport,
       credentialStore: _MemoryCredentialStore(),
-      pendingLoginLinkStore: _MemoryPendingStore(),
-      loginLinkRequestFactory: _NeverRequestFactory(),
+      pendingEmailCodeStore: _MemoryPendingStore(),
+
       device: DeviceDescriptor(
         id: _deviceId,
         name: 'Test device',
@@ -684,8 +670,8 @@ void main() {
     final manager = IdentitySessionManager(
       transport: transport,
       credentialStore: _MemoryCredentialStore(),
-      pendingLoginLinkStore: _MemoryPendingStore(),
-      loginLinkRequestFactory: _NeverRequestFactory(),
+      pendingEmailCodeStore: _MemoryPendingStore(),
+
       device: DeviceDescriptor(
         id: _deviceId,
         name: 'Test device',
@@ -720,8 +706,8 @@ void main() {
     final manager = IdentitySessionManager(
       transport: transport,
       credentialStore: _MemoryCredentialStore(),
-      pendingLoginLinkStore: _MemoryPendingStore(),
-      loginLinkRequestFactory: _NeverRequestFactory(),
+      pendingEmailCodeStore: _MemoryPendingStore(),
+
       device: DeviceDescriptor(
         id: _deviceId,
         name: 'Test device',
@@ -787,15 +773,13 @@ http.Response _problem(int status, String detail) => _json(<String, Object?>{
   'requestId': 'test-request',
 }, status);
 
-PendingLoginLinkRequest _pending() => PendingLoginLinkRequest(
+PendingEmailCode _pending() => PendingEmailCode(
   requestId: _requestId,
   email: 'person@example.com',
-  pollToken: _pollToken,
-  codeVerifier: _verifier,
-  state: _state,
   createdAt: DateTime.utc(2026, 8, 9, 12),
   expiresAt: DateTime.utc(2026, 8, 9, 12, 15),
-  pollInterval: const Duration(seconds: 3),
+  bindingToken: _pollToken,
+  resendAt: (DateTime.utc(2026, 8, 9, 12)).add(const Duration(seconds: 60)),
 );
 
 Map<String, Object?> _nativeSessionJson() => <String, Object?>{
@@ -829,6 +813,7 @@ Map<String, Object?> _webSessionJson() => <String, Object?>{
 
 Map<String, Object?> _currentUserJson() => <String, Object?>{
   'userId': _userId,
+  'profile': <String, Object?>{},
   'email': 'person@example.com',
   'emailVerified': true,
   'activeHomeId': _homeId,
@@ -910,15 +895,15 @@ final class _AbortObservingClient extends http.BaseClient {
   }
 }
 
-final class _MemoryPendingStore implements PendingLoginLinkStore {
+final class _MemoryPendingStore implements PendingEmailCodeStore {
   bool logoutIntent = false;
   BrowserCookieMutationJournal? cookieMutation;
 
   @override
-  Future<void> clear({PendingLoginLinkRequest? request}) async {}
+  Future<void> clear({PendingEmailCode? request}) async {}
 
   @override
-  Future<void> invalidate(PendingLoginLinkRequest request) async {}
+  Future<void> invalidate(PendingEmailCode request) async {}
 
   @override
   Future<bool> hasLogoutIntent() async => logoutIntent;
@@ -945,24 +930,12 @@ final class _MemoryPendingStore implements PendingLoginLinkStore {
   }
 
   @override
-  Future<PendingLoginLinkRequest?> read() async => null;
+  Future<PendingEmailCode?> read() async => null;
   @override
   Future<void> write(
-    PendingLoginLinkRequest request, {
+    PendingEmailCode request, {
     required bool activate,
   }) async {}
-}
-
-final class _NeverRequestFactory implements LoginLinkRequestFactory {
-  @override
-  String challenge(String secret) => throw UnimplementedError();
-  @override
-  PendingLoginLinkRequest create({
-    required String email,
-    required DateTime createdAt,
-    required DateTime expiresAt,
-    required Duration pollInterval,
-  }) => throw UnimplementedError();
 }
 
 final class _RestoringIdentityTransport implements IdentityTransportPort {
@@ -1005,22 +978,17 @@ final class _RestoringIdentityTransport implements IdentityTransportPort {
     currentSession: _deviceSession(DateTime.utc(2026, 8, 9, 12)),
   );
   @override
-  Future<LoginLinkStartReceipt> startLoginLink(LoginLinkStartCommand command) =>
-      throw UnimplementedError();
-  @override
-  Future<LoginLinkStatusView> getLoginLinkStatus({
-    required String requestId,
-    required String pollToken,
+  Future<PendingEmailCode> requestEmailCode({
+    required String email,
+    required DeviceDescriptor device,
   }) => throw UnimplementedError();
+
   @override
-  Future<SessionGrant> exchangeLoginLink({
-    required PendingLoginLinkRequest request,
+  Future<SessionGrant> verifyEmailCode({
+    required PendingEmailCode request,
+    required String code,
   }) => throw UnimplementedError();
-  @override
-  Future<void> cancelLoginLink({
-    required String requestId,
-    required String pollToken,
-  }) async {}
+
   @override
   Future<void> logout({
     String? accessToken,

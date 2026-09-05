@@ -160,7 +160,7 @@ void main() {
       expect(
         ProvidentiaApiClient.operations.keys,
         containsAll(<String>[
-          'startLoginLink',
+          'requestEmailCode',
           'proveLoginLinkApproval',
           'reviewLoginLinkApproval',
           'decideLoginLinkApproval',
@@ -253,7 +253,7 @@ void main() {
         baseUri: Uri.parse('https://api.example.test'),
         httpClient: MockClient((request) async {
           expect(request.method, 'POST');
-          expect(request.url.path, '/api/v1/auth/login-links');
+          expect(request.url.path, '/api/v1/auth/email-codes');
           expect(
             request.headers['Content-Type'],
             startsWith('application/json'),
@@ -270,7 +270,7 @@ void main() {
         }),
       );
 
-      final response = await client.startLoginLink(
+      final response = await client.requestEmailCode(
         body: <String, Object?>{
           'email': 'owner@example.test',
           'applicationKind': 'homeowner',
