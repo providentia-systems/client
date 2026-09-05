@@ -6,6 +6,8 @@ import 'package:providentia/features/homes/domain/home_models.dart';
 import 'package:providentia/features/homes/presentation/home_governance_page.dart';
 import 'package:providentia/features/homes/presentation/homes_controller.dart';
 
+import '../../support/access_fixture.dart';
+
 void main() {
   testWidgets(
     'owner governance exposes and executes the server-authorized controls',
@@ -21,6 +23,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: HomeGovernancePage(
+            profilePort: FixtureProfilePort(),
             controller: fixture.controller,
             currentUserId: _currentUserId,
           ),
@@ -142,6 +145,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: HomeGovernancePage(
+            profilePort: FixtureProfilePort(),
             controller: fixture.controller,
             currentUserId: _currentUserId,
           ),
@@ -209,6 +213,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: HomeGovernancePage(
+            profilePort: FixtureProfilePort(),
             controller: fixture.controller,
             currentUserId: _currentUserId,
           ),
@@ -256,6 +261,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: HomeGovernancePage(
+          profilePort: FixtureProfilePort(),
           controller: fixture.controller,
           currentUserId: _currentUserId,
         ),
@@ -293,6 +299,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: HomeGovernancePage(
+            profilePort: FixtureProfilePort(),
             controller: fixture.controller,
             currentUserId: _currentUserId,
           ),
@@ -367,6 +374,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: HomeGovernancePage(
+            profilePort: FixtureProfilePort(),
             controller: fixture.controller,
             currentUserId: _currentUserId,
           ),
@@ -412,6 +420,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: HomeGovernancePage(
+          profilePort: FixtureProfilePort(),
           controller: fixture.controller,
           currentUserId: _currentUserId,
         ),
@@ -576,6 +585,19 @@ final class _GovernanceTransport implements HomeTransportPort {
   ({String transferId, int expectedRevision})? revokedTransfer;
 
   @override
+  Future<HomeSummary> getHome(String homeId) async => home;
+
+  @override
+  Future<void> declinePendingInvitation({
+    required String invitationId,
+    required int expectedRevision,
+  }) async {
+    pendingInvitations.removeWhere(
+      (invitation) => invitation.id == invitationId,
+    );
+  }
+
+  @override
   Future<List<HomeSummary>> listHomes() async => <HomeSummary>[home];
 
   @override
@@ -596,6 +618,8 @@ final class _GovernanceTransport implements HomeTransportPort {
   }) async {
     updatedHomeName = name;
     home = HomeSummary(
+      effectivePermissions: fixtureHomePermissions(home.role),
+      access: fixtureHomeAccess(),
       id: home.id,
       name: name,
       locale: locale,
@@ -630,12 +654,6 @@ final class _GovernanceTransport implements HomeTransportPort {
   Future<List<HomeOwnershipTransfer>> listHomeOwnershipTransfers(
     String homeId,
   ) async => List<HomeOwnershipTransfer>.of(ownershipTransfers);
-
-  @override
-  Future<StepUpLinkReceipt> requestStepUpLink() async {
-    stepUpRequests++;
-    return const StepUpLinkReceipt(developmentStepUpToken: _stepUpToken);
-  }
 
   @override
   Future<HomeOwnershipTransfer> proposeHomeOwnershipTransfer({
@@ -675,6 +693,8 @@ final class _GovernanceTransport implements HomeTransportPort {
     );
     ownershipTransfers.removeWhere((transfer) => transfer.id == transferId);
     home = HomeSummary(
+      effectivePermissions: fixtureHomePermissions(HomeRole.owner),
+      access: fixtureHomeAccess(),
       id: home.id,
       name: home.name,
       locale: home.locale,
@@ -823,6 +843,8 @@ final class _MemoryActiveHomeStore implements ActiveHomeStore {
 }
 
 HomeSummary _home(HomeRole role) => HomeSummary(
+  effectivePermissions: fixtureHomePermissions(role),
+  access: fixtureHomeAccess(),
   id: _homeId,
   name: 'My home',
   locale: 'en-NA',

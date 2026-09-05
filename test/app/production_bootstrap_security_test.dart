@@ -10,6 +10,8 @@ import 'package:providentia/features/homes/domain/home_models.dart';
 import 'package:providentia/features/homes/presentation/homes_controller.dart';
 import 'package:providentia/features/identity/domain/identity_models.dart';
 
+import '../support/access_fixture.dart';
+
 void main() {
   test('production composes revocation, policy, and cross-tab protections', () {
     final source = File(
@@ -234,6 +236,8 @@ final class _SecurityActiveHomeStore implements ActiveHomeStore {
 
 final class _SecurityHomeTransport implements HomeTransportPort {
   final HomeSummary home = HomeSummary(
+    effectivePermissions: fixtureHomePermissions(HomeRole.owner),
+    access: fixtureHomeAccess(),
     id: 'home-a',
     name: 'My home',
     locale: 'en-NA',
@@ -242,6 +246,17 @@ final class _SecurityHomeTransport implements HomeTransportPort {
     role: HomeRole.owner,
     revision: 1,
   );
+
+  @override
+  Future<HomeSummary> getHome(String homeId) async => home;
+
+  @override
+  Future<void> declinePendingInvitation({
+    required String invitationId,
+    required int expectedRevision,
+  }) async {
+    throw StateError('This fixture has no pending invitations.');
+  }
 
   @override
   Future<List<HomeSummary>> listHomes() async => <HomeSummary>[home];
@@ -327,9 +342,6 @@ final class _SecurityHomeTransport implements HomeTransportPort {
   Future<List<HomeOwnershipTransfer>> listHomeOwnershipTransfers(
     String homeId,
   ) async => const <HomeOwnershipTransfer>[];
-
-  @override
-  Future<StepUpLinkReceipt> requestStepUpLink() => throw UnimplementedError();
 
   @override
   Future<HomeOwnershipTransfer> proposeHomeOwnershipTransfer({

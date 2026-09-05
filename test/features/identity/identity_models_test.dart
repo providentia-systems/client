@@ -1,52 +1,24 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:providentia/features/identity/domain/identity_models.dart';
-import 'package:providentia/features/identity/infrastructure/secure_login_link_request_factory.dart';
 
 void main() {
-  test(
-    'secure factory creates origin-only proof and distinct S256 challenges',
-    () {
-      final factory = SecureLoginLinkRequestFactory();
-      final request = factory.create(
-        email: 'Person@Example.com',
-        createdAt: DateTime.utc(2026, 8, 9, 12),
-        expiresAt: DateTime.utc(2026, 8, 9, 12, 15),
-        pollInterval: const Duration(seconds: 3),
-      );
-
-      expect(request.email, 'person@example.com');
-      expect(request.requestId, matches(RegExp(r'^[0-9a-f-]{36}$')));
-      expect(request.pollToken.length, greaterThanOrEqualTo(43));
-      expect(request.codeVerifier.length, greaterThanOrEqualTo(43));
-      expect(request.state.length, greaterThanOrEqualTo(32));
-      expect(factory.challenge(request.pollToken), hasLength(43));
-      expect(factory.challenge(request.codeVerifier), hasLength(43));
-      expect(
-        factory.challenge(request.pollToken),
-        isNot(factory.challenge(request.codeVerifier)),
-      );
-    },
-  );
-
-  test('server receipt cannot replace the client request identity', () {
-    final factory = SecureLoginLinkRequestFactory();
-    final request = factory.create(
+  test('email-code view exposes deadlines without the binding proof', () {
+    final created = DateTime.utc(2026, 9, 1);
+    final request = PendingEmailCode(
+      requestId: '0198a0b1-c2d3-7e4f-8123-456789abcdef',
       email: 'person@example.com',
-      createdAt: DateTime.utc(2026, 8, 9, 12),
-      expiresAt: DateTime.utc(2026, 8, 9, 12, 15),
-      pollInterval: const Duration(seconds: 3),
+      bindingToken: 'binding-token-000000000000000000000000000000',
+      createdAt: created,
+      expiresAt: created.add(const Duration(minutes: 10)),
+      resendAt: created.add(const Duration(seconds: 60)),
     );
-
-    expect(
-      () => request.withServerReceipt(
-        LoginLinkStartReceipt(
-          requestId: '0198a0b1-c2d3-7e4f-8123-456789abcdef',
-          expiresAt: DateTime.utc(2026, 8, 9, 12, 15),
-          pollInterval: const Duration(seconds: 3),
-        ),
-      ),
-      throwsFormatException,
-    );
+    final view = request.toPublicView();
+    expect(view.email, request.email);
+    expect(view.resendAt, created.add(const Duration(seconds: 60)));
+    expect(view.isExpiredAt(created.add(const Duration(minutes: 9))), isFalse);
+    expect(view.isExpiredAt(request.expiresAt), isTrue);
+    expect(view.toString(), isNot(contains(request.bindingToken)));
+    expect(request.toString(), isNot(contains(request.bindingToken)));
   });
 
   test('web cookie grant rejects bearer credentials', () {

@@ -6,6 +6,8 @@ import 'package:providentia/features/homes/domain/home_models.dart';
 import 'package:providentia/features/homes/presentation/home_selection_page.dart';
 import 'package:providentia/features/homes/presentation/homes_controller.dart';
 
+import '../../support/access_fixture.dart';
+
 void main() {
   testWidgets(
     'invited first-timers see invitations first and create as secondary',
@@ -144,11 +146,25 @@ final class _SelectionHomeTransport implements HomeTransportPort {
   int? acceptedRevision;
 
   @override
+  Future<HomeSummary> getHome(String homeId) async =>
+      homes.singleWhere((home) => home.id == homeId);
+
+  @override
+  Future<void> declinePendingInvitation({
+    required String invitationId,
+    required int expectedRevision,
+  }) async {
+    invitations.removeWhere((invitation) => invitation.id == invitationId);
+  }
+
+  @override
   Future<List<HomeSummary>> listHomes() async => List<HomeSummary>.of(homes);
 
   @override
   Future<HomeSummary> createHome(CreateHomeCommand command) async {
     final created = HomeSummary(
+      effectivePermissions: fixtureHomePermissions(HomeRole.owner),
+      access: fixtureHomeAccess(),
       id: 'created-home',
       name: command.name,
       locale: command.locale,
@@ -177,6 +193,8 @@ final class _SelectionHomeTransport implements HomeTransportPort {
     acceptedRevision = expectedRevision;
     invitations.removeWhere((invitation) => invitation.id == invitationId);
     final accepted = HomeSummary(
+      effectivePermissions: fixtureHomePermissions(HomeRole.member),
+      access: fixtureHomeAccess(),
       id: 'shared-home',
       name: 'Shared pantry',
       locale: 'en-NA',
@@ -245,9 +263,6 @@ final class _SelectionHomeTransport implements HomeTransportPort {
   Future<List<HomeOwnershipTransfer>> listHomeOwnershipTransfers(
     String homeId,
   ) async => const <HomeOwnershipTransfer>[];
-
-  @override
-  Future<StepUpLinkReceipt> requestStepUpLink() => throw UnimplementedError();
 
   @override
   Future<HomeOwnershipTransfer> proposeHomeOwnershipTransfer({

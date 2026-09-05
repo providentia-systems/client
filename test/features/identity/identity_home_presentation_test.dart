@@ -10,8 +10,10 @@ import 'package:providentia/features/identity/application/identity_session_manag
 import 'package:providentia/features/identity/domain/identity_models.dart';
 import 'package:providentia/features/identity/presentation/account_access_page.dart';
 import 'package:providentia/features/identity/presentation/device_sessions_page.dart';
+import 'package:providentia/features/identity/presentation/email_code_sign_in_page.dart';
 import 'package:providentia/features/identity/presentation/identity_controller.dart';
-import 'package:providentia/features/identity/presentation/login_link_sign_in_page.dart';
+
+import '../../support/access_fixture.dart';
 
 void main() {
   testWidgets('production sign-in is email-only and non-enumerating', (
@@ -21,7 +23,7 @@ void main() {
     addTearDown(identity.dispose);
     await tester.pumpWidget(
       MaterialApp(
-        home: LoginLinkSignInPage(
+        home: EmailCodeSignInPage(
           controller: identity.controller,
           restoreOnStart: false,
         ),
@@ -46,7 +48,7 @@ void main() {
     expect(find.textContaining('whether this address is new'), findsNothing);
     expect(find.byKey(const Key('identity-check-login-link')), findsOneWidget);
     expect(find.byKey(const Key('identity-cancel-login-link')), findsOneWidget);
-    await identity.controller.cancelLoginLink();
+    await identity.controller.cancelEmailCode();
     await tester.pump();
   });
 
@@ -55,7 +57,7 @@ void main() {
     addTearDown(identity.dispose);
     await tester.pumpWidget(
       MaterialApp(
-        home: LoginLinkSignInPage(
+        home: EmailCodeSignInPage(
           controller: identity.controller,
           restoreOnStart: false,
         ),
@@ -165,6 +167,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: AccountAccessPage(
+          profilePort: FixtureProfilePort(),
           identityController: identity.controller,
           homesController: homes.controller,
         ),
@@ -223,6 +226,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: AccountAccessPage(
+          profilePort: FixtureProfilePort(),
           identityController: identity.controller,
           homesController: homes.controller,
         ),
@@ -242,6 +246,8 @@ void main() {
       final homes = _HomeFixture();
       homes.transport.homes.add(
         HomeSummary(
+          effectivePermissions: fixtureHomePermissions(HomeRole.owner),
+          access: fixtureHomeAccess(),
           id: 'owner-home',
           name: 'Owner home',
           locale: 'en-NA',
@@ -259,6 +265,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: AccountAccessPage(
+            profilePort: FixtureProfilePort(),
             identityController: identity.controller,
             homesController: homes.controller,
             catalogContributionPageBuilder: (_) =>
@@ -307,6 +314,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: AccountAccessPage(
+            profilePort: FixtureProfilePort(),
             identityController: identity.controller,
             homesController: homes.controller,
             catalogImportPageBuilder: (_) =>
@@ -330,6 +338,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: AccountAccessPage(
+            profilePort: FixtureProfilePort(),
             identityController: identity.controller,
             homesController: homes.controller,
             householdReportsPageBuilder: (_) =>
@@ -358,6 +367,8 @@ void main() {
     final homes = _HomeFixture();
     homes.transport.homes.add(
       HomeSummary(
+        effectivePermissions: fixtureHomePermissions(HomeRole.owner),
+        access: fixtureHomeAccess(),
         id: 'owner-home',
         name: 'Owner home',
         locale: 'en-NA',
@@ -374,6 +385,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: AccountAccessPage(
+          profilePort: FixtureProfilePort(),
           identityController: identity.controller,
           homesController: homes.controller,
           householdReportsPageBuilder: (_) =>
@@ -525,15 +537,13 @@ final class _IdentityFixture {
     manager = IdentitySessionManager(
       transport: transport,
       credentialStore: _MemoryCredentialStore(),
-      pendingLoginLinkStore: _MemoryPendingStore(),
-      loginLinkRequestFactory: _RequestFactory(),
+      pendingEmailCodeStore: _MemoryPendingStore(),
+
       device: DeviceDescriptor(
         id: '0198a0b1-c2d3-7e4f-8123-456789abcdeb',
         name: 'Test device',
         platform: 'test',
       ),
-      defaultPollInterval: const Duration(seconds: 30),
-      maximumPollInterval: const Duration(seconds: 30),
     );
     controller = IdentityController(manager);
   }
@@ -565,15 +575,13 @@ final class _AuthenticatedIdentityFixture {
     manager = IdentitySessionManager(
       transport: transport,
       credentialStore: credentials,
-      pendingLoginLinkStore: _MemoryPendingStore(),
-      loginLinkRequestFactory: _RequestFactory(),
+      pendingEmailCodeStore: _MemoryPendingStore(),
+
       device: DeviceDescriptor(
         id: _identityDeviceId,
         name: 'Test device',
         platform: 'test',
       ),
-      defaultPollInterval: const Duration(seconds: 30),
-      maximumPollInterval: const Duration(seconds: 30),
     );
     controller = IdentityController(manager);
   }
@@ -595,34 +603,23 @@ class _PresentationIdentityTransport implements IdentityTransportPort {
       ClientSessionTransport.nativeBearer;
 
   @override
-  Future<LoginLinkStartReceipt> startLoginLink(
-    LoginLinkStartCommand command,
-  ) async => LoginLinkStartReceipt(
-    requestId: command.requestId,
-    expiresAt: DateTime.now().toUtc().add(const Duration(minutes: 15)),
-    pollInterval: const Duration(seconds: 30),
+  Future<PendingEmailCode> requestEmailCode({
+    required String email,
+    required DeviceDescriptor device,
+  }) async => PendingEmailCode(
+    requestId: _requestId,
+    email: email,
+    bindingToken: _pollToken,
+    createdAt: DateTime.now().toUtc(),
+    expiresAt: DateTime.now().toUtc().add(const Duration(minutes: 10)),
+    resendAt: DateTime.now().toUtc().add(const Duration(seconds: 60)),
   );
 
   @override
-  Future<LoginLinkStatusView> getLoginLinkStatus({
-    required String requestId,
-    required String pollToken,
-  }) async => LoginLinkStatusView(
-    requestId: requestId,
-    status: LoginLinkRequestStatus.pending,
-    expiresAt: DateTime.now().toUtc().add(const Duration(minutes: 15)),
-  );
-
-  @override
-  Future<SessionGrant> exchangeLoginLink({
-    required PendingLoginLinkRequest request,
+  Future<SessionGrant> verifyEmailCode({
+    required PendingEmailCode request,
+    required String code,
   }) => throw UnimplementedError();
-
-  @override
-  Future<void> cancelLoginLink({
-    required String requestId,
-    required String pollToken,
-  }) async {}
 
   @override
   Future<SessionGrant> refreshSession({String? refreshToken}) =>
@@ -736,41 +733,17 @@ final class _AuthenticatedPresentationIdentityTransport
   }
 }
 
-final class _RequestFactory implements LoginLinkRequestFactory {
-  @override
-  String challenge(String secret) =>
-      'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
-
-  @override
-  PendingLoginLinkRequest create({
-    required String email,
-    required DateTime createdAt,
-    required DateTime expiresAt,
-    required Duration pollInterval,
-  }) => PendingLoginLinkRequest(
-    requestId: _requestId,
-    email: email,
-    pollToken: _pollToken,
-    codeVerifier: _verifier,
-    state: _state,
-    createdAt: createdAt,
-    expiresAt: expiresAt,
-    pollInterval: pollInterval,
-  );
-}
-
-final class _MemoryPendingStore implements PendingLoginLinkStore {
-  PendingLoginLinkRequest? value;
+final class _MemoryPendingStore implements PendingEmailCodeStore {
+  PendingEmailCode? value;
   bool logoutIntent = false;
   BrowserCookieMutationJournal? cookieMutation;
   @override
-  Future<void> clear({PendingLoginLinkRequest? request}) async {
+  Future<void> clear({PendingEmailCode? request}) async {
     if (request == null || value?.requestId == request.requestId) value = null;
   }
 
   @override
-  Future<void> invalidate(PendingLoginLinkRequest request) async =>
-      value = null;
+  Future<void> invalidate(PendingEmailCode request) async => value = null;
 
   @override
   Future<bool> hasLogoutIntent() async => logoutIntent;
@@ -797,10 +770,10 @@ final class _MemoryPendingStore implements PendingLoginLinkStore {
   }
 
   @override
-  Future<PendingLoginLinkRequest?> read() async => value;
+  Future<PendingEmailCode?> read() async => value;
   @override
   Future<void> write(
-    PendingLoginLinkRequest request, {
+    PendingEmailCode request, {
     required bool activate,
   }) async => value = request;
 }
@@ -895,10 +868,24 @@ final class _PresentationHomeTransport implements HomeTransportPort {
   int? acceptedRevision;
 
   @override
+  Future<HomeSummary> getHome(String homeId) async =>
+      homes.singleWhere((home) => home.id == homeId);
+
+  @override
+  Future<void> declinePendingInvitation({
+    required String invitationId,
+    required int expectedRevision,
+  }) async {
+    invitations.removeWhere((invitation) => invitation.id == invitationId);
+  }
+
+  @override
   Future<List<HomeSummary>> listHomes() async => List<HomeSummary>.of(homes);
   @override
   Future<HomeSummary> createHome(CreateHomeCommand command) async {
     final created = HomeSummary(
+      effectivePermissions: fixtureHomePermissions(HomeRole.owner),
+      access: fixtureHomeAccess(),
       id: 'created-home',
       name: command.name,
       locale: command.locale,
@@ -987,8 +974,7 @@ final class _PresentationHomeTransport implements HomeTransportPort {
   Future<List<HomeOwnershipTransfer>> listHomeOwnershipTransfers(
     String homeId,
   ) async => const <HomeOwnershipTransfer>[];
-  @override
-  Future<StepUpLinkReceipt> requestStepUpLink() => throw UnimplementedError();
+
   @override
   Future<HomeOwnershipTransfer> proposeHomeOwnershipTransfer({
     required String homeId,
@@ -1019,6 +1005,8 @@ final class _PresentationHomeTransport implements HomeTransportPort {
 }
 
 HomeSummary _home(String id, String name) => HomeSummary(
+  effectivePermissions: fixtureHomePermissions(HomeRole.member),
+  access: fixtureHomeAccess(),
   id: id,
   name: name,
   locale: 'en-NA',

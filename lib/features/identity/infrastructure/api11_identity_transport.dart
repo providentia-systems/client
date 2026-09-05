@@ -120,14 +120,16 @@ final class Api11IdentityTransport
       final homes = object['homes'];
       final pendingInvitations = object['pendingInvitations'];
       final roles = object['platformRoles'];
+      final profile = object['profile'];
       if (homes is! List<Object?> ||
           pendingInvitations is! List<Object?> ||
-          roles is! List<Object?>) {
+          roles is! List<Object?> ||
+          profile is! Map<String, Object?>) {
         throw const FormatException('Expected user collections.');
       }
       return CurrentUserView(
         userId: _string(object, 'userId'),
-        profile: Map<String, Object?>.from(object['profile']! as Map),
+        profile: profile,
         email: _string(object, 'email'),
         emailVerified: _boolean(object, 'emailVerified'),
         displayName: _optionalString(object['displayName']),
