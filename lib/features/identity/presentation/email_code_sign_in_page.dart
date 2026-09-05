@@ -1,11 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:providentia/features/identity/domain/identity_models.dart';
 import 'package:providentia/features/identity/presentation/identity_controller.dart';
 
-final class LoginLinkSignInPage extends StatefulWidget {
-  const LoginLinkSignInPage({
+final class EmailCodeSignInPage extends StatefulWidget {
+  const EmailCodeSignInPage({
     required this.controller,
     this.restoreOnStart = true,
     this.authenticatedBuilder,
@@ -18,41 +19,32 @@ final class LoginLinkSignInPage extends StatefulWidget {
   authenticatedBuilder;
 
   @override
-  State<LoginLinkSignInPage> createState() => _LoginLinkSignInPageState();
+  State<EmailCodeSignInPage> createState() => _EmailCodeSignInPageState();
 }
 
-final class _LoginLinkSignInPageState extends State<LoginLinkSignInPage>
-    with WidgetsBindingObserver {
+final class _EmailCodeSignInPageState extends State<EmailCodeSignInPage> {
   final GlobalKey<FormState> _emailForm = GlobalKey<FormState>();
   final TextEditingController _email = TextEditingController();
+  final TextEditingController _code = TextEditingController();
+  Timer? _countdown;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
+    _countdown = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted && widget.controller.snapshot.pendingEmailCode != null) {
+        setState(() {});
+      }
+    });
     if (widget.restoreOnStart) {
       unawaited(widget.controller.restore());
     }
   }
 
   @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    switch (state) {
-      case AppLifecycleState.resumed:
-        widget.controller.resumeLoginLinkPolling();
-        return;
-      case AppLifecycleState.inactive ||
-          AppLifecycleState.hidden ||
-          AppLifecycleState.paused ||
-          AppLifecycleState.detached:
-        widget.controller.pauseLoginLinkPolling();
-        return;
-    }
-  }
-
-  @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
+    _countdown?.cancel();
+    _code.dispose();
     _email.dispose();
     super.dispose();
   }
@@ -109,7 +101,7 @@ final class _LoginLinkSignInPageState extends State<LoginLinkSignInPage>
           );
         }
         return Scaffold(
-          key: const Key('login-link-sign-in-page'),
+          key: const Key('email-code-sign-in-page'),
           body: SafeArea(
             child: Center(
               child: SingleChildScrollView(
@@ -133,7 +125,7 @@ final class _LoginLinkSignInPageState extends State<LoginLinkSignInPage>
 
   Widget _content(IdentitySessionSnapshot snapshot) {
     final theme = Theme.of(context);
-    final pending = snapshot.pendingLoginLink;
+    final pending = snapshot.pendingEmailCode;
     return AutofillGroup(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -156,11 +148,11 @@ final class _LoginLinkSignInPageState extends State<LoginLinkSignInPage>
             IdentitySessionStatus.restoring => const _ProgressMessage(
               message: 'Restoring your secure session',
             ),
-            IdentitySessionStatus.requestingLoginLink => const _ProgressMessage(
-              message: 'Sending your login link',
+            IdentitySessionStatus.requestingEmailCode => const _ProgressMessage(
+              message: 'Sending your email code',
             ),
-            IdentitySessionStatus.exchangingLoginLink => const _ProgressMessage(
-              message: 'Email approved. Finishing sign in securely',
+            IdentitySessionStatus.verifyingEmailCode => const _ProgressMessage(
+              message: 'Verifying your email code',
             ),
             IdentitySessionStatus.authenticated => const _ProgressMessage(
               message: 'Signed in. Loading your homes',
@@ -211,14 +203,14 @@ final class _LoginLinkSignInPageState extends State<LoginLinkSignInPage>
               prefixIcon: Icon(Icons.email_outlined),
             ),
             validator: _validateEmail,
-            onFieldSubmitted: (_) => _requestLoginLink(),
+            onFieldSubmitted: (_) => _requestEmailCode(),
           ),
           const SizedBox(height: 16),
           FilledButton.icon(
-            key: const Key('identity-request-login-link'),
-            onPressed: widget.controller.isBusy ? null : _requestLoginLink,
+            key: const Key('identity-request-email-code'),
+            onPressed: widget.controller.isBusy ? null : _requestEmailCode,
             icon: const Icon(Icons.mark_email_read_outlined),
-            label: const Text('Email me a login link'),
+            label: const Text('Email me a email code'),
           ),
           const SizedBox(height: 12),
           const Text(
@@ -231,65 +223,69 @@ final class _LoginLinkSignInPageState extends State<LoginLinkSignInPage>
 
   Widget _pendingRequest(
     IdentitySessionSnapshot snapshot,
-    PendingLoginLinkView? pending,
+    PendingEmailCodeView? pending,
     String email,
   ) {
-    final waiting =
-        snapshot.status == IdentitySessionStatus.waitingForLoginLink;
+    final remaining =
+        pending?.resendAt.difference(DateTime.now().toUtc()).inSeconds ?? 0;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        Semantics(
-          header: true,
-          child: Text(
-            waiting ? 'Check your email' : 'Request a new login link',
-            style: Theme.of(context).textTheme.titleLarge,
-          ),
-        ),
+        Text('Check your email', style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: 8),
-        Text(
-          waiting
-              ? 'Open the login link sent to $email on any device. This app will continue automatically after the browser approves the request.'
-              : 'Send a new login link to $email to continue.',
+        Text('Enter the eight-digit code sent to $email.'),
+        const SizedBox(height: 16),
+        TextField(
+          key: const Key('identity-email-code'),
+          controller: _code,
+          enabled: !widget.controller.isBusy,
+          keyboardType: TextInputType.number,
+          autofillHints: const <String>[AutofillHints.oneTimeCode],
+          inputFormatters: <TextInputFormatter>[
+            FilteringTextInputFormatter.digitsOnly,
+            LengthLimitingTextInputFormatter(8),
+          ],
+          decoration: const InputDecoration(
+            labelText: 'Email code',
+            helperText: 'Valid for ten minutes',
+          ),
+          onSubmitted: (_) =>
+              unawaited(widget.controller.verifyEmailCode(_code.text)),
         ),
-        if (waiting) ...<Widget>[
-          const SizedBox(height: 12),
-          const Text(
-            'The browser will tell you when approval is complete and can then be closed.',
-          ),
-          const SizedBox(height: 16),
-          OutlinedButton.icon(
-            key: const Key('identity-check-login-link'),
-            onPressed: widget.controller.isBusy
-                ? null
-                : () => unawaited(widget.controller.checkLoginLinkNow()),
-            icon: const Icon(Icons.refresh_rounded),
-            label: const Text('Check now'),
-          ),
-        ],
-        const SizedBox(height: 8),
-        FilledButton.tonalIcon(
-          key: const Key('identity-resend-login-link'),
-          onPressed: widget.controller.isBusy
+        const SizedBox(height: 16),
+        FilledButton(
+          key: const Key('identity-verify-email-code'),
+          onPressed: widget.controller.isBusy || pending == null
               ? null
-              : () => unawaited(widget.controller.resendLoginLink()),
-          icon: const Icon(Icons.forward_to_inbox_outlined),
-          label: const Text('Send a new login link'),
+              : () => unawaited(widget.controller.verifyEmailCode(_code.text)),
+          child: const Text('Verify and sign in'),
         ),
         TextButton(
-          key: const Key('identity-cancel-login-link'),
+          key: const Key('identity-resend-email-code'),
+          onPressed: widget.controller.isBusy || remaining > 0
+              ? null
+              : () {
+                  _code.clear();
+                  unawaited(widget.controller.resendEmailCode());
+                },
+          child: Text(
+            remaining > 0 ? 'Resend in ${remaining}s' : 'Send a new code',
+          ),
+        ),
+        TextButton(
+          key: const Key('identity-cancel-email-code'),
           onPressed: widget.controller.isBusy
               ? null
-              : () => unawaited(widget.controller.cancelLoginLink()),
+              : () => unawaited(widget.controller.cancelEmailCode()),
           child: const Text('Use another email'),
         ),
       ],
     );
   }
 
-  void _requestLoginLink() {
+  void _requestEmailCode() {
     if (_emailForm.currentState?.validate() ?? false) {
-      unawaited(widget.controller.requestLoginLink(_email.text));
+      unawaited(widget.controller.requestEmailCode(_email.text));
     }
   }
 

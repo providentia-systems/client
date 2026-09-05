@@ -21,97 +21,56 @@ final class Api11IdentityTransport
   final ClientSessionTransport sessionTransport;
 
   @override
-  Future<LoginLinkStartReceipt> startLoginLink(
-    LoginLinkStartCommand command,
-  ) async {
+  Future<PendingEmailCode> requestEmailCode({
+    required String email,
+    required DeviceDescriptor device,
+  }) async {
     try {
-      final response = await _invoke(
-        operationId: 'startLoginLink',
+      final object = (await _invoke(
+        operationId: 'requestEmailCode',
         body: <String, Object?>{
-          'requestId': command.requestId,
-          'email': command.email,
+          'email': email,
           'applicationKind': 'homeowner',
-          'pollChallenge': command.pollChallenge,
-          'codeChallenge': command.codeChallenge,
-          'codeChallengeMethod': 'S256',
-          'state': command.state,
-          'installationId': command.device.id,
-          'deviceName': command.device.name,
-          'platform': command.device.platform,
-          'transport': _transportName(command.transport),
-          if (command.requestedSessionIdleSeconds != null)
-            'requestedSessionIdleSeconds': command.requestedSessionIdleSeconds,
+          'installationId': device.id,
+          'deviceName': device.name,
+          'platform': device.platform,
+          'transport': _transportName(sessionTransport),
         },
-      );
-      final object = response.requireObject();
-      if (object['accepted'] != true) {
-        throw const FormatException('Expected a generic accepted response.');
-      }
-      final returnedRequestId = _string(object, 'requestId');
-      if (returnedRequestId != command.requestId) {
-        throw const FormatException('Login request identity changed.');
-      }
-      return LoginLinkStartReceipt(
-        requestId: returnedRequestId,
+      )).requireObject();
+      final now = DateTime.now().toUtc();
+      return PendingEmailCode(
+        requestId: _string(object, 'challengeId'),
+        email: email,
+        bindingToken: _string(object, 'bindingToken'),
+        createdAt: now,
         expiresAt: _dateTime(object, 'expiresAt'),
-        pollInterval: Duration(
-          seconds: _integer(object, 'pollIntervalSeconds'),
+        resendAt: now.add(
+          Duration(seconds: _integer(object, 'resendAfterSeconds')),
         ),
       );
     } on ProvidentiaApiException catch (error) {
       throw _identityFailure(error);
     } on FormatException {
-      throw _malformedIdentityResponse('Invalid login request response.');
+      throw _malformedIdentityResponse('Invalid email code response.');
     } on ArgumentError {
-      throw _malformedIdentityResponse('Invalid login request response.');
+      throw _malformedIdentityResponse('Invalid email code response.');
     } on http.ClientException {
       throw _identityNetworkFailure();
     }
   }
 
   @override
-  Future<LoginLinkStatusView> getLoginLinkStatus({
-    required String requestId,
-    required String pollToken,
-  }) async {
-    try {
-      final object = (await _invoke(
-        operationId: 'getLoginLinkStatus',
-        pathParameters: <String, String>{'requestId': requestId},
-        body: <String, Object?>{'pollToken': pollToken},
-      )).requireObject();
-      if (_string(object, 'applicationKind') != 'homeowner') {
-        throw const FormatException('Login application kind changed.');
-      }
-      return LoginLinkStatusView(
-        requestId: _string(object, 'requestId'),
-        status: _loginStatus(_string(object, 'status')),
-        expiresAt: _dateTime(object, 'expiresAt'),
-        approvedAt: _optionalDateTime(object['approvedAt']),
-      );
-    } on ProvidentiaApiException catch (error) {
-      throw _identityFailure(error);
-    } on FormatException {
-      throw _malformedIdentityResponse('Invalid login request status.');
-    } on ArgumentError {
-      throw _malformedIdentityResponse('Invalid login request status.');
-    } on http.ClientException {
-      throw _identityNetworkFailure();
-    }
-  }
-
-  @override
-  Future<SessionGrant> exchangeLoginLink({
-    required PendingLoginLinkRequest request,
+  Future<SessionGrant> verifyEmailCode({
+    required PendingEmailCode request,
+    required String code,
   }) async {
     try {
       final response = await _invoke(
-        operationId: 'exchangeLoginLink',
-        pathParameters: <String, String>{'requestId': request.requestId},
+        operationId: 'verifyEmailCode',
         body: <String, Object?>{
-          'pollToken': request.pollToken,
-          'codeVerifier': request.codeVerifier,
-          'state': request.state,
+          'challengeId': request.requestId,
+          'bindingToken': request.bindingToken,
+          'code': code,
         },
       );
       return _grant(response.requireObject());
@@ -121,24 +80,6 @@ final class Api11IdentityTransport
       throw _malformedIdentityResponse('Invalid session response.');
     } on ArgumentError {
       throw _malformedIdentityResponse('Invalid session response.');
-    } on http.ClientException {
-      throw _identityNetworkFailure();
-    }
-  }
-
-  @override
-  Future<void> cancelLoginLink({
-    required String requestId,
-    required String pollToken,
-  }) async {
-    try {
-      await _invoke(
-        operationId: 'cancelLoginLink',
-        pathParameters: <String, String>{'requestId': requestId},
-        body: <String, Object?>{'pollToken': pollToken},
-      );
-    } on ProvidentiaApiException catch (error) {
-      throw _identityFailure(error);
     } on http.ClientException {
       throw _identityNetworkFailure();
     }
@@ -186,6 +127,7 @@ final class Api11IdentityTransport
       }
       return CurrentUserView(
         userId: _string(object, 'userId'),
+        profile: Map<String, Object?>.from(object['profile']! as Map),
         email: _string(object, 'email'),
         emailVerified: _boolean(object, 'emailVerified'),
         displayName: _optionalString(object['displayName']),
@@ -458,16 +400,6 @@ IdentityTransportException _identityFailure(ProvidentiaApiException error) {
   };
   return IdentityTransportException(kind: kind, safeMessage: message);
 }
-
-LoginLinkRequestStatus _loginStatus(String value) => switch (value) {
-  'pending' => LoginLinkRequestStatus.pending,
-  'approved' => LoginLinkRequestStatus.approved,
-  'denied' => LoginLinkRequestStatus.denied,
-  'exchanged' => LoginLinkRequestStatus.exchanged,
-  'expired' => LoginLinkRequestStatus.expired,
-  'cancelled' => LoginLinkRequestStatus.cancelled,
-  _ => throw FormatException('Unknown login request status.'),
-};
 
 PlatformRole _platformRole(Object? value) => switch (value) {
   'platform_administrator' => PlatformRole.platformAdministrator,

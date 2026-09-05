@@ -2,7 +2,7 @@ import 'dart:collection';
 
 enum HomeRole { owner, manager, member, viewer }
 
-enum InvitationStatus { pending, accepted, revoked, expired }
+enum InvitationStatus { pending, accepted, declined, revoked, expired }
 
 enum OwnershipTransferStatus { pending, accepted, rejected, revoked, expired }
 
@@ -38,8 +38,8 @@ final class HomePermissions {
   static const String billingRead = 'billing.read';
   static const String billingManage = 'billing.manage';
 
-  /// The owner policy is immutable on the backend and always contains the
-  /// complete permission catalog. Other roles must have a server policy.
+  /// Known home permission names. Actual owner access comes from the backend
+  /// and is bounded by the home group.
   static const Set<String> owner = <String>{
     homeRead,
     homeManage,
@@ -87,7 +87,10 @@ final class HomeSummary {
     required this.timezone,
     required this.role,
     required this.revision,
-  }) {
+    Set<String> effectivePermissions = const <String>{},
+    Map<String, Object?> access = const <String, Object?>{},
+  }) : effectivePermissions = Set<String>.unmodifiable(effectivePermissions),
+       access = Map<String, Object?>.unmodifiable(access) {
     _requireNonEmpty(id, 'id');
     _requireNonEmpty(name, 'name');
     _requireNonEmpty(locale, 'locale');
@@ -98,6 +101,8 @@ final class HomeSummary {
     }
   }
 
+  final Set<String> effectivePermissions;
+  final Map<String, Object?> access;
   final String id;
   final String name;
   final String locale;
@@ -266,12 +271,6 @@ final class HomeOwnershipTransfer {
 /// Receipt for a queued step-up confirmation email. The single-use token is
 /// delivered out of band; only an explicitly enabled non-production
 /// development profile returns it inline for local flows.
-final class StepUpLinkReceipt {
-  const StepUpLinkReceipt({this.developmentStepUpToken});
-
-  final String? developmentStepUpToken;
-}
-
 final class HomePermissionPolicy {
   HomePermissionPolicy({
     required this.role,
@@ -338,26 +337,9 @@ final class HomeSessionSnapshot {
   bool get hasActiveHome =>
       status == HomeSessionStatus.ready && activeHome != null;
 
-  /// Effective permissions for the currently authorized home.
-  ///
-  /// Missing or malformed policies deny access for every non-owner role. This
-  /// is presentation-level defence in depth; every command is still checked by
-  /// the backend.
-  Set<String> get effectivePermissions {
-    final active = activeHome;
-    if (active == null) {
-      return const <String>{};
-    }
-    if (active.role == HomeRole.owner) {
-      return HomePermissions.owner;
-    }
-    for (final policy in permissionPolicies) {
-      if (policy.role == active.role) {
-        return policy.permissions;
-      }
-    }
-    return const <String>{};
-  }
+  /// Backend-evaluated permissions for this membership in this home.
+  Set<String> get effectivePermissions =>
+      activeHome?.effectivePermissions ?? const <String>{};
 
   bool allows(String permission) => effectivePermissions.contains(permission);
 

@@ -21,15 +21,15 @@ final class IdentityController extends ChangeNotifier {
 
   bool get isBusy =>
       _snapshot.status == IdentitySessionStatus.restoring ||
-      _snapshot.status == IdentitySessionStatus.requestingLoginLink ||
-      _snapshot.status == IdentitySessionStatus.exchangingLoginLink ||
+      _snapshot.status == IdentitySessionStatus.requestingEmailCode ||
+      _snapshot.status == IdentitySessionStatus.verifyingEmailCode ||
       _snapshot.status == IdentitySessionStatus.refreshing;
 
   Future<void> restore() => _manager.restore();
 
-  Future<void> requestLoginLink(String email) async {
+  Future<void> requestEmailCode(String email) async {
     try {
-      await _manager.requestLoginLink(email);
+      await _manager.requestEmailCode(email);
     } on ArgumentError {
       _setLocalFailure('Enter a valid email address.');
     } on IdentityTransportException {
@@ -39,11 +39,11 @@ final class IdentityController extends ChangeNotifier {
     }
   }
 
-  Future<void> resendLoginLink() async {
+  Future<void> resendEmailCode() async {
     try {
-      await _manager.resendLoginLink();
+      await _manager.resendEmailCode();
     } on StateError {
-      _setLocalFailure('Enter your email address to request a login link.');
+      _setLocalFailure('Enter your email address to request an email code.');
     } on IdentityTransportException {
       // The manager already published a safe transport message.
     } on IdentityCredentialStoreException catch (error) {
@@ -51,13 +51,17 @@ final class IdentityController extends ChangeNotifier {
     }
   }
 
-  Future<void> cancelLoginLink() => _manager.cancelLoginLink();
+  Future<void> cancelEmailCode() => _manager.cancelEmailCode();
 
-  Future<void> checkLoginLinkNow() => _manager.pollLoginLinkNow();
-
-  void pauseLoginLinkPolling() => _manager.pauseLoginLinkPolling();
-
-  void resumeLoginLinkPolling() => _manager.resumeLoginLinkPolling();
+  Future<void> verifyEmailCode(String code) async {
+    try {
+      await _manager.verifyEmailCode(code);
+    } on FormatException {
+      _setLocalFailure('Enter the eight-digit email code.');
+    } on IdentityTransportException catch (error) {
+      _setLocalFailure(error.safeMessage);
+    }
+  }
 
   Future<void> logout() => _manager.logout();
 

@@ -2,9 +2,9 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Providentia API",
-    "version": "1.19.0",
+    "version": "2.0.0",
     "summary": "Authoritative Providentia backend contract through the production-readiness programme",
-    "description": "Bounded identity, multi-home tenancy, published global catalog reads, and home-scoped offline synchronization.\n\nVersion 1.4 adds the Phase 5 inventory ledger, counts, purchasing review, shopping lists, and dashboard projections.\n\nVersion 1.5 adds privacy-controlled, human-reviewed AI extraction.\n\nVersion 1.6 adds sanitized catalog proposals, role-separated moderation, icon metadata, redirects, and reversible product merges.\n\nVersion 1.8 adds email-only login-link authentication and durable encrypted notification delivery.\n\nVersion 1.9 adds revisioned household permissions, revocable invitations, and accepted ownership transfer with step-up confirmation.\n\nVersion 1.10 adds typed pantry synchronization, catalog sharing/imports, data rights, commercial controls, multi-provider AI orchestration, encrypted private media, and production acceptance surfaces.\n\nVersion 1.11 adds cross-device login-link approval with origin-client polling and PKCE exchange, current-user bootstrap, recipient invitation acceptance, platform-administrator management, and explicit sliding-session metadata.\n\nVersion 1.11.1 exposes the installation UUID separately from the account-scoped device UUID so clients can validate login-link session binding without rejecting valid sessions.\n\nVersion 1.12 publishes only moderator-approved, consent-bound catalog contribution facts through a bounded attribution-free global projection.\n\nVersion 1.13 adds revision-bound, idempotent stock-count cancellation to the online API and protocol-v2 synchronization command set, publishes a precise AI media-handling disclosure that distinguishes transient direct extraction from explicit encrypted private-media storage, and provides a typed, deterministic, paged home item master for offline caching.\n\nVersion 1.13.1 documents the non-disclosing 404 response used when a home is revoked or foreign, allowing clients to purge stale private projections instead of retrying indefinitely.\n\nVersion 1.13.2 exhaustively documents non-disclosing home authorization for AI and shopping operations and adds a revisioned receipt-line unresolved decision across ordinary HTTP and protocol-v2 synchronization; receipt commit processes approved lines while retaining unresolved raw lines without price or stock effects.\n\nVersion 1.14 adds revision-bound home-private categories and products to the local-first inventory protocol, plus a privacy-safe Linux administrator control plane for account lifecycle and platform roles. Billing enforcement remains disabled by configuration during the free stabilization phase.\n\nVersion 1.15 adds consent-bound product-image contributions with server-side sanitization, encrypted moderation quarantine, reviewer-only no-store previews, explicit curator publication, immutable content-addressed public assets, and typed published catalog search results.\n\nVersion 1.16 removes every interactive backend page, binds each login-link request to either the homeowner or administrator application, and exposes single-use approval proof, review, and decision JSON operations for client-owned deep-link handling. Metrics are disabled by default and require a dedicated bearer credential when explicitly enabled.\n\nVersion 1.17 binds verification, password-reset, and step-up credentials to the originating application, moves every emailed account capability into configured Client/Admin URI fragments, and separates receipt quantities from validated stock-count minimum/maximum ranges in extraction schema v2.\n\nVersion 1.18 makes stock-count line writes usable as compare-and-swap operations: revision 0 creates a line, a matching positive revision updates it, and successful writes return the complete line representation."
+    "description": "Providentia pre-release API: email-code authentication, account/home/administrator groups, household stock, operator access, profiles and country onboarding. Billing collection remains a future capability."
   },
   "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
   "servers": [
@@ -111,367 +111,6 @@
           },
           "404": {
             "description": "Metrics are disabled or the dedicated credential is absent or invalid"
-          }
-        }
-      }
-    },
-    "/api/v1/auth/login-links": {
-      "post": {
-        "operationId": "startLoginLink",
-        "summary": "Start a login-link request owned by the originating client",
-        "description": "Accepts client-generated polling and PKCE challenges, queues a single-use email approval link, and returns generic request metadata only. Account existence is never disclosed, and the server never returns the private poll token or PKCE verifier. The browser approval does not receive a session; after approval, the originating client exchanges its private proof for the session.",
-        "security": [],
-        "tags": [
-          "Identity"
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LoginLinkStartRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "202": {
-            "description": "Accepted without revealing whether the account already exists",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LoginLinkStarted"
-                }
-              }
-            }
-          },
-          "409": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "422": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "429": {
-            "$ref": "#/components/responses/Problem"
-          }
-        }
-      }
-    },
-    "/api/v1/auth/login-links/{requestId}/proof": {
-      "post": {
-        "operationId": "proveLoginLinkApproval",
-        "summary": "Validate an application-bound login-link approval credential",
-        "description": "The client receives the credential from its deep or universal link fragment, clears the fragment immediately, and submits the credential only in this JSON body. A successful proof does not consume or extend the credential and discloses no account identity.",
-        "security": [],
-        "tags": [
-          "Identity"
-        ],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/LoginLinkRequestId"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LoginLinkApprovalProof"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "The credential belongs to this request and application",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LoginLinkApprovalValidity"
-                }
-              }
-            }
-          },
-          "404": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "409": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "410": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "422": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "429": {
-            "$ref": "#/components/responses/Problem"
-          }
-        }
-      }
-    },
-    "/api/v1/auth/login-links/{requestId}/review": {
-      "post": {
-        "operationId": "reviewLoginLinkApproval",
-        "summary": "Review the device request inside the bound client application",
-        "description": "Returns only the device, platform, and request times needed for a human approval decision. It never returns an email address, user identifier, account state, or credential.",
-        "security": [],
-        "tags": [
-          "Identity"
-        ],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/LoginLinkRequestId"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LoginLinkApprovalProof"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Human-readable login request review",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LoginLinkApprovalReview"
-                }
-              }
-            }
-          },
-          "404": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "409": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "410": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "422": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "429": {
-            "$ref": "#/components/responses/Problem"
-          }
-        }
-      }
-    },
-    "/api/v1/auth/login-links/{requestId}/decision": {
-      "post": {
-        "operationId": "decideLoginLinkApproval",
-        "summary": "Consume an application-bound approval credential",
-        "description": "Atomically approves or denies the request and consumes the single-use credential. The generic accepted response is identical for successful, replayed, expired, unavailable, and account-inactive capabilities; the originating client learns terminal state only through its private poll proof.",
-        "security": [],
-        "tags": [
-          "Identity"
-        ],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/LoginLinkRequestId"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LoginLinkDecisionRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "202": {
-            "description": "Decision received without disclosing request or account state",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LoginLinkDecisionReceived"
-                }
-              }
-            }
-          },
-          "422": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "429": {
-            "$ref": "#/components/responses/Problem"
-          }
-        }
-      }
-    },
-    "/api/v1/auth/login-links/{requestId}/status": {
-      "post": {
-        "operationId": "getLoginLinkStatus",
-        "summary": "Poll a login-link request from its originating client",
-        "description": "The private poll token is submitted in the request body and must never be placed in a URL. This operation never returns access, refresh, session, approval, or PKCE credentials.",
-        "security": [],
-        "tags": [
-          "Identity"
-        ],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/LoginLinkRequestId"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LoginLinkRequestProof"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Current request state",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LoginLinkStatus"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "410": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "429": {
-            "$ref": "#/components/responses/Problem"
-          }
-        }
-      }
-    },
-    "/api/v1/auth/login-links/{requestId}/exchange": {
-      "post": {
-        "operationId": "exchangeLoginLink",
-        "summary": "Exchange an approved login-link request for an origin-device session",
-        "description": "Requires the originating client's private poll token, state, and RFC 7636 verifier. Exchange is single-use and terminal; after an ambiguous or lost success response the client must start a new login-link request because credentials cannot be reconstructed from stored hashes. No session credential is accepted in a URL.",
-        "security": [],
-        "tags": [
-          "Identity"
-        ],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/LoginLinkRequestId"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LoginLinkExchangeRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Native credentials or secure cookie session issued to the originating client",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SessionCredentials"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "409": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "410": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "422": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "429": {
-            "$ref": "#/components/responses/Problem"
-          }
-        }
-      }
-    },
-    "/api/v1/auth/login-links/{requestId}/cancel": {
-      "post": {
-        "operationId": "cancelLoginLink",
-        "summary": "Cancel a pending login-link request",
-        "security": [],
-        "tags": [
-          "Identity"
-        ],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/LoginLinkRequestId"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LoginLinkRequestProof"
-              }
-            }
-          }
-        },
-        "responses": {
-          "204": {
-            "description": "Request cancelled or already terminal"
-          },
-          "401": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "429": {
-            "$ref": "#/components/responses/Problem"
-          }
-        }
-      }
-    },
-    "/api/v1/auth/step-up-links": {
-      "post": {
-        "operationId": "requestStepUpLink",
-        "tags": [
-          "Identity"
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/StepUpRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "202": {
-            "description": "A single-use confirmation link was queued",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StepUpLinkAccepted"
-                }
-              }
-            }
-          },
-          "422": {
-            "$ref": "#/components/responses/Problem"
           }
         }
       }
@@ -619,123 +258,6 @@
             }
           },
           "401": {
-            "$ref": "#/components/responses/Problem"
-          }
-        }
-      }
-    },
-    "/api/v1/platform/administrators": {
-      "get": {
-        "operationId": "listPlatformAdministrators",
-        "summary": "List active and pending platform-administrator grants",
-        "tags": [
-          "Platform administration"
-        ],
-        "responses": {
-          "200": {
-            "description": "Platform-administrator grants",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "data"
-                  ],
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/PlatformAdministrator"
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "$ref": "#/components/responses/Problem"
-          }
-        }
-      },
-      "post": {
-        "operationId": "grantPlatformAdministrator",
-        "summary": "Grant platform-administrator access by verified email address",
-        "description": "Invitation-by-email workflow: creates an active grant for an existing verified account or a pending grant for an address that has not completed login-link verification. Active grants and revocations advance the same account revision used by the UUID-based account role operations; idempotent requests do not. This global role never creates or implies access to a home.",
-        "tags": [
-          "Platform administration"
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PlatformAdministratorGrantRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Active or pending platform-administrator grant created",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PlatformAdministrator"
-                }
-              }
-            }
-          },
-          "403": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "409": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "422": {
-            "$ref": "#/components/responses/Problem"
-          }
-        }
-      }
-    },
-    "/api/v1/platform/administrators/{administratorId}/revoke": {
-      "post": {
-        "operationId": "revokePlatformAdministrator",
-        "summary": "Revoke an active or pending platform-administrator grant",
-        "description": "The final active platform administrator cannot be revoked. A stale expected revision fails without changing the grant.",
-        "tags": [
-          "Platform administration"
-        ],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/PlatformAdministratorId"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PlatformAdministratorRevokeRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "204": {
-            "description": "Grant revoked"
-          },
-          "403": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "404": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "409": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "422": {
             "$ref": "#/components/responses/Problem"
           }
         }
@@ -1452,6 +974,7 @@
                   "role": {
                     "type": "string",
                     "enum": [
+                      "owner",
                       "manager",
                       "member",
                       "viewer"
@@ -1597,42 +1120,6 @@
           },
           "410": {
             "$ref": "#/components/responses/Problem"
-          },
-          "422": {
-            "$ref": "#/components/responses/Problem"
-          }
-        }
-      }
-    },
-    "/api/v1/home-invitations/accept": {
-      "post": {
-        "operationId": "acceptHomeInvitation",
-        "summary": "Deprecated token-based invitation acceptance",
-        "description": "Deprecated compatibility endpoint. Verified clients should list invitations from /api/v1/me/home-invitations and accept by invitation ID.",
-        "deprecated": true,
-        "tags": [
-          "Homes"
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/TokenRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Accepted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HomeInvitationAcceptance"
-                }
-              }
-            }
           },
           "422": {
             "$ref": "#/components/responses/Problem"
@@ -7996,47 +7483,26 @@
         }
       }
     },
-    "/api/v1/admin/accounts/{userId}/roles/{role}": {
-      "put": {
-        "operationId": "grantOperatorAccountRole",
-        "summary": "Grant a platform role",
-        "description": "Platform roles never confer household access.",
+    "/api/v1/auth/email-codes": {
+      "post": {
+        "operationId": "requestEmailCode",
+        "summary": "Request email code",
         "tags": [
-          "Platform administration"
+          "Identity"
         ],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/UserId"
-          },
-          {
-            "name": "role",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/PlatformRole"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/OperatorRoleChangeRequest"
-              }
-            }
-          }
-        },
         "responses": {
-          "200": {
-            "description": "Role granted",
+          "202": {
+            "description": "Successful operation",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OperatorAccountDetail"
+                  "$ref": "#/components/schemas/EmailCodeChallenge"
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
           },
           "403": {
             "$ref": "#/components/responses/Problem"
@@ -8048,50 +7514,132 @@
             "$ref": "#/components/responses/Problem"
           },
           "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailCodeRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/email-codes/verify": {
+      "post": {
+        "operationId": "verifyEmailCode",
+        "summary": "Verify email code",
+        "tags": [
+          "Identity"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionCredentials"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailCodeVerification"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/profile": {
+      "get": {
+        "operationId": "getAccountProfile",
+        "summary": "Get account profile",
+        "tags": [
+          "Identity"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountProfile"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
             "$ref": "#/components/responses/Problem"
           }
         }
       },
-      "delete": {
-        "operationId": "revokeOperatorAccountRole",
-        "summary": "Revoke a platform role",
-        "description": "Revision-bound. The final active platform administrator cannot be revoked.",
+      "patch": {
+        "operationId": "updateAccountProfile",
+        "summary": "Update account profile",
         "tags": [
-          "Platform administration"
+          "Identity"
         ],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/UserId"
-          },
-          {
-            "name": "role",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/PlatformRole"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/OperatorRoleChangeRequest"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
-            "description": "Role revoked",
+            "description": "Successful operation",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OperatorAccountDetail"
+                  "$ref": "#/components/schemas/AccountProfile"
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
           },
           "403": {
             "$ref": "#/components/responses/Problem"
@@ -8104,6 +7652,2393 @@
           },
           "422": {
             "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountProfileRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/onboarding": {
+      "post": {
+        "operationId": "completeAccountOnboarding",
+        "summary": "Complete account onboarding",
+        "tags": [
+          "Identity"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountProfile"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountOnboardingRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/emails/codes": {
+      "post": {
+        "operationId": "requestAccountEmailCode",
+        "summary": "Request account email code",
+        "tags": [
+          "Identity"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailCodeChallenge"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailAddressRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/emails/verify": {
+      "post": {
+        "operationId": "verifyAccountEmail",
+        "summary": "Verify account email",
+        "tags": [
+          "Identity"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountProfile"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailCodeVerification"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/emails/{emailId}/primary": {
+      "post": {
+        "operationId": "makeAccountEmailPrimary",
+        "summary": "Make account email primary",
+        "tags": [
+          "Identity"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformChange"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "emailId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailChangeRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/emails/{emailId}/remove": {
+      "post": {
+        "operationId": "removeAccountEmail",
+        "summary": "Remove account email",
+        "tags": [
+          "Identity"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformChange"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "emailId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailChangeRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/security-codes": {
+      "post": {
+        "operationId": "requestSecurityCode",
+        "summary": "Request security code",
+        "tags": [
+          "Identity"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailCodeChallenge"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SecurityCodeRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/security-codes/verify": {
+      "post": {
+        "operationId": "verifySecurityCode",
+        "summary": "Verify security code",
+        "tags": [
+          "Identity"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecurityCodeProof"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailCodeVerification"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/access/catalog": {
+      "get": {
+        "operationId": "getFeatureCatalog",
+        "summary": "Get feature catalog",
+        "tags": [
+          "Platform"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformRecordPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/access/groups": {
+      "get": {
+        "operationId": "listAccessGroups",
+        "summary": "List access groups",
+        "tags": [
+          "Platform"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformRecordPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "createAccessGroup",
+        "summary": "Create access group",
+        "tags": [
+          "Platform"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessGroup"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccessGroupRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/access/groups/{groupId}": {
+      "put": {
+        "operationId": "updateAccessGroup",
+        "summary": "Update access group",
+        "tags": [
+          "Platform"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessGroup"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "groupId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccessGroupRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/access/{scope}/{subjectId}": {
+      "put": {
+        "operationId": "assignAccessGroup",
+        "summary": "Assign access group",
+        "tags": [
+          "Platform"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformChange"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "subjectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupAssignmentRequest"
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "getAccessAssignment",
+        "summary": "Get access assignment",
+        "tags": [
+          "Platform"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EffectiveAccess"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "subjectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/countries": {
+      "get": {
+        "operationId": "listAvailableCountries",
+        "summary": "List available countries",
+        "tags": [
+          "Geography"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformRecordPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/v1/countries/{countryCode}/policy": {
+      "get": {
+        "operationId": "getCountryPrivacyPolicy",
+        "summary": "Get country privacy policy",
+        "tags": [
+          "Geography"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "countryCode",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": []
+      }
+    },
+    "/api/v1/countries/{countryCode}/states": {
+      "get": {
+        "operationId": "listCountryStates",
+        "summary": "List country states",
+        "tags": [
+          "Geography"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformRecordPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "countryCode",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "stateId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "security": []
+      }
+    },
+    "/api/v1/countries/{countryCode}/cities": {
+      "get": {
+        "operationId": "listCountryCities",
+        "summary": "List country cities",
+        "tags": [
+          "Geography"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformRecordPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "countryCode",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "stateId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "security": []
+      }
+    },
+    "/api/v1/admin/countries": {
+      "get": {
+        "operationId": "listOperatorCountries",
+        "summary": "List operator countries",
+        "tags": [
+          "Platform"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformRecordPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/countries/{countryCode}": {
+      "get": {
+        "operationId": "getCountryConfiguration",
+        "summary": "Get country configuration",
+        "tags": [
+          "Platform"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "countryCode",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "put": {
+        "operationId": "updateCountryConfiguration",
+        "summary": "Update country configuration",
+        "tags": [
+          "Platform"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformChange"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "countryCode",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CountryConfigurationRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/privacy-policies": {
+      "get": {
+        "operationId": "listPrivacyPolicies",
+        "summary": "List privacy policies",
+        "tags": [
+          "Platform"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformRecordPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "countryCode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "createPrivacyPolicy",
+        "summary": "Create privacy policy",
+        "tags": [
+          "Platform"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PrivacyPolicyRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/privacy-policies/{policyId}": {
+      "put": {
+        "operationId": "updatePrivacyPolicy",
+        "summary": "Update privacy policy",
+        "tags": [
+          "Platform"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "policyId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PrivacyPolicyRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/reference-updates": {
+      "get": {
+        "operationId": "listReferenceUpdates",
+        "summary": "List reference updates",
+        "tags": [
+          "Platform"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformRecordPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "post": {
+        "operationId": "requestReferenceUpdate",
+        "summary": "Request reference update",
+        "tags": [
+          "Platform"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/me/home-invitations/{invitationId}/decline": {
+      "post": {
+        "operationId": "declineHomeInvitation",
+        "summary": "Decline home invitation",
+        "tags": [
+          "Identity"
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful operation"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "invitationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevisionRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/homes/{homeId}/memberships/{userId}/permissions": {
+      "get": {
+        "operationId": "getMemberPermissionOverrides",
+        "summary": "Get member permission overrides",
+        "tags": [
+          "Home"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberPermissionOverrides"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "homeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "put": {
+        "operationId": "updateMemberPermissionOverrides",
+        "summary": "Update member permission overrides",
+        "tags": [
+          "Home"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberPermissionOverrides"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "homeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemberPermissionOverridesRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/homes": {
+      "get": {
+        "operationId": "listOperatorHomes",
+        "summary": "List operator homes",
+        "tags": [
+          "Platform"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformRecordPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/homes/{homeId}": {
+      "get": {
+        "operationId": "getOperatorHome",
+        "summary": "Get operator home",
+        "tags": [
+          "Platform"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "homeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/homes/{homeId}/records/{collection}": {
+      "get": {
+        "operationId": "listOperatorHomeRecords",
+        "summary": "List operator home records",
+        "tags": [
+          "Platform"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformRecordPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "homeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "collection",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/administrators": {
+      "get": {
+        "operationId": "listAdministrators",
+        "summary": "List administrators",
+        "tags": [
+          "Platform"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformRecordPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/administrators/{userId}/review": {
+      "post": {
+        "operationId": "reviewAdministrator",
+        "summary": "Review administrator",
+        "tags": [
+          "Platform"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformChange"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdministratorReviewRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/audit-events": {
+      "get": {
+        "operationId": "listPlatformAuditEvents",
+        "summary": "List platform audit events",
+        "tags": [
+          "Platform"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformRecordPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/homes/{homeId}/profile": {
+      "get": {
+        "operationId": "getHomeProfile",
+        "summary": "Get home profile",
+        "tags": [
+          "Home"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HomeProfile"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "homeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "put": {
+        "operationId": "updateHomeProfile",
+        "summary": "Update home profile",
+        "tags": [
+          "Home"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HomeProfile"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "homeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HomeProfileRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/homes/{homeId}/image": {
+      "get": {
+        "operationId": "getHomeImage",
+        "summary": "Get home image",
+        "tags": [
+          "Home"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "image/webp": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "Use the default avatar"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "homeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "put": {
+        "operationId": "putHomeImage",
+        "summary": "Put home image",
+        "tags": [
+          "Home"
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful operation"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "homeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfileImageRequest"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteHomeImage",
+        "summary": "Delete home image",
+        "tags": [
+          "Home"
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful operation"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "homeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevisionRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/avatar": {
+      "get": {
+        "operationId": "getOwnAvatar",
+        "summary": "Get own avatar",
+        "tags": [
+          "Identity"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "image/webp": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "Use the default avatar"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "put": {
+        "operationId": "putOwnAvatar",
+        "summary": "Put own avatar",
+        "tags": [
+          "Identity"
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful operation"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfileImageRequest"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteOwnAvatar",
+        "summary": "Delete own avatar",
+        "tags": [
+          "Identity"
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful operation"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevisionRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/users/{userId}/avatar": {
+      "get": {
+        "operationId": "getUserAvatar",
+        "summary": "Get user avatar",
+        "tags": [
+          "Geography"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "image/webp": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "Use the default avatar"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/homes/{homeId}/image": {
+      "get": {
+        "operationId": "getOperatorHomeImage",
+        "summary": "Get operator home image",
+        "tags": [
+          "Platform"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "image/webp": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "Use the default avatar"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "homeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/users/{userId}/avatar": {
+      "get": {
+        "operationId": "getOperatorUserAvatar",
+        "summary": "Get operator user avatar",
+        "tags": [
+          "Platform"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "image/webp": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "Use the default avatar"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/me/avatar/gravatar": {
+      "post": {
+        "operationId": "selectGravatar",
+        "summary": "Select gravatar",
+        "tags": [
+          "Identity"
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful operation"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "429": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GravatarRequest"
+              }
+            }
           }
         }
       }
@@ -8376,373 +10311,6 @@
         ],
         "description": "The only client application allowed to open and decide this login request."
       },
-      "LoginLinkStartRequest": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "requestId",
-          "email",
-          "applicationKind",
-          "pollChallenge",
-          "codeChallenge",
-          "codeChallengeMethod",
-          "state",
-          "installationId",
-          "deviceName",
-          "platform",
-          "transport"
-        ],
-        "properties": {
-          "requestId": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Client-generated identifier retained by the originating installation."
-          },
-          "email": {
-            "type": "string",
-            "format": "email"
-          },
-          "applicationKind": {
-            "$ref": "#/components/schemas/LoginApplicationKind"
-          },
-          "pollChallenge": {
-            "type": "string",
-            "minLength": 43,
-            "maxLength": 43,
-            "pattern": "^[A-Za-z0-9_-]{43}$",
-            "writeOnly": true,
-            "description": "Unpadded base64url SHA-256 challenge derived from a high-entropy poll token that never leaves the originating client except in status, exchange, and cancel request bodies."
-          },
-          "codeChallenge": {
-            "type": "string",
-            "minLength": 43,
-            "maxLength": 43,
-            "pattern": "^[A-Za-z0-9_-]{43}$",
-            "writeOnly": true,
-            "description": "RFC 7636 S256 challenge derived from the originating client's private verifier."
-          },
-          "codeChallengeMethod": {
-            "const": "S256"
-          },
-          "state": {
-            "type": "string",
-            "minLength": 32,
-            "maxLength": 256,
-            "writeOnly": true
-          },
-          "installationId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "deviceName": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 120
-          },
-          "platform": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 40
-          },
-          "transport": {
-            "$ref": "#/components/schemas/SessionTransport"
-          },
-          "requestedSessionIdleSeconds": {
-            "type": "integer",
-            "minimum": 900,
-            "maximum": 5184000,
-            "description": "Optional client request for a shorter idle window. The server always caps it at the transport policy: 30 days for web and 60 days for native . Omit it to keep the trusted installation signed in until explicit revocation when the deployment imposes no idle ceiling."
-          }
-        }
-      },
-      "LoginLinkStarted": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "accepted",
-          "requestId",
-          "expiresAt",
-          "pollIntervalSeconds"
-        ],
-        "properties": {
-          "accepted": {
-            "const": true
-          },
-          "requestId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "expiresAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "pollIntervalSeconds": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 30
-          },
-          "developmentApprovalToken": {
-            "type": "string",
-            "description": "The emailed approval token, echoed only when the deployment enables EXPOSE_DEVELOPMENT_TOKENS for development and acceptance environments. Never enabled in production.",
-            "readOnly": true
-          }
-        },
-        "description": "Generic accepted response. The private poll token and PKCE verifier are client-generated and are never returned by the server."
-      },
-      "LoginLinkRequestProof": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "pollToken"
-        ],
-        "properties": {
-          "pollToken": {
-            "type": "string",
-            "minLength": 43,
-            "maxLength": 128,
-            "writeOnly": true
-          }
-        }
-      },
-      "LoginLinkApprovalProof": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "applicationKind",
-          "approvalToken"
-        ],
-        "properties": {
-          "applicationKind": {
-            "$ref": "#/components/schemas/LoginApplicationKind"
-          },
-          "approvalToken": {
-            "type": "string",
-            "minLength": 40,
-            "maxLength": 128,
-            "pattern": "^[A-Za-z0-9_-]+$",
-            "writeOnly": true,
-            "description": "Single-use capability received in an application-link URI fragment and submitted only in a JSON body."
-          }
-        }
-      },
-      "LoginLinkApprovalValidity": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "valid",
-          "requestId",
-          "applicationKind",
-          "expiresAt"
-        ],
-        "properties": {
-          "valid": {
-            "const": true
-          },
-          "requestId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "applicationKind": {
-            "$ref": "#/components/schemas/LoginApplicationKind"
-          },
-          "expiresAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
-      },
-      "LoginLinkApprovalReview": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "requestId",
-          "applicationKind",
-          "deviceName",
-          "platform",
-          "createdAt",
-          "expiresAt"
-        ],
-        "properties": {
-          "requestId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "applicationKind": {
-            "$ref": "#/components/schemas/LoginApplicationKind"
-          },
-          "deviceName": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 120
-          },
-          "platform": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 40
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "expiresAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
-      },
-      "LoginLinkDecisionRequest": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "applicationKind",
-          "approvalToken",
-          "decision"
-        ],
-        "properties": {
-          "applicationKind": {
-            "$ref": "#/components/schemas/LoginApplicationKind"
-          },
-          "approvalToken": {
-            "type": "string",
-            "minLength": 40,
-            "maxLength": 128,
-            "pattern": "^[A-Za-z0-9_-]+$",
-            "writeOnly": true
-          },
-          "decision": {
-            "type": "string",
-            "enum": [
-              "approve",
-              "deny"
-            ]
-          }
-        }
-      },
-      "LoginLinkDecisionReceived": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "requestId",
-          "applicationKind",
-          "status"
-        ],
-        "properties": {
-          "requestId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "applicationKind": {
-            "$ref": "#/components/schemas/LoginApplicationKind"
-          },
-          "status": {
-            "const": "received"
-          }
-        }
-      },
-      "LoginLinkStatus": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "requestId",
-          "applicationKind",
-          "status",
-          "expiresAt"
-        ],
-        "properties": {
-          "requestId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "applicationKind": {
-            "$ref": "#/components/schemas/LoginApplicationKind"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "pending",
-              "approved",
-              "denied",
-              "exchanged",
-              "expired",
-              "cancelled"
-            ]
-          },
-          "expiresAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "approvedAt": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time"
-          }
-        }
-      },
-      "LoginLinkExchangeRequest": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "pollToken",
-          "codeVerifier",
-          "state"
-        ],
-        "properties": {
-          "pollToken": {
-            "type": "string",
-            "minLength": 43,
-            "maxLength": 128,
-            "writeOnly": true
-          },
-          "codeVerifier": {
-            "type": "string",
-            "minLength": 43,
-            "maxLength": 128,
-            "pattern": "^[A-Za-z0-9._~-]+$",
-            "writeOnly": true
-          },
-          "state": {
-            "type": "string",
-            "minLength": 32,
-            "maxLength": 256,
-            "writeOnly": true
-          }
-        }
-      },
-      "StepUpLinkAccepted": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "accepted"
-        ],
-        "properties": {
-          "accepted": {
-            "const": true
-          },
-          "developmentStepUpToken": {
-            "type": "string",
-            "readOnly": true,
-            "description": "Present only in an explicitly enabled non-production development profile."
-          }
-        }
-      },
-      "StepUpRequest": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "applicationKind",
-          "action"
-        ],
-        "properties": {
-          "applicationKind": {
-            "$ref": "#/components/schemas/LoginApplicationKind"
-          },
-          "action": {
-            "const": "ownership-transfer"
-          }
-        }
-      },
       "EmailRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -8973,7 +10541,8 @@
           "homes",
           "pendingInvitations",
           "platformRoles",
-          "currentSession"
+          "currentSession",
+          "profile"
         ],
         "properties": {
           "userId": {
@@ -9034,89 +10603,9 @@
           },
           "currentSession": {
             "$ref": "#/components/schemas/DeviceSession"
-          }
-        }
-      },
-      "PlatformAdministrator": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "id",
-          "email",
-          "status",
-          "revision",
-          "createdAt"
-        ],
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
           },
-          "email": {
-            "type": "string",
-            "format": "email"
-          },
-          "userId": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "pending",
-              "active"
-            ]
-          },
-          "revision": {
-            "type": "integer",
-            "minimum": 1
-          },
-          "grantedByUserId": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "activatedAt": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time"
-          }
-        }
-      },
-      "PlatformAdministratorGrantRequest": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "email"
-        ],
-        "properties": {
-          "email": {
-            "type": "string",
-            "format": "email"
-          }
-        }
-      },
-      "PlatformAdministratorRevokeRequest": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "expectedRevision"
-        ],
-        "properties": {
-          "expectedRevision": {
-            "type": "integer",
-            "minimum": 1
+          "profile": {
+            "$ref": "#/components/schemas/AccountProfile"
           }
         }
       },
@@ -9191,15 +10680,15 @@
       "RevisionRequest": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "expectedRevision"
-        ],
         "properties": {
           "expectedRevision": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 0
           }
-        }
+        },
+        "required": [
+          "expectedRevision"
+        ]
       },
       "HomeOwnershipTransferProposal": {
         "type": "object",
@@ -9368,6 +10857,15 @@
           },
           "revision": {
             "type": "integer"
+          },
+          "access": {
+            "$ref": "#/components/schemas/EffectiveAccess"
+          },
+          "effectivePermissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -9462,6 +10960,7 @@
             "enum": [
               "pending",
               "accepted",
+              "declined",
               "revoked",
               "expired"
             ]
@@ -17459,19 +18958,6 @@
           }
         }
       },
-      "OperatorRoleChangeRequest": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "expectedRevision"
-        ],
-        "properties": {
-          "expectedRevision": {
-            "type": "integer",
-            "minimum": 1
-          }
-        }
-      },
       "SyncHomeCategoryCreatePayload": {
         "type": "object",
         "additionalProperties": false,
@@ -17537,6 +19023,942 @@
             "$ref": "#/components/schemas/HomeCategoryStatus"
           }
         }
+      },
+      "EmailCodeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "maxLength": 254
+          },
+          "applicationKind": {
+            "$ref": "#/components/schemas/LoginApplicationKind"
+          },
+          "installationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deviceName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "platform": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "transport": {
+            "$ref": "#/components/schemas/SessionTransport"
+          }
+        },
+        "required": [
+          "email",
+          "applicationKind",
+          "installationId",
+          "deviceName",
+          "platform",
+          "transport"
+        ]
+      },
+      "EmailCodeChallenge": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "bindingToken": {
+            "type": "string",
+            "minLength": 40,
+            "description": "Secret retained only by the requesting client. Never logged or placed in URLs."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "resendAfterSeconds": {
+            "type": "integer",
+            "const": 60
+          }
+        },
+        "required": [
+          "challengeId",
+          "bindingToken",
+          "expiresAt",
+          "resendAfterSeconds"
+        ]
+      },
+      "EmailCodeVerification": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "bindingToken": {
+            "type": "string",
+            "writeOnly": true,
+            "minLength": 40,
+            "maxLength": 128
+          },
+          "code": {
+            "type": "string",
+            "writeOnly": true,
+            "pattern": "^[0-9]{8}$"
+          }
+        },
+        "required": [
+          "challengeId",
+          "bindingToken",
+          "code"
+        ]
+      },
+      "SecurityCodeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "email.primary",
+              "email.remove",
+              "ownership-transfer"
+            ]
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "SecurityCodeProof": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "proofToken": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "proofToken",
+          "action"
+        ]
+      },
+      "EmailAddressRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "maxLength": 254
+          }
+        },
+        "required": [
+          "email"
+        ]
+      },
+      "EmailChangeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "proofToken": {
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "proofToken"
+        ]
+      },
+      "AccountEmail": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "primary": {
+            "type": "boolean"
+          },
+          "verifiedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "primary",
+          "verifiedAt"
+        ]
+      },
+      "AccessGroup": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "account",
+              "home",
+              "admin"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "features": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "boolean"
+            }
+          },
+          "limits": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": -1
+            }
+          },
+          "delegablePermissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "rolePermissions": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "protected": {
+            "type": "boolean"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "id",
+          "scope",
+          "name",
+          "features",
+          "limits",
+          "delegablePermissions",
+          "rolePermissions",
+          "revision",
+          "protected"
+        ]
+      },
+      "AccessGroupRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "account",
+              "home",
+              "admin"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "features": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "boolean"
+            }
+          },
+          "limits": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": -1
+            }
+          },
+          "delegablePermissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "rolePermissions": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "scope",
+          "name",
+          "features",
+          "limits",
+          "delegablePermissions",
+          "rolePermissions",
+          "expectedRevision"
+        ]
+      },
+      "GroupAssignmentRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "groupId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "groupId",
+          "expectedRevision"
+        ]
+      },
+      "EffectiveAccess": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "type": "string"
+          },
+          "subjectId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "groupId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "groupName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "groupRevision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "features": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "boolean"
+            }
+          },
+          "limits": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": -1
+            }
+          },
+          "delegablePermissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "rolePermissions": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "required": [
+          "scope",
+          "subjectId",
+          "groupId",
+          "features",
+          "limits",
+          "revision",
+          "groupRevision",
+          "delegablePermissions",
+          "rolePermissions"
+        ]
+      },
+      "AccountProfileRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "countryCode": {
+            "type": "string",
+            "pattern": "^[A-Z]{2}$"
+          },
+          "stateId": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "cityId": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "locale": {
+            "type": "string",
+            "maxLength": 16
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "policyAccepted": {
+            "type": "boolean"
+          },
+          "policyId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "policyRevision": {
+            "type": "integer"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "displayName",
+          "countryCode",
+          "expectedRevision"
+        ]
+      },
+      "AccountOnboardingRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "countryCode": {
+            "type": "string",
+            "pattern": "^[A-Z]{2}$"
+          },
+          "stateId": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "cityId": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "locale": {
+            "type": "string",
+            "maxLength": 16
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "policyAccepted": {
+            "type": "boolean"
+          },
+          "policyId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "policyRevision": {
+            "type": "integer"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "displayName",
+          "countryCode",
+          "expectedRevision",
+          "policyAccepted",
+          "policyId",
+          "policyRevision"
+        ]
+      },
+      "AccountProfile": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "displayName": {
+            "type": "string"
+          },
+          "countryCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "stateId": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "cityId": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "locale": {
+            "type": "string",
+            "maxLength": 16
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "onboardingComplete": {
+            "type": "boolean"
+          },
+          "avatarSource": {
+            "type": "string",
+            "enum": [
+              "default",
+              "gravatar",
+              "upload"
+            ]
+          },
+          "avatarEmailId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "avatarRevision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "emails": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AccountEmail"
+            }
+          },
+          "accountAccess": {
+            "$ref": "#/components/schemas/EffectiveAccess"
+          },
+          "administratorAccess": {
+            "$ref": "#/components/schemas/EffectiveAccess"
+          },
+          "administratorStatus": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "userId",
+          "revision",
+          "onboardingComplete",
+          "emails",
+          "accountAccess",
+          "administratorAccess"
+        ]
+      },
+      "MemberPermissionOverrides": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "homeId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "permissions": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "boolean"
+            }
+          }
+        },
+        "required": [
+          "homeId",
+          "userId",
+          "revision",
+          "permissions"
+        ]
+      },
+      "MemberPermissionOverridesRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "permissions": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "boolean"
+            }
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "permissions",
+          "expectedRevision"
+        ]
+      },
+      "AdministratorReviewRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "approved",
+              "rejected",
+              "suspended"
+            ]
+          },
+          "groupId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "assignmentRevision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "status",
+          "expectedRevision"
+        ]
+      },
+      "HomeProfile": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "countryCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "stateId": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "cityId": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "latitude": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "longitude": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "avatarSource": {
+            "type": "string"
+          },
+          "avatarRevision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "HomeProfileRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "countryCode": {
+            "type": "string"
+          },
+          "stateId": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "cityId": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "latitude": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": -90,
+            "maximum": 90
+          },
+          "longitude": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": -180,
+            "maximum": 180
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "description",
+          "countryCode",
+          "expectedRevision"
+        ]
+      },
+      "ProfileImageRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "imageBase64": {
+            "type": "string",
+            "contentEncoding": "base64",
+            "maxLength": 2796204
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "imageBase64",
+          "expectedRevision"
+        ]
+      },
+      "GravatarRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "emailId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "emailId",
+          "expectedRevision"
+        ]
+      },
+      "CountryConfigurationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "published": {
+            "type": "boolean"
+          },
+          "accountGroupId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "invitedGroupId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "homeGroupId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "defaultCurrency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "defaultTimezone": {
+            "type": "string"
+          },
+          "policyId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "published",
+          "accountGroupId",
+          "invitedGroupId",
+          "homeGroupId",
+          "defaultCurrency",
+          "defaultTimezone",
+          "policyId",
+          "expectedRevision"
+        ]
+      },
+      "PrivacyPolicyRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 160
+          },
+          "body": {
+            "type": "string",
+            "minLength": 100,
+            "maxLength": 100000
+          },
+          "countryCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "published"
+            ]
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "title",
+          "body",
+          "status",
+          "expectedRevision"
+        ]
+      },
+      "PlatformRecordPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
+      "PlatformChange": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "changed": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": [
+          "changed"
+        ]
       }
     }
   },
