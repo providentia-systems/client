@@ -7,6 +7,7 @@ import 'package:http/testing.dart';
 import 'package:providentia/features/homes/application/home_ports.dart';
 import 'package:providentia/features/homes/domain/home_models.dart';
 import 'package:providentia/features/homes/infrastructure/api11_home_transport.dart';
+import 'package:providentia/features/profile/generated_profile_port.dart';
 import 'package:providentia_api_client/providentia_api_client.dart';
 
 void main() {
@@ -311,48 +312,47 @@ void main() {
     );
   });
 
-  test('step-up request is scoped to homeowner ownership transfer', () async {
-    http.Request? seen;
-    final transport = Api11HomeTransport(
+  test('ownership confirmation uses a session-bound numeric code', () async {
+    final seen = <http.Request>[];
+    final port = GeneratedProfilePort(
       _client((request) async {
-        seen = request;
-        return _json(<String, Object?>{
-          'accepted': true,
-          'developmentStepUpToken': _stepUpToken,
-        });
+        seen.add(request);
+        return _json(
+          request.url.path.endsWith('/verify')
+              ? <String, Object?>{'proofToken': _stepUpToken}
+              : <String, Object?>{
+                  'challengeId': _homeId,
+                  'bindingToken': 'binding-test',
+                  'expiresAt': '2026-09-05T10:10:00Z',
+                  'resendAfterSeconds': 60,
+                },
+        );
       }),
     );
-
-    final receipt = await transport.requestStepUpLink();
-
-    expect(seen?.url.path, endsWith('/auth/step-up-links'));
-    expect(jsonDecode(seen?.body ?? ''), <String, Object?>{
-      'applicationKind': 'homeowner',
-      'action': 'ownership-transfer',
+    final challenge =
+        await port.call(
+              'requestSecurityCode',
+              body: <String, Object?>{'action': 'ownership-transfer'},
+            )
+            as Map;
+    final proof =
+        await port.call(
+              'verifySecurityCode',
+              body: <String, Object?>{
+                'challengeId': challenge['challengeId'],
+                'bindingToken': challenge['bindingToken'],
+                'code': '12345678',
+              },
+            )
+            as Map;
+    expect(seen.first.url.path, '/api/v1/me/security-codes');
+    expect(seen.last.url.path, '/api/v1/me/security-codes/verify');
+    expect(jsonDecode(seen.last.body), <String, Object?>{
+      'challengeId': _homeId,
+      'bindingToken': 'binding-test',
+      'code': '12345678',
     });
-    expect(receipt.developmentStepUpToken, _stepUpToken);
-
-    final production = Api11HomeTransport(
-      _client((_) async => _json(<String, Object?>{'accepted': true})),
-    );
-    expect(
-      (await production.requestStepUpLink()).developmentStepUpToken,
-      isNull,
-    );
-
-    final refused = Api11HomeTransport(
-      _client((_) async => _json(<String, Object?>{'accepted': false})),
-    );
-    await expectLater(
-      refused.requestStepUpLink(),
-      throwsA(
-        isA<HomeTransportException>().having(
-          (error) => error.kind,
-          'kind',
-          HomeFailureKind.unavailable,
-        ),
-      ),
-    );
+    expect(proof['proofToken'], _stepUpToken);
   });
 
   test(

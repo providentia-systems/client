@@ -15,7 +15,7 @@ import 'package:providentia/core/networking/credentialed_http_client.dart';
 import 'package:providentia/core/networking/generated_api_connectivity_probe.dart';
 import 'package:providentia/core/networking/session_http_client.dart';
 import 'package:providentia/core/security/device_identity_store.dart';
-import 'package:providentia/core/security/platform_pending_login_link_store.dart';
+import 'package:providentia/core/security/platform_pending_email_code_store.dart';
 import 'package:providentia/core/security/platform_session_coordination.dart';
 import 'package:providentia/core/security/platform_session_credential_store.dart';
 import 'package:providentia/core/security/uuid_v4.dart';
@@ -80,22 +80,17 @@ import 'package:providentia/features/homes/presentation/home_selection_page.dart
 import 'package:providentia/features/homes/presentation/homes_controller.dart';
 import 'package:providentia/features/identity/application/identity_session_manager.dart';
 import 'package:providentia/features/identity/domain/identity_models.dart';
-import 'package:providentia/features/identity/domain/login_link_approval_models.dart';
 import 'package:providentia/features/identity/infrastructure/api11_identity_transport.dart';
-import 'package:providentia/features/identity/infrastructure/browser_fragment_scrubber.dart';
-import 'package:providentia/features/identity/infrastructure/generated_login_link_approval_transport.dart';
-import 'package:providentia/features/identity/infrastructure/homeowner_app_link_ingress.dart';
-import 'package:providentia/features/identity/infrastructure/secure_login_link_request_factory.dart';
 import 'package:providentia/features/identity/presentation/account_access_page.dart';
+import 'package:providentia/features/identity/presentation/email_code_sign_in_page.dart';
 import 'package:providentia/features/identity/presentation/identity_controller.dart';
-import 'package:providentia/features/identity/presentation/login_link_approval_controller.dart';
-import 'package:providentia/features/identity/presentation/login_link_approval_page.dart';
-import 'package:providentia/features/identity/presentation/login_link_sign_in_page.dart';
 import 'package:providentia/features/inventory/application/stock_camera_capture_session.dart';
 import 'package:providentia/features/inventory/application/stock_photo_count_controller.dart';
 import 'package:providentia/features/inventory/infrastructure/generated_home_item_master_source.dart';
 import 'package:providentia/features/inventory/infrastructure/item_master_refreshing_synchronization.dart';
 import 'package:providentia/features/inventory/presentation/inventory_controller.dart';
+import 'package:providentia/features/profile/account_profile_page.dart';
+import 'package:providentia/features/profile/generated_profile_port.dart';
 import 'package:providentia/features/purchasing/application/purchase_repository.dart';
 import 'package:providentia/features/purchasing/presentation/purchasing_controller.dart';
 import 'package:providentia/features/reporting/application/household_report_service.dart';
@@ -116,14 +111,9 @@ import 'package:providentia_api_client/providentia_api_client.dart';
 /// local-first household workspace. No home ID or bearer token is required at
 /// build time, and every server call is bound to the authenticated session.
 final class ProductionBootstrapApp extends StatefulWidget {
-  const ProductionBootstrapApp({
-    required this.configuration,
-    this.initialAppLink,
-    super.key,
-  });
+  const ProductionBootstrapApp({required this.configuration, super.key});
 
   final RuntimeConfiguration configuration;
-  final InitialHomeownerAppLink? initialAppLink;
 
   @override
   State<ProductionBootstrapApp> createState() => _ProductionBootstrapAppState();
@@ -137,7 +127,6 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp>
   late final ProvidentiaApiClient _authorizedApi;
   late final IdentitySessionManager _identityManager;
   late final IdentityController _identityController;
-  late final LoginLinkApprovalController _loginLinkApprovalController;
   late final HomesController _homesController;
   late final ProductionSessionSecurityBoundary _sessionSecurityBoundary;
   late final ProductionHomeRevocationBoundary _homeRevocationBoundary;
@@ -155,15 +144,11 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp>
   final Map<String, Future<bool>> _revokedHomePurges = <String, Future<bool>>{};
   final HomeSyncRevocationGate _homeSyncRevocationGate =
       HomeSyncRevocationGate();
-  Uri? _pendingInitialAppLink;
-  bool _initialAppLinkScheduled = false;
-  bool _loginApprovalRouteActive = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _pendingInitialAppLink = widget.initialAppLink?.take();
     _database = AppDatabase.defaults();
     _homeRevocationBoundary = ProductionHomeRevocationBoundary(
       purge: (homeId) {
@@ -182,10 +167,6 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp>
     _identityApi = const ApiClientFactory().create(
       configuration: widget.configuration,
     );
-    _loginLinkApprovalController = LoginLinkApprovalController(
-      transport: GeneratedLoginLinkApprovalTransport(_identityApi),
-      expectedBaseUri: widget.configuration.homeownerAppLinkBaseUri,
-    );
     final identityTransport = Api11IdentityTransport(
       _identityApi,
       sessionTransport: sessionTransport,
@@ -193,8 +174,7 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp>
     _identityManager = IdentitySessionManager(
       transport: identityTransport,
       credentialStore: PlatformSessionCredentialStore(),
-      pendingLoginLinkStore: PlatformPendingLoginLinkStore(),
-      loginLinkRequestFactory: SecureLoginLinkRequestFactory(),
+      pendingEmailCodeStore: PlatformPendingEmailCodeStore(),
       sessionCoordination: PlatformSessionCoordination(),
       device: DeviceDescriptor(
         id: _deviceId,
@@ -257,7 +237,6 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp>
         if (snapshot.connectionState != ConnectionState.done) {
           return const _StartupProgressApp();
         }
-        _scheduleInitialAppLink();
         return MaterialApp(
           navigatorKey: _rootNavigatorKey,
           debugShowCheckedModeBanner: false,
@@ -265,128 +244,99 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp>
           initialRoute: '/',
           theme: ProvidentiaTheme.light(),
           highContrastTheme: ProvidentiaTheme.light(highContrast: true),
-          home: LoginLinkSignInPage(
+          home: EmailCodeSignInPage(
             controller: _identityController,
             authenticatedBuilder: (context, identitySnapshot) =>
-                HomeSelectionPage(
-                  controller: _homesController,
-                  sessionActiveHomeId:
-                      identitySnapshot.session?.activeHomeId ??
-                      identitySnapshot.currentUser?.activeHomeId,
-                  accountPageBuilder: (context) => AccountAccessPage(
-                    identityController: _identityController,
-                    homesController: _homesController,
-                    catalogSharingPageBuilder: _catalogSharingPageBuilder(
-                      _homesController.snapshot.activeHome,
-                      _homesController.snapshot.effectivePermissions,
+                identitySnapshot.currentUser?.onboardingComplete != true
+                ? AccountProfilePage(
+                    port: GeneratedProfilePort(_authorizedApi),
+                    onChanged: _identityController.refreshCurrentUser,
+                    onboarding: true,
+                    onSignOut: _signOut,
+                  )
+                : HomeSelectionPage(
+                    accountAccess: Map<String, Object?>.from(
+                      identitySnapshot.currentUser?.profile['accountAccess']
+                              as Map? ??
+                          const <String, Object?>{},
                     ),
-                    householdReportsPageBuilder: _householdReportsPageBuilder,
-                    householdAiPageBuilder: _householdAiPageBuilder,
-                    dataGovernancePageBuilder: _dataGovernancePageBuilder,
-                  ),
-                  onSignOut: _signOut,
-                  activeHomeBuilder: (context, home) {
-                    final permissions =
-                        _homesController.snapshot.effectivePermissions;
-                    final permissionKey = permissions.toList(growable: false)
-                      ..sort();
-                    return _ConnectedHomeWorkspace(
-                      key: ValueKey<String>(
-                        '${home.id}:${permissionKey.join(',')}',
+                    controller: _homesController,
+                    sessionActiveHomeId:
+                        identitySnapshot.session?.activeHomeId ??
+                        identitySnapshot.currentUser?.activeHomeId,
+                    accountPageBuilder: (context) => AccountAccessPage(
+                      profilePort: GeneratedProfilePort(_authorizedApi),
+                      profilePageBuilder: (_) => AccountProfilePage(
+                        port: GeneratedProfilePort(_authorizedApi),
+                        onChanged: _identityController.refreshCurrentUser,
                       ),
-                      home: home,
-                      access: HouseholdWorkspaceAccess.fromPermissions(
-                        permissions,
-                      ),
-                      revokedDataPurge: _revokedHomePurges[home.id],
-                      syncRevocationGate: _homeSyncRevocationGate,
-                      homeRevocationBoundary: _homeRevocationBoundary,
-                      database: _database,
-                      deviceId: _deviceId,
-                      api: _authorizedApi,
                       identityController: _identityController,
                       homesController: _homesController,
                       catalogSharingPageBuilder: _catalogSharingPageBuilder(
-                        home,
-                        permissions,
-                      ),
-                      canContributeCatalog: mayContributeCatalogProduct(
-                        permissions,
+                        _homesController.snapshot.activeHome,
+                        _homesController.snapshot.effectivePermissions,
                       ),
                       householdReportsPageBuilder: _householdReportsPageBuilder,
                       householdAiPageBuilder: _householdAiPageBuilder,
                       dataGovernancePageBuilder: _dataGovernancePageBuilder,
-                      protectedRouteRegistry: _protectedRouteRegistry,
-                      onCatalogAuthorizationLost:
-                          _handleCatalogSharingAuthorizationLost,
-                      workspaceNavigatorKey: _workspaceNavigatorKey,
-                      onChangeHome: _homesController.returnToChooser,
-                      onSignOut: _signOut,
-                    );
-                  },
-                ),
+                    ),
+                    onSignOut: _signOut,
+                    activeHomeBuilder: (context, home) {
+                      final permissions =
+                          _homesController.snapshot.effectivePermissions;
+                      final permissionKey = permissions.toList(growable: false)
+                        ..sort();
+                      return _ConnectedHomeWorkspace(
+                        key: ValueKey<String>(
+                          '${home.id}:${permissionKey.join(',')}',
+                        ),
+                        home: home,
+                        access: HouseholdWorkspaceAccess.fromPermissions(
+                          permissions,
+                        ),
+                        revokedDataPurge: _revokedHomePurges[home.id],
+                        syncRevocationGate: _homeSyncRevocationGate,
+                        homeRevocationBoundary: _homeRevocationBoundary,
+                        database: _database,
+                        deviceId: _deviceId,
+                        api: _authorizedApi,
+                        identityController: _identityController,
+                        homesController: _homesController,
+                        catalogSharingPageBuilder: _catalogSharingPageBuilder(
+                          home,
+                          permissions,
+                        ),
+                        canContributeCatalog: mayContributeCatalogProduct(
+                          permissions,
+                        ),
+                        householdReportsPageBuilder:
+                            _householdReportsPageBuilder,
+                        householdAiPageBuilder: _householdAiPageBuilder,
+                        dataGovernancePageBuilder: _dataGovernancePageBuilder,
+                        protectedRouteRegistry: _protectedRouteRegistry,
+                        onCatalogAuthorizationLost:
+                            _handleCatalogSharingAuthorizationLost,
+                        workspaceNavigatorKey: _workspaceNavigatorKey,
+                        onChangeHome: _homesController.returnToChooser,
+                        onSignOut: _signOut,
+                      );
+                    },
+                  ),
           ),
         );
       },
     );
   }
 
-  void _scheduleInitialAppLink() {
-    if (_initialAppLinkScheduled) return;
-    final uri = _pendingInitialAppLink;
-    _pendingInitialAppLink = null;
-    _initialAppLinkScheduled = true;
-    if (uri == null) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      unawaited(_presentLoginLinkApproval(uri));
-    });
-  }
-
-  @override
-  Future<bool> didPushRouteInformation(RouteInformation routeInformation) {
-    final uri = routeInformation.uri;
-    if (!isHomeownerLoginLink(
-      uri,
-      widget.configuration.homeownerAppLinkBaseUri,
-    )) {
-      return Future<bool>.value(false);
-    }
-    scrubBrowserFragment();
-    unawaited(_presentLoginLinkApproval(uri));
-    return Future<bool>.value(true);
-  }
-
-  Future<void> _presentLoginLinkApproval(Uri uri) async {
-    if (_loginApprovalRouteActive) return;
-    await _initialization;
-    if (!mounted || _loginApprovalRouteActive) return;
-    _loginApprovalRouteActive = true;
-    unawaited(_loginLinkApprovalController.receive(uri));
-    try {
-      await _rootNavigatorKey.currentState?.push<void>(
-        MaterialPageRoute<void>(
-          settings: const RouteSettings(name: '/login-link-approval'),
-          builder: (_) =>
-              LoginLinkApprovalPage(controller: _loginLinkApprovalController),
-        ),
-      );
-    } finally {
-      _loginLinkApprovalController.cancel();
-      _loginApprovalRouteActive = false;
-    }
-  }
-
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _pendingInitialAppLink = null;
     unawaited(
       _initialization.then((_) async {
         await _identitySubscription?.cancel();
         _homesController.removeListener(_handleHomeSecurityState);
         _homesController.dispose();
         _identityController.dispose();
-        _loginLinkApprovalController.dispose();
         await _identityManager.dispose();
         _authorizedApi.close();
         _authorizedTransport?.close();
@@ -946,6 +896,11 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
             _app.selectSection(AppSection.stock);
           },
           accountPageBuilder: (context) => AccountAccessPage(
+            profilePort: GeneratedProfilePort(widget.api),
+            profilePageBuilder: (_) => AccountProfilePage(
+              port: GeneratedProfilePort(widget.api),
+              onChanged: widget.identityController.refreshCurrentUser,
+            ),
             identityController: widget.identityController,
             homesController: widget.homesController,
             catalogSharingPageBuilder: widget.catalogSharingPageBuilder,

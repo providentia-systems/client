@@ -9,44 +9,37 @@ import 'package:providentia/features/identity/application/identity_session_manag
 import 'package:providentia/features/identity/domain/identity_models.dart';
 
 void main() {
-  test('origin client starts a private S256 login request', () async {
-    final fixture = _Fixture();
-    addTearDown(fixture.dispose);
-
-    await fixture.manager.requestLoginLink('Person@Example.com');
-
-    final command = fixture.transport.started.single;
-    expect(command.email, 'person@example.com');
-    expect(command.requestId, _requestId);
-    expect(command.pollChallenge, _pollChallenge);
-    expect(command.codeChallenge, _codeChallenge);
-    expect(command.state, _state);
-    expect(command.pollChallenge, isNot(_pollToken));
-    expect(command.codeChallenge, isNot(_verifier));
-    expect(fixture.pendingStore.value?.pollToken, _pollToken);
-    expect(
-      fixture.manager.snapshot.status,
-      IdentitySessionStatus.waitingForLoginLink,
-    );
-  });
+  test(
+    'origin client persists the email-code binding before prompting',
+    () async {
+      final fixture = _Fixture();
+      addTearDown(fixture.dispose);
+      await fixture.manager.requestEmailCode('Person@Example.com');
+      expect(fixture.transport.started.single.email, 'person@example.com');
+      expect(fixture.pendingStore.value?.bindingToken, _pollToken);
+      expect(
+        fixture.manager.snapshot.status,
+        IdentitySessionStatus.waitingForEmailCode,
+      );
+      expect(fixture.transport.exchangeCalls, 0);
+    },
+  );
 
   test('account-scoped device grant accepts its bound installation', () async {
     final fixture = _Fixture(installationId: _installationId);
     addTearDown(fixture.dispose);
-    await fixture.manager.requestLoginLink('person@example.com');
+    await fixture.manager.requestEmailCode('person@example.com');
     fixture.transport
-      ..status = LoginLinkRequestStatus.approved
       ..exchangeGrant = _grant(
         fixture.clock.value,
         installationId: _installationId,
       )
       ..currentUser = _currentUser(fixture.clock.value);
 
-    await fixture.manager.pollLoginLinkNow();
+    await fixture.manager.verifyEmailCode('12345678');
 
     expect(fixture.transport.exchangeCalls, 1);
-    expect(fixture.transport.lastExchange?.pollToken, _pollToken);
-    expect(fixture.transport.lastExchange?.codeVerifier, _verifier);
+    expect(fixture.transport.lastExchange?.bindingToken, _pollToken);
     expect(
       fixture.manager.snapshot.status,
       IdentitySessionStatus.authenticated,
@@ -61,10 +54,9 @@ void main() {
   test('grant for another installation is rejected and revoked', () async {
     final fixture = _Fixture(installationId: _installationId);
     addTearDown(fixture.dispose);
-    await fixture.manager.requestLoginLink('person@example.com');
-    fixture.transport.status = LoginLinkRequestStatus.approved;
+    await fixture.manager.requestEmailCode('person@example.com');
 
-    await fixture.manager.pollLoginLinkNow();
+    await fixture.manager.verifyEmailCode('12345678');
 
     expect(fixture.manager.snapshot.status, IdentitySessionStatus.failure);
     expect(fixture.manager.snapshot.safeMessage, contains('different device'));
@@ -73,43 +65,41 @@ void main() {
   });
 
   test(
-    'polls server at local expiry so a late approval is not missed',
+    'expired email code is retired without a verification request',
     () async {
       final clock = _MutableClock(DateTime.utc(2026, 8, 9, 12));
       final fixture = _Fixture(clock: clock);
       addTearDown(fixture.dispose);
-      await fixture.manager.requestLoginLink('person@example.com');
+      await fixture.manager.requestEmailCode('person@example.com');
       clock.value = fixture.transport.expiresAt;
-      fixture.transport
-        ..status = LoginLinkRequestStatus.approved
-        ..expiresAt = clock.value.add(const Duration(minutes: 2));
+      fixture.transport.expiresAt = clock.value.add(const Duration(minutes: 2));
 
-      await fixture.manager.pollLoginLinkNow();
+      await fixture.manager.verifyEmailCode('12345678');
 
-      expect(fixture.transport.statusCalls, 1);
-      expect(fixture.transport.exchangeCalls, 1);
+      expect(fixture.transport.statusCalls, 0);
+      expect(fixture.transport.exchangeCalls, 0);
       expect(
         fixture.manager.snapshot.status,
-        IdentitySessionStatus.authenticated,
+        IdentitySessionStatus.emailCodeExpired,
       );
     },
   );
 
   test(
-    'lifecycle pause suppresses polling and resume checks immediately',
+    'waiting for an email code never starts background authentication',
     () async {
       final fixture = _Fixture();
       addTearDown(fixture.dispose);
-      await fixture.manager.requestLoginLink('person@example.com');
-      fixture.manager.pauseLoginLinkPolling();
+      await fixture.manager.requestEmailCode('person@example.com');
       await Future<void>.delayed(Duration.zero);
       expect(fixture.transport.statusCalls, 0);
-
-      fixture.transport.status = LoginLinkRequestStatus.approved;
-      fixture.manager.resumeLoginLinkPolling();
-      await fixture.manager.pollLoginLinkNow();
-
-      expect(fixture.transport.statusCalls, 1);
+      expect(fixture.transport.exchangeCalls, 0);
+      expect(
+        fixture.manager.snapshot.status,
+        IdentitySessionStatus.waitingForEmailCode,
+      );
+      await fixture.manager.verifyEmailCode('12345678');
+      expect(fixture.transport.exchangeCalls, 1);
       expect(
         fixture.manager.snapshot.status,
         IdentitySessionStatus.authenticated,
@@ -122,23 +112,21 @@ void main() {
     () async {
       final fixture = _Fixture();
       addTearDown(fixture.dispose);
-      await fixture.manager.requestLoginLink('person@example.com');
-      fixture.transport
-        ..status = LoginLinkRequestStatus.approved
-        ..exchangeError = const IdentityTransportException(
-          kind: IdentityFailureKind.network,
-          safeMessage: 'Connection lost.',
-        );
+      await fixture.manager.requestEmailCode('person@example.com');
+      fixture.transport.exchangeError = const IdentityTransportException(
+        kind: IdentityFailureKind.network,
+        safeMessage: 'Connection lost.',
+      );
 
-      await fixture.manager.pollLoginLinkNow();
+      await fixture.manager.verifyEmailCode('12345678');
 
       expect(fixture.transport.exchangeCalls, 1);
       expect(fixture.pendingStore.value, isNull);
-      expect(fixture.manager.snapshot.pendingLoginLink, isNull);
+      expect(fixture.manager.snapshot.pendingEmailCode, isNull);
       expect(fixture.manager.snapshot.loginEmail, 'person@example.com');
       expect(
         fixture.manager.snapshot.safeMessage,
-        contains('Request a new login link'),
+        contains('Request a new email code'),
       );
     },
   );
@@ -148,15 +136,13 @@ void main() {
     () async {
       final fixture = _Fixture();
       addTearDown(fixture.dispose);
-      await fixture.manager.requestLoginLink('person@example.com');
-      fixture.transport
-        ..status = LoginLinkRequestStatus.approved
-        ..currentUserError = const IdentityTransportException(
-          kind: IdentityFailureKind.authentication,
-          safeMessage: 'Session rejected.',
-        );
+      await fixture.manager.requestEmailCode('person@example.com');
+      fixture.transport.currentUserError = const IdentityTransportException(
+        kind: IdentityFailureKind.authentication,
+        safeMessage: 'Session rejected.',
+      );
 
-      await fixture.manager.pollLoginLinkNow();
+      await fixture.manager.verifyEmailCode('12345678');
 
       expect(
         fixture.manager.snapshot.status,
@@ -171,15 +157,13 @@ void main() {
   test('temporary current-user failure retains the issued session', () async {
     final fixture = _Fixture();
     addTearDown(fixture.dispose);
-    await fixture.manager.requestLoginLink('person@example.com');
-    fixture.transport
-      ..status = LoginLinkRequestStatus.approved
-      ..currentUserError = const IdentityTransportException(
-        kind: IdentityFailureKind.unavailable,
-        safeMessage: 'Unavailable.',
-      );
+    await fixture.manager.requestEmailCode('person@example.com');
+    fixture.transport.currentUserError = const IdentityTransportException(
+      kind: IdentityFailureKind.unavailable,
+      safeMessage: 'Unavailable.',
+    );
 
-    await fixture.manager.pollLoginLinkNow();
+    await fixture.manager.verifyEmailCode('12345678');
 
     expect(
       fixture.manager.snapshot.status,
@@ -194,10 +178,9 @@ void main() {
   test('secure credential write failure revokes an orphan grant', () async {
     final fixture = _Fixture(credentialWriteFails: true);
     addTearDown(fixture.dispose);
-    await fixture.manager.requestLoginLink('person@example.com');
-    fixture.transport.status = LoginLinkRequestStatus.approved;
+    await fixture.manager.requestEmailCode('person@example.com');
 
-    await fixture.manager.pollLoginLinkNow();
+    await fixture.manager.verifyEmailCode('12345678');
 
     expect(fixture.manager.snapshot.status, IdentitySessionStatus.failure);
     expect(fixture.manager.accessToken, isNull);
@@ -205,21 +188,21 @@ void main() {
   });
 
   test(
-    'follow-up pending-store failure never strands or leaks the request',
+    'verification needs no second pending challenge write',
     () async {
       final fixture = _Fixture(pendingWriteFailsAfter: 1);
       addTearDown(fixture.dispose);
 
-      await fixture.manager.requestLoginLink('person@example.com');
-      fixture.transport.status = LoginLinkRequestStatus.expired;
-      await fixture.manager.pollLoginLinkNow();
+      await fixture.manager.requestEmailCode('person@example.com');
+
+      await fixture.manager.verifyEmailCode('12345678');
 
       expect(
         fixture.manager.snapshot.status,
-        IdentitySessionStatus.loginLinkExpired,
+        IdentitySessionStatus.authenticated,
       );
-      expect(fixture.manager.snapshot.pendingLoginLink, isNull);
-      expect(fixture.manager.snapshot.loginEmail, 'person@example.com');
+      expect(fixture.manager.snapshot.pendingEmailCode, isNull);
+      expect(fixture.pendingStore.writes, 1);
     },
   );
 
@@ -308,9 +291,9 @@ void main() {
     final clock = _MutableClock(DateTime.utc(2026, 8, 9, 12));
     final fixture = _Fixture(clock: clock);
     addTearDown(fixture.dispose);
-    await fixture.manager.requestLoginLink('person@example.com');
-    fixture.transport.status = LoginLinkRequestStatus.approved;
-    await fixture.manager.pollLoginLinkNow();
+    await fixture.manager.requestEmailCode('person@example.com');
+
+    await fixture.manager.verifyEmailCode('12345678');
     expect(fixture.manager.snapshot.session?.isDurable, isFalse);
 
     clock.value = clock.value.add(const Duration(days: 61));
@@ -359,9 +342,9 @@ void main() {
   test('remote logout rejection never restores cleared local state', () async {
     final fixture = _Fixture();
     addTearDown(fixture.dispose);
-    await fixture.manager.requestLoginLink('person@example.com');
-    fixture.transport.status = LoginLinkRequestStatus.approved;
-    await fixture.manager.pollLoginLinkNow();
+    await fixture.manager.requestEmailCode('person@example.com');
+
+    await fixture.manager.verifyEmailCode('12345678');
     fixture.transport.logoutError = const IdentityTransportException(
       kind: IdentityFailureKind.forbidden,
       safeMessage: 'Logout proof was rejected.',
@@ -381,9 +364,9 @@ void main() {
       final clock = _MutableClock(DateTime.utc(2026, 8, 9, 12));
       final fixture = _Fixture(clock: clock);
       addTearDown(fixture.dispose);
-      await fixture.manager.requestLoginLink('person@example.com');
-      fixture.transport.status = LoginLinkRequestStatus.approved;
-      await fixture.manager.pollLoginLinkNow();
+      await fixture.manager.requestEmailCode('person@example.com');
+
+      await fixture.manager.verifyEmailCode('12345678');
       clock.value = clock.value.add(const Duration(minutes: 14));
       fixture.transport.refreshError = const IdentityTransportException(
         kind: IdentityFailureKind.unavailable,
@@ -411,9 +394,9 @@ void main() {
     () async {
       final fixture = _Fixture();
       addTearDown(fixture.dispose);
-      await fixture.manager.requestLoginLink('person@example.com');
-      fixture.transport.status = LoginLinkRequestStatus.approved;
-      await fixture.manager.pollLoginLinkNow();
+      await fixture.manager.requestEmailCode('person@example.com');
+
+      await fixture.manager.verifyEmailCode('12345678');
 
       final recovered = await fixture.manager.tryRecover();
 
@@ -429,9 +412,9 @@ void main() {
   test('a rejected forced rotation clears the authenticated session', () async {
     final fixture = _Fixture();
     addTearDown(fixture.dispose);
-    await fixture.manager.requestLoginLink('person@example.com');
-    fixture.transport.status = LoginLinkRequestStatus.approved;
-    await fixture.manager.pollLoginLinkNow();
+    await fixture.manager.requestEmailCode('person@example.com');
+
+    await fixture.manager.verifyEmailCode('12345678');
     fixture.transport.refreshError = const IdentityTransportException(
       kind: IdentityFailureKind.authentication,
       safeMessage: 'Refresh rejected.',
@@ -449,38 +432,33 @@ void main() {
   test('cancel A cannot erase a concurrently requested B', () async {
     final fixture = _Fixture();
     addTearDown(fixture.dispose);
-    await fixture.manager.requestLoginLink('a@example.com');
-    fixture.transport.cancelGate = Completer<void>();
+    await fixture.manager.requestEmailCode('a@example.com');
 
-    final cancel = fixture.manager.cancelLoginLink();
-    await _until(() => fixture.transport.cancelCalls == 1);
-    final startB = fixture.manager.requestLoginLink('b@example.com');
+    final cancel = fixture.manager.cancelEmailCode();
+    final startB = fixture.manager.requestEmailCode('b@example.com');
     expect(
       fixture.manager.snapshot.status,
-      IdentitySessionStatus.requestingLoginLink,
+      IdentitySessionStatus.requestingEmailCode,
     );
-    fixture.transport.cancelGate!.complete();
     await Future.wait<void>(<Future<void>>[cancel, startB.then<void>((_) {})]);
 
     expect(fixture.manager.snapshot.loginEmail, 'b@example.com');
     expect(fixture.pendingStore.value?.email, 'b@example.com');
     expect(
       fixture.manager.snapshot.status,
-      IdentitySessionStatus.waitingForLoginLink,
+      IdentitySessionStatus.waitingForEmailCode,
     );
   });
 
   test('resend preempts an approval exchange already in flight', () async {
     final fixture = _Fixture();
     addTearDown(fixture.dispose);
-    await fixture.manager.requestLoginLink('a@example.com');
-    fixture.transport
-      ..status = LoginLinkRequestStatus.approved
-      ..exchangeGate = Completer<SessionGrant>();
+    await fixture.manager.requestEmailCode('a@example.com');
+    fixture.transport.exchangeGate = Completer<SessionGrant>();
 
-    final poll = fixture.manager.pollLoginLinkNow();
+    final poll = fixture.manager.verifyEmailCode('12345678');
     await _until(() => fixture.transport.exchangeCalls == 1);
-    final resend = fixture.manager.requestLoginLink('b@example.com');
+    final resend = fixture.manager.requestEmailCode('b@example.com');
     fixture.transport.exchangeGate!.complete(_grant(fixture.clock.value));
     await Future.wait<void>(<Future<void>>[poll, resend.then<void>((_) {})]);
 
@@ -489,7 +467,7 @@ void main() {
     expect(fixture.pendingStore.value?.email, 'b@example.com');
     expect(
       fixture.manager.snapshot.status,
-      IdentitySessionStatus.waitingForLoginLink,
+      IdentitySessionStatus.waitingForEmailCode,
     );
   });
 
@@ -497,12 +475,12 @@ void main() {
     final fixture = _Fixture();
     addTearDown(fixture.dispose);
     fixture.pendingStore
-      ..blockWriteAt = 2
+      ..blockWriteAt = 1
       ..writeGate = Completer<void>();
 
-    final startA = fixture.manager.requestLoginLink('a@example.com');
-    await _until(() => fixture.pendingStore.writes == 2);
-    final startB = fixture.manager.requestLoginLink('b@example.com');
+    final startA = fixture.manager.requestEmailCode('a@example.com');
+    await _until(() => fixture.pendingStore.writes == 1);
+    final startB = fixture.manager.requestEmailCode('b@example.com');
     fixture.pendingStore.writeGate!.complete();
     await Future.wait<void>(<Future<void>>[
       startA.then<void>((_) {}),
@@ -521,17 +499,16 @@ void main() {
       fixture.credentials
         ..blockWriteAt = 1
         ..writeGate = Completer<void>();
-      await fixture.manager.requestLoginLink('person@example.com');
-      fixture.transport.status = LoginLinkRequestStatus.approved;
+      await fixture.manager.requestEmailCode('person@example.com');
 
-      final poll = fixture.manager.pollLoginLinkNow();
+      final poll = fixture.manager.verifyEmailCode('12345678');
       await _until(() => fixture.credentials.writes == 1);
       final logout = fixture.manager.logout();
       // Durable logout does not claim completion until its tombstone is queued
       // behind the in-flight credential write.
       expect(
         fixture.manager.snapshot.status,
-        IdentitySessionStatus.exchangingLoginLink,
+        IdentitySessionStatus.verifyingEmailCode,
       );
       fixture.credentials.writeGate!.complete();
       await Future.wait<void>(<Future<void>>[poll, logout]);
@@ -549,10 +526,9 @@ void main() {
     fixture.credentials
       ..blockWriteAt = 1
       ..writeGate = Completer<void>();
-    await fixture.manager.requestLoginLink('person@example.com');
-    fixture.transport.status = LoginLinkRequestStatus.approved;
+    await fixture.manager.requestEmailCode('person@example.com');
 
-    final poll = fixture.manager.pollLoginLinkNow();
+    final poll = fixture.manager.verifyEmailCode('12345678');
     await _until(() => fixture.credentials.writes == 1);
     await poll;
     expect(fixture.manager.snapshot.isAuthenticated, isFalse);
@@ -574,36 +550,34 @@ void main() {
       );
 
       await expectLater(
-        fixture.manager.requestLoginLink('person@example.com'),
+        fixture.manager.requestEmailCode('person@example.com'),
         throwsA(isA<IdentityTransportException>()),
       );
 
       expect(fixture.transport.statusCalls, 0);
       expect(fixture.pendingStore.value, isNull);
-      expect(fixture.manager.snapshot.pendingLoginLink, isNull);
+      expect(fixture.manager.snapshot.pendingEmailCode, isNull);
     },
   );
 
   test('exchange rate limit retains approved proof for retry', () async {
     final fixture = _Fixture();
     addTearDown(fixture.dispose);
-    await fixture.manager.requestLoginLink('person@example.com');
-    fixture.transport
-      ..status = LoginLinkRequestStatus.approved
-      ..exchangeError = const IdentityTransportException(
-        kind: IdentityFailureKind.rateLimited,
-        safeMessage: 'Wait before trying again.',
-      );
+    await fixture.manager.requestEmailCode('person@example.com');
+    fixture.transport.exchangeError = const IdentityTransportException(
+      kind: IdentityFailureKind.rateLimited,
+      safeMessage: 'Wait before trying again.',
+    );
 
-    await fixture.manager.pollLoginLinkNow();
+    await fixture.manager.verifyEmailCode('12345678');
     expect(fixture.pendingStore.value, isNotNull);
     expect(
       fixture.manager.snapshot.status,
-      IdentitySessionStatus.waitingForLoginLink,
+      IdentitySessionStatus.waitingForEmailCode,
     );
 
     fixture.transport.exchangeError = null;
-    await fixture.manager.pollLoginLinkNow();
+    await fixture.manager.verifyEmailCode('12345678');
     expect(
       fixture.manager.snapshot.status,
       IdentitySessionStatus.authenticated,
@@ -615,16 +589,14 @@ void main() {
       sessionTransport: ClientSessionTransport.webCookie,
     );
     addTearDown(fixture.dispose);
-    await fixture.manager.requestLoginLink('person@example.com');
+    await fixture.manager.requestEmailCode('person@example.com');
     final logoutBeforeExchange = fixture.transport.logoutCalls;
-    fixture.transport
-      ..status = LoginLinkRequestStatus.approved
-      ..exchangeError = const IdentityTransportException(
-        kind: IdentityFailureKind.network,
-        safeMessage: 'Connection lost.',
-      );
+    fixture.transport.exchangeError = const IdentityTransportException(
+      kind: IdentityFailureKind.network,
+      safeMessage: 'Connection lost.',
+    );
 
-    await fixture.manager.pollLoginLinkNow();
+    await fixture.manager.verifyEmailCode('12345678');
 
     expect(fixture.transport.logoutCalls, logoutBeforeExchange + 1);
     expect(fixture.pendingStore.value, isNull);
@@ -640,7 +612,7 @@ void main() {
         ..blockWriteAt = 1
         ..writeGate = Completer<void>();
 
-      final request = fixture.manager.requestLoginLink('person@example.com');
+      final request = fixture.manager.requestEmailCode('person@example.com');
       await expectLater(
         request,
         throwsA(isA<IdentityCredentialStoreException>()),
@@ -648,41 +620,20 @@ void main() {
       fixture.pendingStore.writeGate!.complete();
       await _until(() => fixture.pendingStore.value == null);
 
-      expect(fixture.manager.snapshot.pendingLoginLink, isNull);
-      expect(fixture.transport.started, isEmpty);
+      expect(fixture.manager.snapshot.pendingEmailCode, isNull);
+      expect(fixture.transport.started, hasLength(1));
     },
   );
 
-  test('restored pending B wins over retained account A credential', () async {
-    final first = _Fixture(
-      stored: StoredNativeSession(
-        sessionId: _sessionId,
-        deviceId: _deviceId,
-        refreshToken: 'account-a-refresh',
-      ),
-    );
-    first.transport.refreshError = const IdentityTransportException(
-      kind: IdentityFailureKind.network,
-      safeMessage: 'Offline.',
-    );
-    await first.manager.restore();
-    first.credentials.clearFails = true;
-    await first.manager.requestLoginLink('account-b@example.com');
-    final savedPending = first.pendingStore.value;
-    final savedCredential = first.credentials.value;
-    await first.dispose();
-
-    final second = _Fixture(stored: savedCredential);
-    addTearDown(second.dispose);
-    second.pendingStore.value = savedPending;
-    await second.manager.restore();
-
-    expect(second.transport.refreshTokens, isEmpty);
-    expect(second.manager.snapshot.loginEmail, 'account-b@example.com');
-    expect(
-      second.manager.snapshot.status,
-      IdentitySessionStatus.waitingForLoginLink,
-    );
+  test('a new account cannot start while old credentials cannot be retired', () async {
+    final fixture = _Fixture(stored: StoredNativeSession(sessionId: _sessionId, deviceId: _deviceId, refreshToken: 'account-a-refresh'));
+    addTearDown(fixture.dispose);
+    fixture.credentials.clearFails = true;
+    await expectLater(fixture.manager.requestEmailCode('account-b@example.com'), throwsA(isA<IdentityCredentialStoreException>()));
+    expect(fixture.transport.started, isEmpty);
+    expect(fixture.pendingStore.value, isNull);
+    expect(fixture.pendingStore.logoutIntent, isTrue);
+    expect(fixture.manager.snapshot.isAuthenticated, isFalse);
   });
 
   test('delayed cross-tab grants cannot roll CSRF metadata backward', () async {
@@ -748,15 +699,18 @@ void main() {
   test('two tabs sharing an approved proof exchange it only once', () async {
     final hub = _CoordinationHub();
     final sharedPending = _MemoryPendingStore()
-      ..value = PendingLoginLinkRequest(
+      ..value = PendingEmailCode(
         requestId: _requestId,
         email: 'person@example.com',
-        pollToken: _pollToken,
-        codeVerifier: _verifier,
-        state: _state,
         createdAt: DateTime.utc(2026, 8, 9, 12),
         expiresAt: DateTime.utc(2026, 8, 9, 12, 15),
-        pollInterval: const Duration(seconds: 30),
+        bindingToken: _pollToken,
+        resendAt: (DateTime.utc(
+          2026,
+          8,
+          9,
+          12,
+        )).add(const Duration(seconds: 60)),
       );
     final first = _Fixture(
       sessionTransport: ClientSessionTransport.webCookie,
@@ -770,16 +724,15 @@ void main() {
     );
     addTearDown(first.dispose);
     addTearDown(second.dispose);
-    first.transport.status = LoginLinkRequestStatus.approved;
-    second.transport.status = LoginLinkRequestStatus.approved;
+
     await Future.wait<void>(<Future<void>>[
       first.manager.restore(),
       second.manager.restore(),
     ]);
 
     await Future.wait<void>(<Future<void>>[
-      first.manager.pollLoginLinkNow(),
-      second.manager.pollLoginLinkNow(),
+      first.manager.verifyEmailCode('12345678'),
+      second.manager.verifyEmailCode('12345678'),
     ]);
     await _until(
       () =>
@@ -947,11 +900,10 @@ void main() {
       sessionCoordination: hub.connect(),
     );
     addTearDown(fixture.dispose);
-    await fixture.manager.requestLoginLink('person@example.com');
+    await fixture.manager.requestEmailCode('person@example.com');
     hub.failGrantPublication = true;
-    fixture.transport.status = LoginLinkRequestStatus.approved;
 
-    await fixture.manager.pollLoginLinkNow();
+    await fixture.manager.verifyEmailCode('12345678');
 
     expect(fixture.manager.snapshot.isAuthenticated, isFalse);
     expect(fixture.manager.csrfToken, isNull);
@@ -968,9 +920,9 @@ void main() {
         sessionCoordination: hub.connect(),
       );
       addTearDown(fixture.dispose);
-      await fixture.manager.requestLoginLink('person@example.com');
-      fixture.transport.status = LoginLinkRequestStatus.approved;
-      await fixture.manager.pollLoginLinkNow();
+      await fixture.manager.requestEmailCode('person@example.com');
+
+      await fixture.manager.verifyEmailCode('12345678');
       final logoutCallsBeforeRefresh = fixture.transport.logoutCalls;
       hub.failGrantPublication = true;
       fixture.transport.refreshGrant = _grant(
@@ -1014,9 +966,9 @@ void main() {
           CurrentUserHomeView(id: _homeId, name: 'Family home', role: 'owner'),
         ],
       );
-      await fixture.manager.requestLoginLink('person@example.com');
-      fixture.transport.status = LoginLinkRequestStatus.approved;
-      await fixture.manager.pollLoginLinkNow();
+      await fixture.manager.requestEmailCode('person@example.com');
+
+      await fixture.manager.verifyEmailCode('12345678');
       hub.failGrantPublication = true;
 
       await expectLater(
@@ -1045,9 +997,9 @@ void main() {
       sharedPendingStore: pendingStore,
     );
     addTearDown(first.dispose);
-    await first.manager.requestLoginLink('person@example.com');
-    first.transport.status = LoginLinkRequestStatus.approved;
-    await first.manager.pollLoginLinkNow();
+    await first.manager.requestEmailCode('person@example.com');
+
+    await first.manager.verifyEmailCode('12345678');
     first.transport.logoutError = const IdentityTransportException(
       kind: IdentityFailureKind.network,
       safeMessage: 'Offline.',
@@ -1084,7 +1036,7 @@ void main() {
       port.publishAuthenticationIntent(_requestId);
       final pendingStore = _MemoryPendingStore()
         ..cookieMutation = const BrowserCookieMutationJournal(
-          kind: BrowserCookieMutationKind.loginLinkExchange,
+          kind: BrowserCookieMutationKind.emailCodeVerification,
           operationId: _requestId,
         );
       final restored = _Fixture(
@@ -1161,12 +1113,11 @@ void main() {
         transport: ClientSessionTransport.webCookie,
         csrfToken: 'exchange-csrf',
       );
-      await fixture.manager.requestLoginLink('person@example.com');
-      fixture.transport.status = LoginLinkRequestStatus.approved;
+      await fixture.manager.requestEmailCode('person@example.com');
 
-      await fixture.manager.pollLoginLinkNow();
+      await fixture.manager.verifyEmailCode('12345678');
 
-      expect(observedKind, BrowserCookieMutationKind.loginLinkExchange);
+      expect(observedKind, BrowserCookieMutationKind.emailCodeVerification);
       expect(fixture.pendingStore.cookieMutation, isNull);
       fixture.transport.onRefresh = () {
         observedKind = fixture.pendingStore.cookieMutation?.kind;
@@ -1212,25 +1163,29 @@ void main() {
       );
       addTearDown(first.dispose);
       addTearDown(second.dispose);
-      await first.manager.requestLoginLink('a@example.com');
+      await first.manager.requestEmailCode('a@example.com');
       sharedStore
         ..cookieClearGate = Completer<void>()
         ..cookieClearRead = Completer<void>();
-      first.transport.status = LoginLinkRequestStatus.approved;
-      var firstCompleted = false;
-      final firstPoll = first.manager.pollLoginLinkNow().whenComplete(
-        () => firstCompleted = true,
-      );
-      await sharedStore.cookieClearRead!.future;
 
-      final secondStart = second.manager.requestLoginLink('b@example.com');
+      var firstCompleted = false;
+      final firstPoll = first.manager
+          .verifyEmailCode('12345678')
+          .whenComplete(() => firstCompleted = true);
+      final cookieClearGate = sharedStore.cookieClearGate!;
+      addTearDown(() {
+        if (!cookieClearGate.isCompleted) cookieClearGate.complete();
+      });
+      await sharedStore.cookieClearRead!.future.timeout(const Duration(seconds: 2), onTimeout: () { fail('journal not reached: state=' + first.manager.snapshot.status.name + ', reason=' + (first.manager.snapshot.safeMessage ?? '') + ', exchanges=' + first.transport.exchangeCalls.toString()); });
+
+      final secondStart = second.manager.requestEmailCode('b@example.com');
       await Future<void>.delayed(const Duration(milliseconds: 50));
 
       expect(firstCompleted, isFalse);
       expect(second.transport.started, isEmpty);
       expect(
         sharedStore.cookieMutation?.kind,
-        BrowserCookieMutationKind.loginLinkExchange,
+        BrowserCookieMutationKind.emailCodeVerification,
       );
 
       sharedStore.cookieClearGate!.complete();
@@ -1405,8 +1360,8 @@ final class _Fixture {
     manager = IdentitySessionManager(
       transport: transport,
       credentialStore: credentials,
-      pendingLoginLinkStore: pendingStore,
-      loginLinkRequestFactory: _DeterministicRequestFactory(requestId),
+      pendingEmailCodeStore: pendingStore,
+
       sessionCoordination: sessionCoordination,
       device: DeviceDescriptor(
         id: installationId,
@@ -1414,11 +1369,11 @@ final class _Fixture {
         platform: 'linux',
       ),
       clock: () => this.clock.value,
-      defaultPollInterval: const Duration(seconds: 30),
-      maximumPollInterval: const Duration(seconds: 30),
+
       requestTimeout: requestTimeout,
     );
     transport.clock = this.clock;
+    transport.requestId = requestId;
   }
 
   final _MutableClock clock;
@@ -1435,37 +1390,10 @@ final class _MutableClock {
   DateTime value;
 }
 
-final class _DeterministicRequestFactory implements LoginLinkRequestFactory {
-  const _DeterministicRequestFactory(this.requestId);
-
-  final String requestId;
-
-  @override
-  String challenge(String secret) =>
-      secret == _pollToken ? _pollChallenge : _codeChallenge;
-
-  @override
-  PendingLoginLinkRequest create({
-    required String email,
-    required DateTime createdAt,
-    required DateTime expiresAt,
-    required Duration pollInterval,
-  }) => PendingLoginLinkRequest(
-    requestId: requestId,
-    email: email,
-    pollToken: _pollToken,
-    codeVerifier: _verifier,
-    state: _state,
-    createdAt: createdAt,
-    expiresAt: expiresAt,
-    pollInterval: pollInterval,
-  );
-}
-
-final class _MemoryPendingStore implements PendingLoginLinkStore {
+final class _MemoryPendingStore implements PendingEmailCodeStore {
   _MemoryPendingStore({this.writeFailsAfter});
   final int? writeFailsAfter;
-  PendingLoginLinkRequest? value;
+  PendingEmailCode? value;
   int writes = 0;
   int? blockWriteAt;
   Completer<void>? writeGate;
@@ -1478,14 +1406,14 @@ final class _MemoryPendingStore implements PendingLoginLinkStore {
   void Function()? onClearCookieMutation;
 
   @override
-  Future<void> clear({PendingLoginLinkRequest? request}) async {
+  Future<void> clear({PendingEmailCode? request}) async {
     if (request != null && value?.requestId != request.requestId) return;
     if (clearFails) throw StateError('secure store clear unavailable');
     value = null;
   }
 
   @override
-  Future<void> invalidate(PendingLoginLinkRequest request) async {
+  Future<void> invalidate(PendingEmailCode request) async {
     if (invalidateFails) throw StateError('secure store write unavailable');
     value = null;
   }
@@ -1531,13 +1459,10 @@ final class _MemoryPendingStore implements PendingLoginLinkStore {
   }
 
   @override
-  Future<PendingLoginLinkRequest?> read() async => value;
+  Future<PendingEmailCode?> read() async => value;
 
   @override
-  Future<void> write(
-    PendingLoginLinkRequest request, {
-    required bool activate,
-  }) async {
+  Future<void> write(PendingEmailCode request, {required bool activate}) async {
     writes++;
     if (writes == blockWriteAt) {
       await writeGate!.future;
@@ -1583,12 +1508,10 @@ final class _MemoryCredentialStore implements SessionCredentialStore {
 
 final class _FakeIdentityTransport implements IdentityTransportPort {
   _FakeIdentityTransport(this.sessionTransport);
-
   @override
   final ClientSessionTransport sessionTransport;
-
   late _MutableClock clock;
-  LoginLinkRequestStatus status = LoginLinkRequestStatus.pending;
+  String requestId = _requestId;
   DateTime expiresAt = DateTime.utc(2026, 8, 9, 12, 15);
   IdentityTransportException? exchangeError;
   IdentityTransportException? currentUserError;
@@ -1601,8 +1524,7 @@ final class _FakeIdentityTransport implements IdentityTransportPort {
   SessionGrant? refreshGrant;
   CurrentUserView? currentUser;
   List<DeviceSessionView>? deviceSessions;
-  Completer<LoginLinkStartReceipt>? startGate;
-  Completer<LoginLinkStatusView>? statusGate;
+  Completer<PendingEmailCode>? startGate;
   Completer<SessionGrant>? exchangeGate;
   Completer<void>? cancelGate;
   Completer<SessionGrant>? refreshGate;
@@ -1614,46 +1536,33 @@ final class _FakeIdentityTransport implements IdentityTransportPort {
   int logoutCalls = 0;
   int cancelCalls = 0;
   final List<String?> logoutRefreshTokens = <String?>[];
-  PendingLoginLinkRequest? lastExchange;
-  final List<LoginLinkStartCommand> started = <LoginLinkStartCommand>[];
+  PendingEmailCode? lastExchange;
+  final List<({String email, DeviceDescriptor device})> started = [];
   final List<String?> refreshTokens = <String?>[];
 
   @override
-  Future<LoginLinkStartReceipt> startLoginLink(
-    LoginLinkStartCommand command,
-  ) async {
-    started.add(command);
+  Future<PendingEmailCode> requestEmailCode({
+    required String email,
+    required DeviceDescriptor device,
+  }) async {
+    started.add((email: email, device: device));
     if (startGate case final gate?) return gate.future;
     if (startError case final error?) throw error;
-    expiresAt = clock.value.add(const Duration(minutes: 15));
-    return LoginLinkStartReceipt(
-      requestId: command.requestId,
-      expiresAt: expiresAt,
-      pollInterval: const Duration(seconds: 30),
-    );
-  }
-
-  @override
-  Future<LoginLinkStatusView> getLoginLinkStatus({
-    required String requestId,
-    required String pollToken,
-  }) async {
-    statusCalls++;
-    if (statusGate case final gate?) return gate.future;
-    if (statusError case final error?) throw error;
-    return LoginLinkStatusView(
+    expiresAt = clock.value.add(const Duration(minutes: 10));
+    return PendingEmailCode(
       requestId: requestId,
-      status: status,
+      email: email,
+      bindingToken: _pollToken,
+      createdAt: clock.value,
       expiresAt: expiresAt,
-      approvedAt: status == LoginLinkRequestStatus.approved
-          ? clock.value
-          : null,
+      resendAt: clock.value.add(const Duration(seconds: 60)),
     );
   }
 
   @override
-  Future<SessionGrant> exchangeLoginLink({
-    required PendingLoginLinkRequest request,
+  Future<SessionGrant> verifyEmailCode({
+    required PendingEmailCode request,
+    required String code,
   }) async {
     exchangeCalls++;
     lastExchange = request;
@@ -1661,16 +1570,6 @@ final class _FakeIdentityTransport implements IdentityTransportPort {
     if (exchangeGate case final gate?) return gate.future;
     if (exchangeError != null) throw exchangeError!;
     return exchangeGrant ?? _grant(clock.value, transport: sessionTransport);
-  }
-
-  @override
-  Future<void> cancelLoginLink({
-    required String requestId,
-    required String pollToken,
-  }) async {
-    cancelCalls++;
-    if (cancelGate case final gate?) await gate.future;
-    if (cancelError case final error?) throw error;
   }
 
   @override

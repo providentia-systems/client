@@ -5,7 +5,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:providentia/core/security/device_identity_store.dart';
 import 'package:providentia/core/security/origin_lock.dart';
-import 'package:providentia/core/security/platform_pending_login_link_store.dart';
+import 'package:providentia/core/security/platform_pending_email_code_store.dart';
 import 'package:providentia/core/security/platform_session_credential_store_native.dart';
 import 'package:providentia/features/identity/application/identity_ports.dart';
 import 'package:providentia/features/identity/domain/identity_models.dart';
@@ -13,13 +13,13 @@ import 'package:providentia/features/identity/domain/identity_models.dart';
 void main() {
   test('atomic envelope ignores stale updates and remains bounded', () async {
     final storage = _MemorySecureStorage();
-    final store = PlatformPendingLoginLinkStore(storage: storage);
+    final store = PlatformPendingEmailCodeStore(storage: storage);
     final first = _pending(_requestA, 'a@example.com');
     final second = _pending(_requestB, 'b@example.com');
 
     await store.write(first, activate: true);
     await store.write(second, activate: true);
-    await store.write(first.withServerExpiry(first.expiresAt), activate: false);
+    await store.write(first, activate: false);
     await store.clear(request: first);
 
     expect((await store.read())?.requestId, _requestB);
@@ -27,16 +27,16 @@ void main() {
     expect(await store.read(), isNull);
     expect(
       storage.values.keys.where(
-        (key) => key.startsWith('providentia.pending-login-link.'),
+        (key) => key.startsWith('providentia.pending-email-code.'),
       ),
-      <String>['providentia.pending-login-link.v3'],
+      <String>['providentia.pending-email-code.v1'],
     );
   });
 
   test('corrupt intent becomes a durable retirement tombstone', () async {
     final storage = _MemorySecureStorage()
-      ..values['providentia.pending-login-link.v3'] = '{bad json';
-    final store = PlatformPendingLoginLinkStore(storage: storage);
+      ..values['providentia.pending-email-code.v1'] = '{bad json';
+    final store = PlatformPendingEmailCodeStore(storage: storage);
 
     await expectLater(
       store.read(),
@@ -47,28 +47,26 @@ void main() {
     expect(await store.read(), isNull);
   });
 
-  test('incomplete legacy head cannot fall back to an older account', () async {
-    final storage = _MemorySecureStorage()
-      ..values['providentia.pending-login-link.v2.head'] = _requestB
-      ..values['providentia.pending-login-link.v2.$_requestA'] = jsonEncode(
-        _pendingJson(_pending(_requestA, 'a@example.com')),
+  test(
+    'an incomplete current envelope cannot restore an older account',
+    () async {
+      final storage = _MemorySecureStorage()
+        ..values['providentia.pending-email-code.v1'] = jsonEncode(
+          <String, Object?>{
+            'status': 'active',
+            'requestId': _requestB,
+            'email': 'b@example.com',
+          },
+        );
+      final store = PlatformPendingEmailCodeStore(storage: storage);
+      await expectLater(
+        store.read(),
+        throwsA(isA<IdentityCredentialStoreException>()),
       );
-    final store = PlatformPendingLoginLinkStore(storage: storage);
-
-    await expectLater(
-      store.read(),
-      throwsA(isA<IdentityCredentialStoreException>()),
-    );
-
-    expect(await store.hasLogoutIntent(), isTrue);
-    expect(await store.read(), isNull);
-    expect(
-      storage.values.keys.any(
-        (key) => key.startsWith('providentia.pending-login-link.v2.'),
-      ),
-      isFalse,
-    );
-  });
+      expect(await store.hasLogoutIntent(), isTrue);
+      expect(await store.read(), isNull);
+    },
+  );
 
   test('cold-origin device creation is serialized and canonical', () async {
     final storage = _MemorySecureStorage();
@@ -133,9 +131,9 @@ void main() {
     'browser cookie mutation journal is durable and compare-and-cleared',
     () async {
       final storage = _MemorySecureStorage();
-      final store = PlatformPendingLoginLinkStore(storage: storage);
+      final store = PlatformPendingEmailCodeStore(storage: storage);
       const exchange = BrowserCookieMutationJournal(
-        kind: BrowserCookieMutationKind.loginLinkExchange,
+        kind: BrowserCookieMutationKind.emailCodeVerification,
         operationId: _requestA,
       );
       const refresh = BrowserCookieMutationJournal(
@@ -162,30 +160,24 @@ const _requestA = '0198a0b1-c2d3-7e4f-8123-456789abcde1';
 const _requestB = '0198a0b1-c2d3-7e4f-8123-456789abcde2';
 const _installationId = '0198a0b1-c2d3-7e4f-8123-456789abcde3';
 
-PendingLoginLinkRequest _pending(String id, String email) =>
-    PendingLoginLinkRequest(
-      requestId: id,
-      email: email,
-      pollToken: 'poll-token-000000000000000000000000000000000',
-      codeVerifier:
-          'code-verifier-000000000000000000000000000000000000000000000000',
-      state: 'login-state-000000000000000000000000000000000',
-      createdAt: DateTime.utc(2026, 8, 9, 12),
-      expiresAt: DateTime.utc(2026, 8, 9, 12, 15),
-      pollInterval: const Duration(seconds: 3),
-    );
+PendingEmailCode _pending(String id, String email) => PendingEmailCode(
+  requestId: id,
+  email: email,
+  createdAt: DateTime.utc(2026, 8, 9, 12),
+  expiresAt: DateTime.utc(2026, 8, 9, 12, 15),
+  bindingToken: 'poll-token-000000000000000000000000000000000',
+  resendAt: (DateTime.utc(2026, 8, 9, 12)).add(const Duration(seconds: 60)),
+);
 
-Map<String, Object?> _pendingJson(PendingLoginLinkRequest request) =>
+Map<String, Object?> _pendingJson(PendingEmailCode request) =>
     <String, Object?>{
       'status': 'active',
       'requestId': request.requestId,
       'email': request.email,
-      'pollToken': request.pollToken,
-      'codeVerifier': request.codeVerifier,
-      'state': request.state,
+      'bindingToken': request.bindingToken,
       'createdAt': request.createdAt.toIso8601String(),
       'expiresAt': request.expiresAt.toIso8601String(),
-      'pollIntervalSeconds': request.pollInterval.inSeconds,
+      'resendAt': request.resendAt.toIso8601String(),
     };
 
 final class _SerialOriginLock implements OriginLock {

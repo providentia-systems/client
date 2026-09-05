@@ -131,32 +131,29 @@ function validateContract(document) {
   }
   if (
     document.info?.title !== 'Providentia API' ||
-    document.info?.version !== '1.19.0'
+    document.info?.version !== '2.0.0'
   ) {
     throw new Error('Unexpected API identity or version.');
   }
 
   const expectedOperations = [
+    ['post', '/api/v1/auth/email-codes', 'requestEmailCode'],
+    ['post', '/api/v1/auth/email-codes/verify', 'verifyEmailCode'],
+    ['get', '/api/v1/me/profile', 'getAccountProfile'],
+    ['post', '/api/v1/me/onboarding', 'completeAccountOnboarding'],
+    ['post', '/api/v1/me/home-invitations/{invitationId}/decline', 'declineHomeInvitation'],
+    ['get', '/api/v1/homes/{homeId}/memberships/{userId}/permissions', 'getMemberPermissionOverrides'],
     ['get', '/health/live', 'getLiveness'],
     ['get', '/health/ready', 'getReadiness'],
     ['get', '/api/v1/system/info', 'getSystemInfo'],
     ['get', '/metrics', 'getMetrics'],
     ['get', '/api/v1/homes/{homeId}/sync/pull', 'pullHomeSynchronization'],
     ['get', '/api/v1/homes/{homeId}/sync/bootstrap', 'bootstrapHomeSynchronization'],
-    ['post', '/api/v1/auth/login-links', 'startLoginLink'],
-    ['post', '/api/v1/auth/login-links/{requestId}/proof', 'proveLoginLinkApproval'],
-    ['post', '/api/v1/auth/login-links/{requestId}/review', 'reviewLoginLinkApproval'],
-    ['post', '/api/v1/auth/login-links/{requestId}/decision', 'decideLoginLinkApproval'],
-    ['post', '/api/v1/auth/login-links/{requestId}/status', 'getLoginLinkStatus'],
-    ['post', '/api/v1/auth/login-links/{requestId}/exchange', 'exchangeLoginLink'],
-    ['post', '/api/v1/auth/login-links/{requestId}/cancel', 'cancelLoginLink'],
     ['post', '/api/v1/auth/refresh', 'refreshSession'],
     ['post', '/api/v1/auth/logout', 'logout'],
-    ['post', '/api/v1/auth/step-up-links', 'requestStepUpLink'],
     ['delete', '/api/v1/homes/{homeId}/memberships/{userId}', 'removeHomeMembership'],
     ['get', '/api/v1/me', 'getCurrentUser'],
     ['get', '/api/v1/me/home-invitations', 'listPendingHomeInvitations'],
-    ['get', '/api/v1/platform/administrators', 'listPlatformAdministrators'],
     ['get', '/api/v1/homes', 'listHomes'],
     ['get', '/api/v1/homes/{homeId}/stock', 'listHomeStock'],
     ['post', '/api/v1/homes/{homeId}/stock-count-sessions/{sessionId}/cancel', 'cancelStockCountSession'],
@@ -194,14 +191,15 @@ function validateContract(document) {
       operationIds.add(operation.operationId);
     }
   }
-  if (operationIds.size !== 172) {
-    throw new Error(`Expected the API 1.19 surface, found ${operationIds.size} operations.`);
+  if (operationIds.size !== 208) {
+    throw new Error(`Expected the API 2.0 surface, found ${operationIds.size} operations.`);
   }
 
-  // API 1.19 removed every human-account password and email-verification
-  // surface. Login links are the only human authentication; regenerating
-  // against a contract that reintroduces one is a deliberate decision.
+  // Human authentication uses bound email codes. Password and approval-link
+  // endpoints must not reappear in the pre-release API.
   for (const removedPath of [
+    '/api/v1/auth/login-links',
+    '/api/v1/auth/step-up-links',
     '/api/v1/auth/register',
     '/api/v1/auth/login',
     '/api/v1/auth/verify-email',
@@ -252,22 +250,11 @@ function validateContract(document) {
     'SyncBootstrapResponse',
     'SessionCredentials',
     'LogoutRequest',
-    'LoginLinkStartRequest',
-    'LoginLinkStarted',
-    'LoginLinkStatus',
     'LoginApplicationKind',
-    'LoginLinkApprovalProof',
-    'LoginLinkApprovalValidity',
-    'LoginLinkApprovalReview',
-    'LoginLinkDecisionRequest',
-    'LoginLinkDecisionReceived',
-    'StepUpRequest',
-    'LoginLinkExchangeRequest',
     'CurrentUserBootstrap',
     'PlatformRole',
     'DeviceSession',
     'RecipientHomeInvitation',
-    'PlatformAdministrator',
     'Home',
     'UpdateHomeRequest',
     'HomeMembership',
@@ -282,6 +269,13 @@ function validateContract(document) {
     'CatalogWorkbench',
     'ShoppingSuggestion',
     'HomeReport',
+    'EmailCodeRequest',
+    'EmailCodeChallenge',
+    'EmailCodeVerification',
+    'AccountProfile',
+    'EffectiveAccess',
+    'AccessGroup',
+    'MemberPermissionOverrides',
   ]) {
     if (!document.components?.schemas?.[schema]) {
       throw new Error(`Missing component schema ${schema}.`);
@@ -362,48 +356,12 @@ function validateContract(document) {
     'activeHomeId',
     'userId',
   ]);
-  assertRequiredFields(document, 'LoginLinkStartRequest', [
-    'requestId',
-    'email',
-    'applicationKind',
-    'pollChallenge',
-    'codeChallenge',
-    'codeChallengeMethod',
-    'state',
-    'installationId',
-    'deviceName',
-    'platform',
-    'transport',
-  ]);
-  assertRequiredFields(document, 'LoginLinkStarted', [
-    'accepted',
-    'requestId',
-    'expiresAt',
-    'pollIntervalSeconds',
-  ]);
-  assertRequiredFields(document, 'LoginLinkStatus', [
-    'requestId',
-    'applicationKind',
-    'status',
-    'expiresAt',
-  ]);
-  assertRequiredFields(document, 'LoginLinkApprovalProof', [
-    'applicationKind',
-    'approvalToken',
-  ]);
-  assertRequiredFields(document, 'LoginLinkApprovalReview', [
-    'requestId',
-    'applicationKind',
-    'deviceName',
-    'platform',
-    'createdAt',
-    'expiresAt',
-  ]);
-  assertRequiredFields(document, 'LoginLinkDecisionRequest', [
-    'applicationKind',
-    'approvalToken',
-    'decision',
-  ]);
+  assertRequiredFields(document, 'EmailCodeRequest', ['email', 'applicationKind', 'installationId', 'deviceName', 'platform', 'transport']);
+  assertRequiredFields(document, 'EmailCodeChallenge', ['challengeId', 'bindingToken', 'expiresAt', 'resendAfterSeconds']);
+  assertRequiredFields(document, 'EmailCodeVerification', ['challengeId', 'bindingToken', 'code']);
+  if (document.components.schemas.EmailCodeVerification.properties.code.pattern !== '^[0-9]{8}$' || document.components.schemas.EmailCodeVerification.properties.code.writeOnly !== true) {
+    throw new Error('Email verification requires a write-only eight-digit code.');
+  }
   const applicationKinds = document.components.schemas.LoginApplicationKind.enum;
   if (JSON.stringify(applicationKinds) !== JSON.stringify(['homeowner', 'admin'])) {
     throw new Error('LoginApplicationKind must distinguish both client applications.');
@@ -419,11 +377,6 @@ function validateContract(document) {
   ) {
     throw new Error('AI extraction schema v2 and its bounded quantity payload are required.');
   }
-  assertRequiredFields(document, 'LoginLinkExchangeRequest', [
-    'pollToken',
-    'codeVerifier',
-    'state',
-  ]);
   assertRequiredFields(document, 'CurrentUserBootstrap', [
     'userId',
     'email',
@@ -433,6 +386,7 @@ function validateContract(document) {
     'pendingInvitations',
     'platformRoles',
     'currentSession',
+    'profile',
   ]);
   assertRequiredFields(document, 'DeviceSession', [
     'id',
@@ -461,14 +415,6 @@ function validateContract(document) {
         `${schemaName}.${nullableField} must be nullable for durable sessions.`,
       );
     }
-  }
-  const requestedIdle =
-    document.components.schemas.LoginLinkStartRequest.properties
-      ?.requestedSessionIdleSeconds;
-  if (requestedIdle?.minimum !== 900 || requestedIdle?.maximum !== 5184000) {
-    throw new Error(
-      'requestedSessionIdleSeconds must stay optional within 900..5184000.',
-    );
   }
   const receiptApprovalStatuses =
     document.components.schemas.ReceiptLine.properties?.approvalStatus?.enum ?? [];
@@ -500,18 +446,6 @@ function validateContract(document) {
   const platformRoles = document.components.schemas.PlatformRole.enum;
   if (JSON.stringify(platformRoles) !== JSON.stringify(expectedPlatformRoles)) {
     throw new Error('PlatformRole values changed; update identity authorization deliberately.');
-  }
-  const expectedLoginStatuses = [
-    'pending',
-    'approved',
-    'denied',
-    'exchanged',
-    'expired',
-    'cancelled',
-  ];
-  const loginStatuses = document.components.schemas.LoginLinkStatus.properties?.status?.enum;
-  if (JSON.stringify(loginStatuses) !== JSON.stringify(expectedLoginStatuses)) {
-    throw new Error('LoginLinkStatus values changed; update the lifecycle deliberately.');
   }
   const logout = document.paths['/api/v1/auth/logout'].post;
   const logoutSchema = logout.requestBody?.content?.['application/json']?.schema?.$ref;
@@ -1166,6 +1100,7 @@ ${operations.methods}
 
 Object? _decodeResponseBody(http.Response response) {
   final contentType = response.headers['content-type']?.toLowerCase() ?? '';
+  if (contentType.startsWith('image/')) return response.bodyBytes;
   final source = utf8.decode(response.bodyBytes);
   if (contentType.contains('json') ||
       source.startsWith('{') ||
@@ -1485,6 +1420,9 @@ function isHomeownerOperation(method, resourcePath) {
   if (
     resourcePath === '/api/v1/me' ||
     resourcePath.startsWith('/api/v1/me/') ||
+    resourcePath === '/api/v1/countries' ||
+    resourcePath.startsWith('/api/v1/countries/') ||
+    resourcePath.startsWith('/api/v1/users/') ||
     resourcePath.startsWith('/api/v1/home-invitations/') ||
     resourcePath === '/api/v1/homes' ||
     resourcePath.startsWith('/api/v1/homes/') ||

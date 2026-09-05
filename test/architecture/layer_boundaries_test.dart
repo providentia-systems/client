@@ -152,9 +152,9 @@ void main() {
 
     for (final requiredSymbol in <String>[
       'Api11IdentityTransport',
-      'PlatformPendingLoginLinkStore',
+      'PlatformPendingEmailCodeStore',
       'SecureLoginLinkRequestFactory',
-      'LoginLinkSignInPage',
+      'EmailCodeSignInPage',
       'Api11HomeTransport',
       'HomeSelectionPage',
       'AccountAccessPage',

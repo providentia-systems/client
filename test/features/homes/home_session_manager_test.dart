@@ -5,6 +5,8 @@ import 'package:providentia/features/homes/application/home_ports.dart';
 import 'package:providentia/features/homes/application/home_session_manager.dart';
 import 'package:providentia/features/homes/domain/home_models.dart';
 
+import '../../support/access_fixture.dart';
+
 void main() {
   test(
     'multiple homes require selection when no active preference exists',
@@ -1015,6 +1017,8 @@ const String _stepUpToken =
 
 HomeSummary _home(String id, String name, {HomeRole role = HomeRole.owner}) {
   return HomeSummary(
+    effectivePermissions: fixtureHomePermissions(role),
+    access: fixtureHomeAccess(),
     id: id,
     name: name,
     locale: 'en-NA',
@@ -1139,6 +1143,8 @@ final class _FakeHomeTransport implements HomeTransportPort {
   @override
   Future<HomeSummary> createHome(CreateHomeCommand command) async {
     final created = HomeSummary(
+      effectivePermissions: fixtureHomePermissions(HomeRole.owner),
+      access: fixtureHomeAccess(),
       id: 'created-home',
       name: command.name,
       locale: command.locale,
@@ -1170,6 +1176,20 @@ final class _FakeHomeTransport implements HomeTransportPort {
 
   @override
   Future<void> leaveHome(String homeId) async => leaveCalls.add(homeId);
+
+  @override
+  Future<HomeSummary> getHome(String homeId) async =>
+      homes.singleWhere((home) => home.id == homeId);
+
+  @override
+  Future<void> declinePendingInvitation({
+    required String invitationId,
+    required int expectedRevision,
+  }) async {
+    pendingInvitations.removeWhere(
+      (invitation) => invitation.id == invitationId,
+    );
+  }
 
   @override
   Future<List<HomeSummary>> listHomes() async {
@@ -1230,12 +1250,6 @@ final class _FakeHomeTransport implements HomeTransportPort {
   ) async {
     ownershipTransferListCalls++;
     return List<HomeOwnershipTransfer>.of(ownershipTransfers);
-  }
-
-  @override
-  Future<StepUpLinkReceipt> requestStepUpLink() async {
-    stepUpRequests++;
-    return const StepUpLinkReceipt(developmentStepUpToken: _stepUpToken);
   }
 
   @override
@@ -1367,6 +1381,8 @@ final class _FakeHomeTransport implements HomeTransportPort {
   }) async {
     updatedExpectedRevision = expectedRevision;
     final updated = HomeSummary(
+      effectivePermissions: fixtureHomePermissions(HomeRole.owner),
+      access: fixtureHomeAccess(),
       id: homeId,
       name: name,
       locale: locale,

@@ -1,42 +1,31 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:providentia/features/identity/application/identity_ports.dart';
 import 'package:providentia/features/identity/domain/identity_models.dart';
 
-/// Owns the origin-bound login-link transaction and authenticated session.
+/// Owns the origin-bound email-code verification and authenticated session.
 final class IdentitySessionManager implements SessionAuthorizer {
   factory IdentitySessionManager({
     required IdentityTransportPort transport,
     required SessionCredentialStore credentialStore,
-    required PendingLoginLinkStore pendingLoginLinkStore,
-    required LoginLinkRequestFactory loginLinkRequestFactory,
+    required PendingEmailCodeStore pendingEmailCodeStore,
     required DeviceDescriptor device,
     SessionCoordinationPort sessionCoordination =
         const LocalSessionCoordination(),
     DateTime Function()? clock,
     Duration refreshLeeway = const Duration(minutes: 2),
     Duration logoutTimeout = const Duration(seconds: 15),
-    Duration loginLinkLifetime = const Duration(minutes: 15),
-    Duration loginLinkStatusGrace = const Duration(minutes: 2),
-    Duration defaultPollInterval = const Duration(seconds: 3),
-    Duration maximumPollInterval = const Duration(seconds: 30),
     Duration requestTimeout = const Duration(seconds: 15),
     int? requestedSessionIdleSeconds,
   }) => IdentitySessionManager._(
     transport,
     credentialStore,
-    pendingLoginLinkStore,
-    loginLinkRequestFactory,
+    pendingEmailCodeStore,
     device,
     sessionCoordination,
     clock ?? DateTime.now,
     refreshLeeway,
     logoutTimeout,
-    loginLinkLifetime,
-    loginLinkStatusGrace,
-    defaultPollInterval,
-    maximumPollInterval,
     requestTimeout,
     requestedSessionIdleSeconds,
   );
@@ -44,29 +33,19 @@ final class IdentitySessionManager implements SessionAuthorizer {
   IdentitySessionManager._(
     this._transport,
     this._credentialStore,
-    this._pendingLoginLinkStore,
-    this._loginLinkRequestFactory,
+    this._pendingEmailCodeStore,
     this._device,
     this._sessionCoordination,
     this._clock,
     this.refreshLeeway,
     this.logoutTimeout,
-    this.loginLinkLifetime,
-    this.loginLinkStatusGrace,
-    this.defaultPollInterval,
-    this.maximumPollInterval,
     this.requestTimeout,
     this.requestedSessionIdleSeconds,
   ) : _snapshot = const IdentitySessionSnapshot.signedOut() {
     if (refreshLeeway.isNegative) {
       throw ArgumentError.value(refreshLeeway, 'refreshLeeway');
     }
-    if (logoutTimeout <= Duration.zero ||
-        loginLinkLifetime <= Duration.zero ||
-        loginLinkStatusGrace.isNegative ||
-        defaultPollInterval < const Duration(seconds: 1) ||
-        maximumPollInterval < defaultPollInterval ||
-        requestTimeout <= Duration.zero) {
+    if (logoutTimeout <= Duration.zero || requestTimeout <= Duration.zero) {
       throw ArgumentError('Identity lifecycle durations are invalid.');
     }
     if (_transport.sessionTransport == ClientSessionTransport.nativeBearer &&
@@ -94,8 +73,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
 
   final IdentityTransportPort _transport;
   final SessionCredentialStore _credentialStore;
-  final PendingLoginLinkStore _pendingLoginLinkStore;
-  final LoginLinkRequestFactory _loginLinkRequestFactory;
+  final PendingEmailCodeStore _pendingEmailCodeStore;
   final DeviceDescriptor _device;
   final SessionCoordinationPort _sessionCoordination;
   final DateTime Function() _clock;
@@ -106,15 +84,11 @@ final class IdentitySessionManager implements SessionAuthorizer {
 
   final Duration refreshLeeway;
   final Duration logoutTimeout;
-  final Duration loginLinkLifetime;
-  final Duration loginLinkStatusGrace;
-  final Duration defaultPollInterval;
-  final Duration maximumPollInterval;
   final Duration requestTimeout;
   final int? requestedSessionIdleSeconds;
 
   IdentitySessionSnapshot _snapshot;
-  PendingLoginLinkRequest? _pendingLoginLink;
+  PendingEmailCode? _pendingEmailCode;
   SessionSecrets? _secrets;
   Future<void> _mutationTail = Future<void>.value();
   Future<void> _pendingStoreTail = Future<void>.value();
@@ -122,11 +96,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
   Future<bool>? _refreshInFlight;
   SessionGrant? _coordinatedRefreshGrant;
   Future<void>? _restoreInFlight;
-  Future<void>? _pollInFlight;
-  Timer? _pollTimer;
-  int _pollFailureCount = 0;
   int _lifecycleGeneration = 0;
-  bool _pollingEnabled = true;
   bool _disposed = false;
 
   IdentitySessionSnapshot get snapshot => _snapshot;
@@ -157,101 +127,106 @@ final class IdentitySessionManager implements SessionAuthorizer {
     });
   }
 
-  Future<PendingLoginLinkRequest> requestLoginLink(String email) {
+  Future<PendingEmailCode> requestEmailCode(String email) {
     _ensureOpen();
     final normalized = normalizedEmail(email);
-    final now = _clock().toUtc();
-    final pending = _loginLinkRequestFactory.create(
-      email: normalized,
-      createdAt: now,
-      expiresAt: now.add(loginLinkLifetime),
-      pollInterval: defaultPollInterval,
-    );
-    final previousPending = _pendingLoginLink;
-    final previousSecrets = _secrets;
     final generation = _beginAuthentication();
-    _pollingEnabled = true;
-    _pollFailureCount = 0;
-    _pendingLoginLink = pending;
+    final previousPending = _pendingEmailCode;
+    _pendingEmailCode = null;
     _secrets = null;
     _emit(
       IdentitySessionSnapshot(
-        status: IdentitySessionStatus.requestingLoginLink,
-        pendingLoginLink: pending.toPublicView(),
-        loginEmail: pending.email,
+        status: IdentitySessionStatus.requestingEmailCode,
+        loginEmail: normalized,
       ),
     );
-    return _serializeMutation<PendingLoginLinkRequest>(
-      () => _startLoginLink(
-        pending: pending,
-        previousPending: previousPending,
-        previousSecrets: previousSecrets,
-        generation: generation,
-      ),
-    );
+    return _serializeMutation<PendingEmailCode>(() async {
+      await _clearPendingStore(request: previousPending);
+      if (!await _retirePreviousSessionForLoginIntent(generation)) {
+        throw const IdentityCredentialStoreException(
+          'Secure session storage is unavailable.',
+        );
+      }
+      PendingEmailCode? issued;
+      try {
+        final pending = await _transport
+            .requestEmailCode(email: normalized, device: _device)
+            .timeout(requestTimeout);
+        issued = pending;
+        if (!_isCurrent(generation)) {
+          throw StateError('Superseded login request.');
+        }
+        await _withCookieMutationLock<void>(() async {
+          if (!_isCurrent(generation)) return;
+          await _pendingStore<void>(
+            () => _pendingEmailCodeStore.write(pending, activate: true),
+          );
+          if (!_isCurrent(generation)) {
+            await _pendingEmailCodeStore.clear(request: pending);
+            return;
+          }
+          _pendingEmailCode = pending;
+          _sessionCoordination.publishAuthenticationIntent(pending.requestId);
+        });
+        if (_isCurrent(generation)) _emitWaiting(pending);
+        return pending;
+      } on IdentityTransportException catch (error) {
+        if (_isCurrent(generation)) _emitFailure(error.safeMessage);
+        rethrow;
+      } on Object {
+        if (issued != null) {
+          await _invalidatePendingStore(issued);
+        }
+        if (_isCurrent(generation)) {
+          _emitFailure(
+            'The email code could not be requested. Please try again.',
+          );
+        }
+        if (issued != null) {
+          throw const IdentityCredentialStoreException(
+            'The email code request could not be secured on this device.',
+          );
+        }
+        rethrow;
+      }
+    });
   }
 
-  Future<void> pollLoginLinkNow() {
+  Future<void> verifyEmailCode(String code) {
     _ensureOpen();
-    final existing = _pollInFlight;
-    if (existing != null) {
-      return existing;
+    final pending = _pendingEmailCode;
+    if (!RegExp(r'^[0-9]{8}$').hasMatch(code)) {
+      throw const FormatException('Enter the eight-digit email code.');
     }
-    final pending = _pendingLoginLink;
-    if (pending == null ||
-        _snapshot.status != IdentitySessionStatus.waitingForLoginLink) {
-      return Future<void>.value();
-    }
+    if (pending == null) return Future<void>.value();
     final generation = _lifecycleGeneration;
-    final poll = _serializeMutation<void>(() async {
-      if (!_isCurrent(generation) ||
-          _pendingLoginLink?.requestId != pending.requestId) {
-        return;
-      }
-      await _performPoll(pending, generation);
-    });
-    _pollInFlight = poll;
-    return poll.whenComplete(() {
-      if (identical(_pollInFlight, poll)) {
-        _pollInFlight = null;
-      }
-    });
+    return _serializeMutation<void>(
+      () => _withCookieMutationLock<void>(() async {
+        if (_isCurrent(generation)) {
+          await _verifyEmailCodeInsideLock(pending, generation, code);
+        }
+      }),
+    );
   }
 
-  void pauseLoginLinkPolling() {
-    _pollingEnabled = false;
-    _pollTimer?.cancel();
-    _pollTimer = null;
-  }
-
-  void resumeLoginLinkPolling() {
+  Future<void> cancelEmailCode() {
     _ensureOpen();
-    _pollingEnabled = true;
-    if (_snapshot.status == IdentitySessionStatus.waitingForLoginLink &&
-        _pendingLoginLink != null) {
-      _schedulePoll(Duration.zero);
-    }
-  }
-
-  Future<void> cancelLoginLink() {
-    _ensureOpen();
-    final pending = _pendingLoginLink;
+    final pending = _pendingEmailCode;
     _invalidateLifecycle();
     final generation = _lifecycleGeneration;
-    _pollingEnabled = true;
-    _pendingLoginLink = null;
+    _pendingEmailCode = null;
     _emit(const IdentitySessionSnapshot.signedOut());
     return _serializeMutation<void>(
-      () => _cancelLoginLink(pending, generation),
+      () => _cancelEmailCode(pending, generation),
     );
   }
 
-  Future<void> resendLoginLink() {
-    final email = _pendingLoginLink?.email ?? _snapshot.loginEmail;
+  Future<void> resendEmailCode() {
+    final email = _pendingEmailCode?.email ?? _snapshot.loginEmail;
     if (email == null) {
       throw StateError('There is no login request to resend.');
     }
-    return requestLoginLink(email).then<void>((_) {});
+    return requestEmailCode(email).then<void>((_) {});
   }
 
   @override
@@ -391,7 +366,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
 
   Future<void> logout() {
     _ensureOpen();
-    final pending = _pendingLoginLink;
+    final pending = _pendingEmailCode;
     final secrets = _secrets;
     final expectedOriginState = _currentOriginStateFingerprint();
     _invalidateLifecycle();
@@ -408,13 +383,13 @@ final class IdentitySessionManager implements SessionAuthorizer {
 
   Future<void> _performLogout({
     required SessionSecrets? secrets,
-    required PendingLoginLinkRequest? pending,
+    required PendingEmailCode? pending,
     required int generation,
     required String expectedOriginState,
   }) async {
     var logoutIntentDurable = false;
     try {
-      await _pendingStore<void>(_pendingLoginLinkStore.markLogoutIntent);
+      await _pendingStore<void>(_pendingEmailCodeStore.markLogoutIntent);
       logoutIntentDurable = true;
     } on Object {
       // A proven remote logout can still make local sign-out durable.
@@ -450,7 +425,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
 
     // Only publish signed-out after either the web tombstone or a completed
     // remote response proves that a reload cannot silently restore cookies.
-    _pendingLoginLink = null;
+    _pendingEmailCode = null;
     _secrets = null;
     _emit(const IdentitySessionSnapshot.signedOut());
 
@@ -464,14 +439,14 @@ final class IdentitySessionManager implements SessionAuthorizer {
     if (sessionTransport == ClientSessionTransport.nativeBearer &&
         localCredentialCleared) {
       try {
-        await _pendingStore<void>(_pendingLoginLinkStore.clearLogoutIntent);
+        await _pendingStore<void>(_pendingEmailCodeStore.clearLogoutIntent);
       } on Object {
         localCredentialCleared = false;
       }
     }
     if (remoteResult == _RemoteLogoutResult.unavailable &&
         _snapshot.status == IdentitySessionStatus.signedOut &&
-        _pendingLoginLink == null) {
+        _pendingEmailCode == null) {
       _emit(
         IdentitySessionSnapshot(
           status: IdentitySessionStatus.signedOut,
@@ -705,7 +680,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
       return false;
     }
     if (update.authenticationIntentId != null) {
-      if (_pendingLoginLink?.requestId == update.authenticationIntentId) {
+      if (_pendingEmailCode?.requestId == update.authenticationIntentId) {
         return false;
       }
       _secrets = null;
@@ -781,7 +756,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
   }
 
   String _currentOriginStateFingerprint() {
-    if (_pendingLoginLink case final pending?) {
+    if (_pendingEmailCode case final pending?) {
       return 'intent:${pending.requestId}';
     }
     final current = _currentSessionFingerprint();
@@ -845,18 +820,18 @@ final class IdentitySessionManager implements SessionAuthorizer {
     final latest = await _sessionCoordination.readLatest();
     if (!_sameCoordinatedUpdate(update, latest)) return;
     if (update.signedOut) {
-      final pending = _pendingLoginLink;
+      final pending = _pendingEmailCode;
       if (pending != null || !_snapshot.isAuthenticated) return;
       _invalidateLifecycle();
       _coordinatedRefreshGrant = null;
-      _pendingLoginLink = null;
+      _pendingEmailCode = null;
       _secrets = null;
       await _bestEffortClearSessionStore();
       _emit(const IdentitySessionSnapshot.signedOut());
       return;
     }
     final grant = update.grant!;
-    final localPending = _pendingLoginLink;
+    final localPending = _pendingEmailCode;
     // A grant for this exact durable intent is the sibling tab's successful
     // single-use exchange and must be adopted. Unrelated/older grants cannot
     // erase a newer local login request.
@@ -865,9 +840,9 @@ final class IdentitySessionManager implements SessionAuthorizer {
       return;
     }
     if (localPending == null &&
-        (_snapshot.status == IdentitySessionStatus.requestingLoginLink ||
-            _snapshot.status == IdentitySessionStatus.waitingForLoginLink ||
-            _snapshot.status == IdentitySessionStatus.exchangingLoginLink)) {
+        (_snapshot.status == IdentitySessionStatus.requestingEmailCode ||
+            _snapshot.status == IdentitySessionStatus.waitingForEmailCode ||
+            _snapshot.status == IdentitySessionStatus.verifyingEmailCode)) {
       return;
     }
     if (_refreshInFlight != null) {
@@ -877,7 +852,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
       return;
     }
     final generation = _beginAuthentication();
-    _pendingLoginLink = null;
+    _pendingEmailCode = null;
     _secrets = null;
     _emit(IdentitySessionSnapshot(status: IdentitySessionStatus.restoring));
     try {
@@ -902,19 +877,19 @@ final class IdentitySessionManager implements SessionAuthorizer {
     await _withCookieMutationLock<void>(() async {
       final latest = await _sessionCoordination.readLatest();
       if (latest?.authenticationIntentId != intentId) return;
-      final active = await _pendingStore<PendingLoginLinkRequest?>(
-        _pendingLoginLinkStore.read,
+      final active = await _pendingStore<PendingEmailCode?>(
+        _pendingEmailCodeStore.read,
       );
       // The durable origin head is the total order. Delayed broadcasts cannot
       // supersede a newer request, regardless of wall-clock ties or rollback.
       if (active?.requestId != intentId ||
-          _pendingLoginLink?.requestId == intentId) {
+          _pendingEmailCode?.requestId == intentId) {
         return;
       }
-      final superseded = _pendingLoginLink;
+      final superseded = _pendingEmailCode;
       _invalidateLifecycle();
       _coordinatedRefreshGrant = null;
-      _pendingLoginLink = null;
+      _pendingEmailCode = null;
       _secrets = null;
       _emit(const IdentitySessionSnapshot.signedOut());
       await _bestEffortClearSessionStore();
@@ -922,335 +897,60 @@ final class IdentitySessionManager implements SessionAuthorizer {
     });
   }
 
-  Future<PendingLoginLinkRequest> _startLoginLink({
-    required PendingLoginLinkRequest pending,
-    required PendingLoginLinkRequest? previousPending,
-    required SessionSecrets? previousSecrets,
-    required int generation,
-  }) async {
-    // Persist the new intent before retiring an older account. If the process
-    // exits during remote logout, restore must resume this request rather than
-    // silently restoring the previous user's cookie or refresh credential.
+  Future<void> _cancelEmailCode(
+    PendingEmailCode? pending,
+    int generation,
+  ) async {
     try {
-      await _pendingStore<void>(() async {
-        await _pendingLoginLinkStore.write(pending, activate: true);
-        if (sessionTransport == ClientSessionTransport.webCookie) {
-          _sessionCoordination.publishAuthenticationIntent(pending.requestId);
-        }
-      });
+      if (pending != null) {
+        await _pendingStore<void>(
+          () => _pendingEmailCodeStore.invalidate(pending),
+        );
+      }
+      if (pending != null) await _clearPendingStore(request: pending);
     } on Object {
-      // Queue cleanup behind a timed-out write. The store tail preserves order,
-      // so a late completion cannot resurrect this failed request on restart.
-      await _clearPendingStore(request: pending);
-      await _invalidatePendingStore(previousPending);
-      await _retireSession(previousSecrets);
-      if (_isCurrent(generation)) {
-        _pendingLoginLink = null;
-        _emitFailure(
-          'The private login request could not be secured. Try again.',
-        );
-      }
-      throw const IdentityCredentialStoreException(
-        'The private login request could not be secured. Try again.',
-      );
-    }
-    if (!_isCurrent(generation)) {
-      await _clearPendingStore(request: pending);
-      return pending;
-    }
-    await _retireSession(previousSecrets);
-    await _replacePendingRequest(previousPending);
-    if (!_isCurrent(generation)) {
-      await _clearPendingStore(request: pending);
-      return pending;
-    }
-
-    final command = LoginLinkStartCommand(
-      requestId: pending.requestId,
-      email: pending.email,
-      pollChallenge: _loginLinkRequestFactory.challenge(pending.pollToken),
-      codeChallenge: _loginLinkRequestFactory.challenge(pending.codeVerifier),
-      state: pending.state,
-      device: _device,
-      transport: sessionTransport,
-      requestedSessionIdleSeconds: requestedSessionIdleSeconds,
-    );
-    try {
-      final receipt = await _transport
-          .startLoginLink(command)
-          .timeout(requestTimeout);
-      if (!_isCurrent(generation)) {
-        await _clearPendingStore(request: pending);
-        return pending;
-      }
-      final withReceipt = pending.withServerReceipt(receipt);
-      _pendingLoginLink = withReceipt;
-      try {
-        await _pendingStore<void>(
-          () => _pendingLoginLinkStore.write(withReceipt, activate: false),
-        );
-      } on Object {
-        // The original proof is already secured. Receipt metadata remains
-        // authoritative in memory and the next poll checks the server.
-      }
-      if (!_isCurrent(generation)) {
-        await _clearPendingStore(request: pending);
-        return withReceipt;
-      }
-      _emitWaiting(withReceipt);
-      _schedulePoll(withReceipt.pollInterval);
-      return withReceipt;
-    } on TimeoutException {
-      if (!_isCurrent(generation)) {
-        return pending;
-      }
-      _emitAmbiguousStart(pending);
-      return pending;
-    } on IdentityTransportException catch (error) {
-      if (!_isCurrent(generation)) {
-        return pending;
-      }
-      if (error.kind == IdentityFailureKind.network ||
-          error.kind == IdentityFailureKind.unavailable) {
-        _emitAmbiguousStart(pending);
-        return pending;
-      }
-      _pendingLoginLink = null;
-      await _clearPendingStore(request: pending);
-      _emitFailure(error.safeMessage);
-      rethrow;
-    } on FormatException {
-      return _rejectMalformedStart(pending, generation);
-    } on ArgumentError {
-      return _rejectMalformedStart(pending, generation);
-    }
-  }
-
-  Future<PendingLoginLinkRequest> _rejectMalformedStart(
-    PendingLoginLinkRequest pending,
-    int generation,
-  ) async {
-    if (_isCurrent(generation)) {
-      _pendingLoginLink = null;
-      await _clearPendingStore(request: pending);
       if (_isCurrent(generation)) {
         _emitFailure(
-          'The identity service returned an invalid login response.',
+          'The saved code request could not be removed. It will expire automatically.',
         );
       }
     }
-    throw const IdentityTransportException(
-      kind: IdentityFailureKind.validation,
-      safeMessage: 'The identity service returned an invalid login response.',
-    );
   }
 
-  void _emitAmbiguousStart(PendingLoginLinkRequest pending) {
-    _emitWaiting(
-      pending,
-      message:
-          'Your request may have been sent. Keep this screen open while Providentia checks safely.',
-    );
-    _schedulePoll(pending.pollInterval);
-  }
-
-  Future<void> _cancelLoginLink(
-    PendingLoginLinkRequest? pending,
+  Future<void> _verifyEmailCodeInsideLock(
+    PendingEmailCode pending,
     int generation,
+    String code,
   ) async {
-    var cancellationProtected = false;
-    if (pending != null) {
-      try {
-        await _pendingStore<void>(
-          () => _pendingLoginLinkStore.invalidate(pending),
-        );
-        cancellationProtected = true;
-      } on Object {
-        // Remote cancellation or deletion can still make the proof unusable.
-      }
-      try {
-        await _transport
-            .cancelLoginLink(
-              requestId: pending.requestId,
-              pollToken: pending.pollToken,
-            )
-            .timeout(logoutTimeout);
-        cancellationProtected = true;
-      } on Object {
-        // Local invalidation remains authoritative when the server is offline.
-      }
-    }
-    if (pending != null) {
-      try {
-        await _pendingStore<void>(
-          () => _pendingLoginLinkStore.clear(request: pending),
-        );
-        cancellationProtected = true;
-      } on Object {
-        // The non-secret tombstone remains safe when deletion is unavailable.
-      }
-    }
-    if (!cancellationProtected && _isCurrent(generation)) {
+    if (pending.isExpiredAt(_clock())) {
+      await _invalidatePendingStore(pending);
+      _pendingEmailCode = null;
       _emit(
         IdentitySessionSnapshot(
-          status: IdentitySessionStatus.signedOut,
-          safeMessage:
-              'Signed out locally. The saved login request could not be removed and will expire automatically.',
+          status: IdentitySessionStatus.emailCodeExpired,
+          loginEmail: pending.email,
+          safeMessage: 'This email code expired. Request a new code.',
         ),
       );
-    }
-  }
-
-  Future<void> _performPoll(
-    PendingLoginLinkRequest pending,
-    int generation,
-  ) async {
-    if (!_isCurrent(generation)) {
       return;
     }
-    try {
-      final view = await _transport
-          .getLoginLinkStatus(
-            requestId: pending.requestId,
-            pollToken: pending.pollToken,
-          )
-          .timeout(requestTimeout);
-      if (!_isCurrent(generation)) {
-        return;
-      }
-      if (view.requestId != pending.requestId) {
-        throw const FormatException('Login request identity changed.');
-      }
-      pending = pending.withServerExpiry(view.expiresAt);
-      _pendingLoginLink = pending;
-      try {
-        await _pendingStore<void>(
-          () => _pendingLoginLinkStore.write(pending, activate: false),
-        );
-      } on Object {
-        // Continue with the already-secured proof. A restored request always
-        // performs an authoritative server status check before exchange.
-      }
-      if (!_isCurrent(generation)) {
-        return;
-      }
-      _pollFailureCount = 0;
-      switch (view.status) {
-        case LoginLinkRequestStatus.pending:
-          _emitWaiting(pending);
-          _schedulePoll(pending.pollInterval);
-          return;
-        case LoginLinkRequestStatus.approved:
-          await _exchangeApprovedRequest(pending, generation);
-          return;
-        case LoginLinkRequestStatus.denied:
-          await _finishTerminalLoginLink(
-            pending,
-            'This login request was not approved. Request a new login link.',
-            generation,
-          );
-          return;
-        case LoginLinkRequestStatus.exchanged:
-          await _finishTerminalLoginLink(
-            pending,
-            'This login request was already used. Request a new login link.',
-            generation,
-          );
-          return;
-        case LoginLinkRequestStatus.expired:
-          await _expireLoginLink(pending, generation);
-          return;
-        case LoginLinkRequestStatus.cancelled:
-          await _finishTerminalLoginLink(
-            pending,
-            'This login request was cancelled. Request a new login link.',
-            generation,
-          );
-          return;
-      }
-    } on TimeoutException {
-      if (_isCurrent(generation)) {
-        await _retryLoginLinkPoll(pending, generation);
-      }
-    } on IdentityTransportException catch (error) {
-      if (!_isCurrent(generation)) {
-        return;
-      }
-      if (error.retryablePollingFailure) {
-        await _retryLoginLinkPoll(pending, generation);
-        return;
-      }
-      if (error.kind == IdentityFailureKind.loginRequestExpired) {
-        await _expireLoginLink(pending, generation);
-        return;
-      }
-      await _finishTerminalLoginLink(pending, error.safeMessage, generation);
-    } on FormatException {
-      await _finishTerminalLoginLink(
-        pending,
-        'The login request response was invalid. Request a new login link.',
-        generation,
-      );
-    }
-  }
-
-  Future<void> _retryLoginLinkPoll(
-    PendingLoginLinkRequest pending,
-    int generation,
-  ) async {
-    if (!_isCurrent(generation)) {
-      return;
-    }
-    if (!_clock().toUtc().isBefore(
-      pending.expiresAt.add(loginLinkStatusGrace),
-    )) {
-      await _expireLoginLink(pending, generation);
-      return;
-    }
-    _pollFailureCount++;
-    _emitWaiting(
-      pending,
-      message: 'Waiting for approval. Providentia will keep checking safely.',
-    );
-    _schedulePoll(_backoff(pending.pollInterval));
-  }
-
-  Future<void> _exchangeApprovedRequest(
-    PendingLoginLinkRequest pending,
-    int generation,
-  ) async {
-    if (sessionTransport == ClientSessionTransport.webCookie) {
-      await _withCookieMutationLock<void>(() async {
-        if (_isCurrent(generation)) {
-          await _exchangeApprovedRequestInsideLock(pending, generation);
-        }
-      });
-      return;
-    }
-    await _exchangeApprovedRequestInsideLock(pending, generation);
-  }
-
-  Future<void> _exchangeApprovedRequestInsideLock(
-    PendingLoginLinkRequest pending,
-    int generation,
-  ) async {
-    _pollTimer?.cancel();
     _emit(
       IdentitySessionSnapshot(
-        status: IdentitySessionStatus.exchangingLoginLink,
+        status: IdentitySessionStatus.verifyingEmailCode,
         loginEmail: pending.email,
-        safeMessage: 'Email approved. Finishing sign in securely.',
+        safeMessage: 'Verifying your email code.',
       ),
     );
     BrowserCookieMutationJournal? cookieMutation;
+    var credentialIssued = false;
     try {
       if (sessionTransport == ClientSessionTransport.webCookie) {
         if (await _resumeUnfinishedBrowserCookieMutation(generation)) return;
-        final active = await _pendingStore<PendingLoginLinkRequest?>(
-          _pendingLoginLinkStore.read,
+        final active = await _pendingStore<PendingEmailCode?>(
+          _pendingEmailCodeStore.read,
         );
         if (active?.requestId != pending.requestId) {
-          _pendingLoginLink = null;
+          _pendingEmailCode = null;
           _emit(
             IdentitySessionSnapshot(status: IdentitySessionStatus.restoring),
           );
@@ -1262,13 +962,14 @@ final class IdentitySessionManager implements SessionAuthorizer {
           return;
         }
         cookieMutation = await _beginBrowserCookieMutation(
-          BrowserCookieMutationKind.loginLinkExchange,
+          BrowserCookieMutationKind.emailCodeVerification,
           pending.requestId,
         );
       }
       final grant = await _transport
-          .exchangeLoginLink(request: pending)
+          .verifyEmailCode(request: pending, code: code)
           .timeout(requestTimeout);
+      credentialIssued = true;
       if (!_isCurrent(generation)) {
         await _discardGrant(grant);
         return;
@@ -1279,18 +980,18 @@ final class IdentitySessionManager implements SessionAuthorizer {
           // origin lock releases or a sibling tab could exchange it again and
           // clean up the first tab's newly issued cookie session.
           await _pendingStore<void>(
-            () => _pendingLoginLinkStore.clear(request: pending),
+            () => _pendingEmailCodeStore.clear(request: pending),
           );
         } on Object {
           await _discardGrant(grant);
           if (_isCurrent(generation)) {
-            _pendingLoginLink = null;
+            _pendingEmailCode = null;
             _emit(
               IdentitySessionSnapshot(
                 status: IdentitySessionStatus.failure,
                 loginEmail: pending.email,
                 safeMessage:
-                    'Sign in completed remotely but could not be secured on this browser. Request a new login link.',
+                    'Sign in completed remotely but could not be secured on this browser. Request a new email code.',
               ),
             );
           }
@@ -1299,7 +1000,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
       } else {
         await _clearPendingStore(request: pending);
       }
-      _pendingLoginLink = null;
+      _pendingEmailCode = null;
       await _acceptGrant(
         grant,
         generation,
@@ -1316,14 +1017,11 @@ final class IdentitySessionManager implements SessionAuthorizer {
       if (!_isCurrent(generation)) {
         return;
       }
-      if (error.kind == IdentityFailureKind.rateLimited) {
+      if (!credentialIssued &&
+          (error.kind == IdentityFailureKind.rateLimited ||
+              error.kind == IdentityFailureKind.validation)) {
         await _clearBrowserCookieMutation(cookieMutation);
-        _pollFailureCount++;
-        _emitWaiting(
-          pending,
-          message: 'Too many attempts. Providentia will try again shortly.',
-        );
-        _schedulePoll(_backoff(pending.pollInterval));
+        _emitWaiting(pending, message: error.safeMessage);
         return;
       }
       await _failAmbiguousExchange(
@@ -1346,7 +1044,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
   }
 
   Future<void> _failAmbiguousExchange(
-    PendingLoginLinkRequest pending,
+    PendingEmailCode pending,
     int generation, {
     BrowserCookieMutationJournal? cookieMutation,
     String? safeMessage,
@@ -1368,14 +1066,14 @@ final class IdentitySessionManager implements SessionAuthorizer {
     if (!_isCurrent(generation)) {
       return;
     }
-    _pendingLoginLink = null;
+    _pendingEmailCode = null;
     _emit(
       IdentitySessionSnapshot(
         status: IdentitySessionStatus.failure,
         loginEmail: pending.email,
         safeMessage:
             safeMessage ??
-            'Sign in could not be confirmed safely. Request a new login link.',
+            'Sign in could not be confirmed safely. Request a new email code.',
       ),
     );
   }
@@ -1452,16 +1150,16 @@ final class IdentitySessionManager implements SessionAuthorizer {
   }
 
   Future<bool> _restorePendingRequest(int generation) async {
-    PendingLoginLinkRequest? pending;
+    PendingEmailCode? pending;
     try {
-      pending = await _pendingStore<PendingLoginLinkRequest?>(
-        _pendingLoginLinkStore.read,
+      pending = await _pendingStore<PendingEmailCode?>(
+        _pendingEmailCodeStore.read,
       );
     } on Object {
       await _retirePreviousSessionForLoginIntent(generation);
       if (_isCurrent(generation)) {
         _emitFailure(
-          'The saved login request was invalid. Request a new link.',
+          'The saved login request was invalid. Request a new code.',
         );
       }
       return true;
@@ -1479,12 +1177,12 @@ final class IdentitySessionManager implements SessionAuthorizer {
       return true;
     }
     if (!_isCurrent(generation)) return true;
-    _pendingLoginLink = pending;
+    _pendingEmailCode = pending;
     _emitWaiting(
       pending,
-      message: 'Restored your private login request. Waiting for approval.',
+      message:
+          'Enter the code from your email, or request a new one if it expired.',
     );
-    _schedulePoll(Duration.zero);
     return true;
   }
 
@@ -1515,7 +1213,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
     }
 
     try {
-      await _pendingStore<void>(_pendingLoginLinkStore.markLogoutIntent);
+      await _pendingStore<void>(_pendingEmailCodeStore.markLogoutIntent);
       final stored = await _credentialStoreOperation<StoredNativeSession?>(
         _credentialStore.read,
       );
@@ -1526,7 +1224,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
           intentAlreadyMarked: true,
         );
       }
-      await _pendingStore<void>(_pendingLoginLinkStore.clearLogoutIntent);
+      await _pendingStore<void>(_pendingEmailCodeStore.clearLogoutIntent);
       return true;
     } on Object {
       if (_isCurrent(generation)) {
@@ -1737,7 +1435,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
             ),
           ),
         );
-        await _pendingStore<void>(_pendingLoginLinkStore.clearLogoutIntent);
+        await _pendingStore<void>(_pendingEmailCodeStore.clearLogoutIntent);
       } on Object {
         await _bestEffortClearSessionStore();
         _secrets = null;
@@ -1752,7 +1450,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
     } else {
       await _bestEffortClearSessionStore();
       try {
-        await _pendingStore<void>(_pendingLoginLinkStore.clearLogoutIntent);
+        await _pendingStore<void>(_pendingEmailCodeStore.clearLogoutIntent);
       } on Object {
         await _discardGrant(grant);
         throw const IdentityCredentialStoreException(
@@ -1910,93 +1608,22 @@ final class IdentitySessionManager implements SessionAuthorizer {
     );
   }
 
-  Future<void> _expireLoginLink(
-    PendingLoginLinkRequest pending,
-    int generation,
-  ) async {
-    _pollTimer?.cancel();
-    await _clearPendingStore(request: pending);
-    if (!_isCurrent(generation)) {
-      return;
-    }
-    _pendingLoginLink = null;
+  void _emitWaiting(PendingEmailCode pending, {String? message}) {
+    _pendingEmailCode = pending;
     _emit(
       IdentitySessionSnapshot(
-        status: IdentitySessionStatus.loginLinkExpired,
-        loginEmail: pending.email,
-        safeMessage: 'This login link expired. Send a new one to continue.',
-      ),
-    );
-  }
-
-  Future<void> _finishTerminalLoginLink(
-    PendingLoginLinkRequest pending,
-    String message,
-    int generation,
-  ) async {
-    _pollTimer?.cancel();
-    await _clearPendingStore(request: pending);
-    if (!_isCurrent(generation)) {
-      return;
-    }
-    _pendingLoginLink = null;
-    _emit(
-      IdentitySessionSnapshot(
-        status: IdentitySessionStatus.failure,
-        loginEmail: pending.email,
-        safeMessage: message,
-      ),
-    );
-  }
-
-  void _emitWaiting(PendingLoginLinkRequest pending, {String? message}) {
-    _pendingLoginLink = pending;
-    _emit(
-      IdentitySessionSnapshot(
-        status: IdentitySessionStatus.waitingForLoginLink,
-        pendingLoginLink: pending.toPublicView(),
+        status: IdentitySessionStatus.waitingForEmailCode,
+        pendingEmailCode: pending.toPublicView(),
         loginEmail: pending.email,
         safeMessage:
             message ??
-            'If this address can receive email, a login link has been sent.',
+            'If this address can receive email, an eight-digit code has been sent.',
       ),
     );
   }
 
-  void _schedulePoll(Duration delay) {
-    _pollTimer?.cancel();
-    if (!_pollingEnabled ||
-        _disposed ||
-        _snapshot.status != IdentitySessionStatus.waitingForLoginLink) {
-      return;
-    }
-    _pollTimer = Timer(delay, () => unawaited(pollLoginLinkNow()));
-  }
-
-  Duration _backoff(Duration base) {
-    final multiplier = 1 << math.min(_pollFailureCount, 4);
-    final seconds = math.min(
-      maximumPollInterval.inSeconds,
-      base.inSeconds * multiplier,
-    );
-    return Duration(seconds: seconds);
-  }
-
-  Future<void> _replacePendingRequest(PendingLoginLinkRequest? pending) async {
-    _pollTimer?.cancel();
-    if (pending != null) {
-      try {
-        await _transport
-            .cancelLoginLink(
-              requestId: pending.requestId,
-              pollToken: pending.pollToken,
-            )
-            .timeout(logoutTimeout);
-      } on Object {
-        // The proof is replaced locally even if remote cancellation is lost.
-      }
-    }
-    await _clearPendingStore(request: pending);
+  Future<void> _replacePendingRequest(PendingEmailCode? pending) async {
+    if (pending != null) await _clearPendingStore(request: pending);
   }
 
   Future<void> _retireSession(
@@ -2029,7 +1656,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
     if (sessionTransport == ClientSessionTransport.webCookie &&
         !intentAlreadyMarked) {
       try {
-        await _pendingStore<void>(_pendingLoginLinkStore.markLogoutIntent);
+        await _pendingStore<void>(_pendingEmailCodeStore.markLogoutIntent);
       } on Object {
         // Still attempt remote cleanup. A successful response is authoritative.
       }
@@ -2079,7 +1706,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
     if (sessionTransport == ClientSessionTransport.webCookie &&
         result != _RemoteLogoutResult.unavailable) {
       try {
-        await _pendingStore<void>(_pendingLoginLinkStore.clearLogoutIntent);
+        await _pendingStore<void>(_pendingEmailCodeStore.clearLogoutIntent);
       } on Object {
         return _RemoteLogoutResult.unavailable;
       }
@@ -2098,7 +1725,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
     );
     try {
       await _pendingStore<void>(
-        () => _pendingLoginLinkStore.beginCookieMutation(journal),
+        () => _pendingEmailCodeStore.beginCookieMutation(journal),
       );
       return journal;
     } on Object {
@@ -2118,7 +1745,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
       return;
     }
     await _pendingStore<void>(
-      () => _pendingLoginLinkStore.clearCookieMutation(journal: journal),
+      () => _pendingEmailCodeStore.clearCookieMutation(journal: journal),
     );
   }
 
@@ -2159,7 +1786,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
     var journalIsCorrupt = false;
     try {
       journal = await _pendingStore<BrowserCookieMutationJournal?>(
-        _pendingLoginLinkStore.readCookieMutation,
+        _pendingEmailCodeStore.readCookieMutation,
       );
     } on Object {
       journalIsCorrupt = true;
@@ -2178,7 +1805,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
     if (result == _RemoteLogoutResult.settled) {
       try {
         await _pendingStore<void>(
-          () => _pendingLoginLinkStore.clearCookieMutation(journal: journal),
+          () => _pendingEmailCodeStore.clearCookieMutation(journal: journal),
         );
         journalCleared = true;
       } on Object {
@@ -2190,7 +1817,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
         IdentitySessionSnapshot(
           status: IdentitySessionStatus.signedOut,
           safeMessage: journalCleared
-              ? 'An interrupted browser session update was cleared. Request a new login link.'
+              ? 'An interrupted browser session update was cleared. Request a new email code.'
               : 'Reconnect to finish clearing an interrupted browser session update.',
         ),
       );
@@ -2202,7 +1829,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
     bool pendingLogout;
     try {
       pendingLogout = await _pendingStore<bool>(
-        _pendingLoginLinkStore.hasLogoutIntent,
+        _pendingEmailCodeStore.hasLogoutIntent,
       );
     } on Object {
       if (_isCurrent(generation)) {
@@ -2229,7 +1856,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
             intentAlreadyMarked: true,
           );
         }
-        await _pendingStore<void>(_pendingLoginLinkStore.clearLogoutIntent);
+        await _pendingStore<void>(_pendingEmailCodeStore.clearLogoutIntent);
         return false;
       } on Object {
         if (_isCurrent(generation)) {
@@ -2286,21 +1913,21 @@ final class IdentitySessionManager implements SessionAuthorizer {
     }
   }
 
-  Future<void> _clearPendingStore({PendingLoginLinkRequest? request}) async {
+  Future<void> _clearPendingStore({PendingEmailCode? request}) async {
     try {
       await _pendingStore<void>(
-        () => _pendingLoginLinkStore.clear(request: request),
+        () => _pendingEmailCodeStore.clear(request: request),
       );
     } on Object {
       // The in-memory proof is still discarded and will expire server-side.
     }
   }
 
-  Future<void> _invalidatePendingStore(PendingLoginLinkRequest? pending) async {
+  Future<void> _invalidatePendingStore(PendingEmailCode? pending) async {
     if (pending != null) {
       try {
         await _pendingStore<void>(
-          () => _pendingLoginLinkStore.invalidate(pending),
+          () => _pendingEmailCodeStore.invalidate(pending),
         );
       } on Object {
         // Deletion below remains a second independent local safeguard.
@@ -2407,9 +2034,6 @@ final class IdentitySessionManager implements SessionAuthorizer {
     _refreshInFlight = null;
     _coordinatedRefreshGrant = null;
     _restoreInFlight = null;
-    _pollInFlight = null;
-    _pollTimer?.cancel();
-    _pollTimer = null;
   }
 
   bool _isCurrent(int generation) =>
@@ -2419,7 +2043,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
     _emit(
       IdentitySessionSnapshot(
         status: IdentitySessionStatus.failure,
-        loginEmail: _pendingLoginLink?.email ?? _snapshot.loginEmail,
+        loginEmail: _pendingEmailCode?.email ?? _snapshot.loginEmail,
         safeMessage: safeMessage,
       ),
     );

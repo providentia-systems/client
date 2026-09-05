@@ -25,6 +25,19 @@ final class Api11HomeTransport implements HomeTransportPort {
   );
 
   @override
+  Future<HomeSummary> getHome(String homeId) => _run(
+    (abortTrigger) async => _home(
+      (await _invoke(
+        operationId: 'getHome',
+        pathParameters: <String, String>{'homeId': homeId},
+        abortTrigger: abortTrigger,
+      )).body,
+    ),
+    homeId: homeId,
+    treatNotFoundAsRevoked: true,
+  );
+
+  @override
   Future<HomeSummary> createHome(CreateHomeCommand command) => _run(
     (abortTrigger) async => _home(
       (await _invoke(
@@ -225,27 +238,6 @@ final class Api11HomeTransport implements HomeTransportPort {
   );
 
   @override
-  Future<StepUpLinkReceipt> requestStepUpLink() => _run((abortTrigger) async {
-    final object = (await _invoke(
-      operationId: 'requestStepUpLink',
-      abortTrigger: abortTrigger,
-      body: <String, Object?>{
-        'applicationKind': 'homeowner',
-        'action': 'ownership-transfer',
-      },
-    )).requireObject();
-    if (object['accepted'] != true) {
-      throw const FormatException('Step-up link was not accepted.');
-    }
-    return StepUpLinkReceipt(
-      developmentStepUpToken: _nullableStringField(
-        object,
-        'developmentStepUpToken',
-      ),
-    );
-  });
-
-  @override
   Future<HomeOwnershipTransfer> proposeHomeOwnershipTransfer({
     required String homeId,
     required String targetUserId,
@@ -337,6 +329,19 @@ final class Api11HomeTransport implements HomeTransportPort {
       )).requireObject(),
     ).map(_recipientInvitation).toList(growable: false),
   );
+
+  @override
+  Future<void> declinePendingInvitation({
+    required String invitationId,
+    required int expectedRevision,
+  }) => _run((abortTrigger) async {
+    await _invoke(
+      operationId: 'declineHomeInvitation',
+      pathParameters: <String, String>{'invitationId': invitationId},
+      body: <String, Object?>{'expectedRevision': expectedRevision},
+      abortTrigger: abortTrigger,
+    );
+  });
 
   @override
   Future<HomeSummary> acceptPendingInvitation({
@@ -515,6 +520,12 @@ HomeSummary _home(Object? value) {
     timezone: _string(value, 'defaultTimezone'),
     role: _role(_string(value, 'role')),
     revision: _integer(value, 'revision'),
+    effectivePermissions: value['effectivePermissions'] is List
+        ? _requiredStringSet(value['effectivePermissions'])
+        : const <String>{},
+    access: value['access'] is Map
+        ? Map<String, Object?>.from(value['access']! as Map)
+        : const <String, Object?>{},
   );
 }
 

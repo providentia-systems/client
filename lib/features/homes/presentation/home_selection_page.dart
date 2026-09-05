@@ -7,6 +7,7 @@ import 'package:providentia/features/homes/presentation/homes_controller.dart';
 final class HomeSelectionPage extends StatefulWidget {
   const HomeSelectionPage({
     required this.controller,
+    this.accountAccess = const <String, Object?>{},
     this.sessionActiveHomeId,
     this.loadOnStart = true,
     this.activeHomeBuilder,
@@ -16,6 +17,7 @@ final class HomeSelectionPage extends StatefulWidget {
   });
 
   final HomesController controller;
+  final Map<String, Object?> accountAccess;
   final String? sessionActiveHomeId;
   final bool loadOnStart;
   final Widget Function(BuildContext context, HomeSummary home)?
@@ -234,19 +236,50 @@ final class _HomeSelectionPageState extends State<HomeSelectionPage> {
         subtitle: Text(
           '${invitation.role.name} access · from ${invitation.inviterDisplayName ?? 'a home member'}',
         ),
-        trailing: FilledButton(
-          onPressed: widget.controller.isBusy
-              ? null
-              : () => unawaited(
-                  widget.controller.acceptPendingInvitation(invitation),
-                ),
-          child: const Text('Accept'),
+        trailing: Wrap(
+          spacing: 8,
+          children: <Widget>[
+            TextButton(
+              onPressed: widget.controller.isBusy
+                  ? null
+                  : () =>
+                        widget.controller.declinePendingInvitation(invitation),
+              child: const Text('Decline'),
+            ),
+            FilledButton(
+              onPressed: widget.controller.isBusy
+                  ? null
+                  : () => widget.controller.acceptPendingInvitation(invitation),
+              child: const Text('Accept'),
+            ),
+          ],
         ),
       ),
     );
   }
 
   Widget _createSection(HomeSessionSnapshot snapshot) {
+    final features =
+        widget.accountAccess['features'] as Map? ?? const <String, Object?>{};
+    final limits =
+        widget.accountAccess['limits'] as Map? ?? const <String, Object?>{};
+    final maximum = limits['homes.owned'] is int
+        ? limits['homes.owned'] as int
+        : 0;
+    final owned = snapshot.homes
+        .where((home) => home.role == HomeRole.owner)
+        .length;
+    if (features['homes.create'] != true ||
+        (maximum != -1 && owned >= maximum)) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        child: Text(
+          snapshot.homes.isEmpty
+              ? 'Your account can join homes by invitation. Ask a home owner to invite you.'
+              : 'Your account has reached its current allowance for owned homes.',
+        ),
+      );
+    }
     final noHomes = snapshot.homes.isEmpty;
     // Invited first-time people land here with zero homes: their invitations
     // render first and creating a home stays an explicit secondary choice.

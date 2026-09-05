@@ -45,20 +45,14 @@ final class IdentityCredentialStoreException implements Exception {
 abstract interface class IdentityTransportPort {
   ClientSessionTransport get sessionTransport;
 
-  Future<LoginLinkStartReceipt> startLoginLink(LoginLinkStartCommand command);
-
-  Future<LoginLinkStatusView> getLoginLinkStatus({
-    required String requestId,
-    required String pollToken,
+  Future<PendingEmailCode> requestEmailCode({
+    required String email,
+    required DeviceDescriptor device,
   });
 
-  Future<SessionGrant> exchangeLoginLink({
-    required PendingLoginLinkRequest request,
-  });
-
-  Future<void> cancelLoginLink({
-    required String requestId,
-    required String pollToken,
+  Future<SessionGrant> verifyEmailCode({
+    required PendingEmailCode request,
+    required String code,
   });
 
   /// Native callers provide their rotating refresh credential. Browser callers
@@ -172,7 +166,7 @@ class LocalSessionCoordination implements SessionCoordinationPort {
   Future<void> dispose() async {}
 }
 
-enum BrowserCookieMutationKind { loginLinkExchange, sessionRefresh }
+enum BrowserCookieMutationKind { emailCodeVerification, sessionRefresh }
 
 /// Non-secret crash journal for an origin-wide browser cookie mutation.
 ///
@@ -189,17 +183,17 @@ final class BrowserCookieMutationJournal {
   final String operationId;
 }
 
-abstract interface class PendingLoginLinkStore {
-  Future<PendingLoginLinkRequest?> read();
+abstract interface class PendingEmailCodeStore {
+  Future<PendingEmailCode?> read();
 
-  Future<void> write(PendingLoginLinkRequest request, {required bool activate});
+  Future<void> write(PendingEmailCode request, {required bool activate});
 
   /// Replaces a private proof with a non-secret cancellation tombstone.
-  Future<void> invalidate(PendingLoginLinkRequest request);
+  Future<void> invalidate(PendingEmailCode request);
 
   /// Completes only [request] when supplied. Web stores use request-scoped
   /// records so one tab can never delete another tab's newer private proof.
-  Future<void> clear({PendingLoginLinkRequest? request});
+  Future<void> clear({PendingEmailCode? request});
 
   Future<bool> hasLogoutIntent();
 

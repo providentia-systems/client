@@ -2,24 +2,15 @@ import 'dart:collection';
 
 enum ClientSessionTransport { nativeBearer, webCookie }
 
-enum LoginLinkRequestStatus {
-  pending,
-  approved,
-  denied,
-  exchanged,
-  expired,
-  cancelled,
-}
-
 enum IdentitySessionStatus {
   restoring,
   signedOut,
-  requestingLoginLink,
-  waitingForLoginLink,
-  exchangingLoginLink,
+  requestingEmailCode,
+  waitingForEmailCode,
+  verifyingEmailCode,
   authenticated,
   refreshing,
-  loginLinkExpired,
+  emailCodeExpired,
   sessionExpired,
   failure,
 }
@@ -47,190 +38,44 @@ final class DeviceDescriptor {
   final String platform;
 }
 
-/// A login request whose private proof is owned by the originating client.
-///
-/// This type deliberately has no serialization or `toString` helpers. The
-/// poll token, PKCE verifier, and state must only cross the dedicated secure
-/// store and identity transport boundaries.
-final class PendingLoginLinkRequest {
-  PendingLoginLinkRequest({
+/// Email-code challenge. Its binding proof only crosses secure storage and the identity transport.
+final class PendingEmailCode {
+  PendingEmailCode({
     required this.requestId,
     required this.email,
-    required this.pollToken,
-    required this.codeVerifier,
-    required this.state,
+    required this.bindingToken,
     required this.createdAt,
     required this.expiresAt,
-    required this.pollInterval,
+    required this.resendAt,
   }) {
     _requireUuid(requestId, 'requestId');
     _requireEmail(email);
-    _requireSecret(pollToken, 'pollToken');
-    _requireSecret(codeVerifier, 'codeVerifier');
-    _requireSecret(state, 'state', minimumLength: 32);
-    if (pollInterval < const Duration(seconds: 1) ||
-        pollInterval > const Duration(seconds: 30)) {
-      throw ArgumentError.value(
-        pollInterval,
-        'pollInterval',
-        'must be between 1 and 30 seconds',
-      );
-    }
+    _requireSecret(bindingToken, 'bindingToken');
   }
-
   final String requestId;
   final String email;
-  final String pollToken;
-  final String codeVerifier;
-  final String state;
+  final String bindingToken;
   final DateTime createdAt;
   final DateTime expiresAt;
-  final Duration pollInterval;
-
+  final DateTime resendAt;
   bool isExpiredAt(DateTime instant) => !expiresAt.isAfter(instant.toUtc());
-
-  PendingLoginLinkRequest withServerReceipt(LoginLinkStartReceipt receipt) {
-    if (receipt.requestId != requestId) {
-      throw const FormatException('Login request identity changed.');
-    }
-    return PendingLoginLinkRequest(
-      requestId: requestId,
-      email: email,
-      pollToken: pollToken,
-      codeVerifier: codeVerifier,
-      state: state,
-      createdAt: createdAt,
-      expiresAt: receipt.expiresAt,
-      pollInterval: receipt.pollInterval,
-    );
-  }
-
-  PendingLoginLinkRequest withServerExpiry(DateTime serverExpiresAt) {
-    return PendingLoginLinkRequest(
-      requestId: requestId,
-      email: email,
-      pollToken: pollToken,
-      codeVerifier: codeVerifier,
-      state: state,
-      createdAt: createdAt,
-      expiresAt: serverExpiresAt.toUtc(),
-      pollInterval: pollInterval,
-    );
-  }
-
-  PendingLoginLinkView toPublicView() => PendingLoginLinkView(
+  PendingEmailCodeView toPublicView() => PendingEmailCodeView(
     email: email,
     expiresAt: expiresAt,
-    pollInterval: pollInterval,
+    resendAt: resendAt,
   );
 }
 
-/// Non-secret presentation state for an origin-bound login request.
-///
-/// The request identifier and possession proofs deliberately remain private to
-/// [IdentitySessionManager] and its secure persistence/transport boundaries.
-final class PendingLoginLinkView {
-  PendingLoginLinkView({
+final class PendingEmailCodeView {
+  const PendingEmailCodeView({
     required this.email,
     required this.expiresAt,
-    required this.pollInterval,
-  }) {
-    _requireEmail(email);
-  }
-
-  final String email;
-  final DateTime expiresAt;
-  final Duration pollInterval;
-
-  bool isExpiredAt(DateTime instant) => !expiresAt.isAfter(instant.toUtc());
-}
-
-final class LoginLinkStartCommand {
-  LoginLinkStartCommand({
-    required this.requestId,
-    required this.email,
-    required this.pollChallenge,
-    required this.codeChallenge,
-    required this.state,
-    required this.device,
-    required this.transport,
-    this.requestedSessionIdleSeconds,
-  }) {
-    _requireUuid(requestId, 'requestId');
-    _requireEmail(email);
-    _requireChallenge(pollChallenge, 'pollChallenge');
-    _requireChallenge(codeChallenge, 'codeChallenge');
-    _requireSecret(state, 'state', minimumLength: 32);
-    if (requestedSessionIdleSeconds != null &&
-        (requestedSessionIdleSeconds! < 900 ||
-            requestedSessionIdleSeconds! > 5184000)) {
-      throw ArgumentError.value(
-        requestedSessionIdleSeconds,
-        'requestedSessionIdleSeconds',
-        'must be between 900 and 5184000',
-      );
-    }
-  }
-
-  final String requestId;
-  final String email;
-  final String pollChallenge;
-  final String codeChallenge;
-  final String state;
-  final DeviceDescriptor device;
-  final ClientSessionTransport transport;
-  final int? requestedSessionIdleSeconds;
-}
-
-final class LoginLinkStartReceipt {
-  LoginLinkStartReceipt({
-    required this.requestId,
-    required this.expiresAt,
-    required this.pollInterval,
-  }) {
-    _requireUuid(requestId, 'requestId');
-    if (pollInterval < const Duration(seconds: 1) ||
-        pollInterval > const Duration(seconds: 30)) {
-      throw ArgumentError.value(
-        pollInterval,
-        'pollInterval',
-        'must be between 1 and 30 seconds',
-      );
-    }
-  }
-
-  final String requestId;
-  final DateTime expiresAt;
-  final Duration pollInterval;
-}
-
-final class LoginLinkStatusView {
-  LoginLinkStatusView({
-    required this.requestId,
-    required this.status,
-    required this.expiresAt,
-    this.approvedAt,
-  }) {
-    _requireUuid(requestId, 'requestId');
-  }
-
-  final String requestId;
-  final LoginLinkRequestStatus status;
-  final DateTime expiresAt;
-  final DateTime? approvedAt;
-}
-
-/// Creates high-entropy request identifiers and proofs outside application
-/// state so deterministic fakes can be supplied in tests.
-abstract interface class LoginLinkRequestFactory {
-  PendingLoginLinkRequest create({
-    required String email,
-    required DateTime createdAt,
-    required DateTime expiresAt,
-    required Duration pollInterval,
+    required this.resendAt,
   });
-
-  String challenge(String secret);
+  final String email;
+  final DateTime expiresAt;
+  final DateTime resendAt;
+  bool isExpiredAt(DateTime instant) => !expiresAt.isAfter(instant.toUtc());
 }
 
 /// Secret material returned by a session endpoint.
@@ -492,6 +337,7 @@ final class CurrentUserView {
     required this.pendingInvitations,
     required Set<PlatformRole> platformRoles,
     required this.currentSession,
+    this.profile = const <String, Object?>{},
     this.displayName,
     this.locale,
     this.timezone,
@@ -517,6 +363,8 @@ final class CurrentUserView {
     }
   }
 
+  final Map<String, Object?> profile;
+  bool get onboardingComplete => profile['onboardingComplete'] == true;
   final String userId;
   final String email;
   final bool emailVerified;
@@ -534,6 +382,7 @@ final class CurrentUserView {
 
   CurrentUserView withActiveHome(String? homeId) => CurrentUserView(
     userId: userId,
+    profile: profile,
     email: email,
     emailVerified: emailVerified,
     homes: homes,
@@ -551,7 +400,7 @@ final class IdentitySessionSnapshot {
   IdentitySessionSnapshot({
     required this.status,
     this.session,
-    this.pendingLoginLink,
+    this.pendingEmailCode,
     this.loginEmail,
     this.currentUser,
     this.safeMessage,
@@ -563,7 +412,7 @@ final class IdentitySessionSnapshot {
   const IdentitySessionSnapshot.signedOut()
     : status = IdentitySessionStatus.signedOut,
       session = null,
-      pendingLoginLink = null,
+      pendingEmailCode = null,
       loginEmail = null,
       currentUser = null,
       safeMessage = null,
@@ -571,7 +420,7 @@ final class IdentitySessionSnapshot {
 
   final IdentitySessionStatus status;
   final SessionMetadata? session;
-  final PendingLoginLinkView? pendingLoginLink;
+  final PendingEmailCodeView? pendingEmailCode;
 
   /// Non-secret recipient retained for terminal resend presentation.
   final String? loginEmail;
@@ -587,8 +436,8 @@ final class IdentitySessionSnapshot {
     IdentitySessionStatus? status,
     SessionMetadata? session,
     bool clearSession = false,
-    PendingLoginLinkView? pendingLoginLink,
-    bool clearPendingLoginLink = false,
+    PendingEmailCodeView? pendingEmailCode,
+    bool clearPendingEmailCode = false,
     String? loginEmail,
     bool clearLoginEmail = false,
     CurrentUserView? currentUser,
@@ -600,9 +449,9 @@ final class IdentitySessionSnapshot {
     return IdentitySessionSnapshot(
       status: status ?? this.status,
       session: clearSession ? null : (session ?? this.session),
-      pendingLoginLink: clearPendingLoginLink
+      pendingEmailCode: clearPendingEmailCode
           ? null
-          : (pendingLoginLink ?? this.pendingLoginLink),
+          : (pendingEmailCode ?? this.pendingEmailCode),
       loginEmail: clearLoginEmail ? null : (loginEmail ?? this.loginEmail),
       currentUser: clearCurrentUser ? null : (currentUser ?? this.currentUser),
       safeMessage: clearMessage ? null : (safeMessage ?? this.safeMessage),
@@ -614,12 +463,6 @@ final class IdentitySessionSnapshot {
 String normalizedEmail(String value) {
   _requireEmail(value);
   return value.trim().toLowerCase();
-}
-
-void _requireChallenge(String value, String name) {
-  if (!RegExp(r'^[A-Za-z0-9_-]{43}$').hasMatch(value)) {
-    throw ArgumentError.value(value, name, 'must be an S256 challenge');
-  }
 }
 
 void _requireSecret(String value, String name, {int minimumLength = 43}) {
