@@ -13,34 +13,22 @@ local `providentia_api_client` Dart package.
 
 ## Current pin
 
-- Client OpenAPI version: `1.19.0`
+- Client OpenAPI version: `2.0.0`
 - Contract SHA-256:
-  `7e13d550e7a4438297766f654fadbd1e75894efac989229da6fcd0d9f7f97dda`
-- Canonical backend operations: 172
-- Generated homeowner operations: 140
+  `764f1b850a150f805eb178bf85cba802ba6b3ee35dcfbfae24a179049a7d55a7`
+- Canonical backend operations: 208
+- Generated homeowner operations: 159
 
-API 1.19.0 removes every human-account password and email-verification
-surface (`registerAccount`, `login`, `verifyEmail`,
-`resendEmailVerification`, `requestPasswordReset`, `completePasswordReset`
-and their request schemas): the email-only login link is the only human
-authentication, and the generator fails deliberately if a password surface
-ever returns. It adds the revision-guarded `removeHomeMembership`
-(`DELETE /api/v1/homes/{homeId}/memberships/{userId}` with required
-`expectedRevision`), makes trusted-device sessions durable —
-`SessionCredentials`/`DeviceSession` idle and refresh expiry plus
-`refreshIdleTtlSeconds` are nullable, where null means the session lives
-until explicit sign-out, revocation, or an account action, while
-`requestedSessionIdleSeconds` (900..5184000) still requests a deliberately
-bounded session — and gives `AiProviderProfile` a required `ownerScope`
-(`private`|`home`) with a nullable profile-owned `endpoint`.
+API 2.0.0 replaces login links with `requestEmailCode` and `verifyEmailCode`,
+adds country onboarding and policy records, account aliases and media, scoped
+access groups, operator approval, and per-member permission overrides. The
+generator rejects retired password and login-link routes. This is a pre-release
+contract realignment; no deployed legacy clients require compatibility.
 
-The login-link onboarding, account-management, and current household
-integration surfaces are deliberately adopted as one compatible boundary.
 Application-owned adapters compose:
 
-- generic email-only login-link start/status/cancel/exchange with client-owned
-  poll and PKCE proofs, plus app-owned fragment-secret proof, review, and
-  approve/deny handling for the exact homeowner link base;
+- bound numeric email-code request and verification, without callback URLs,
+  polling, browser approval or build-time credentials;
 - web cookie and native bearer refresh/logout, current-user bootstrap, and
   device-session list/revoke;
 - active-home selection, editable home settings, recipient invitations,

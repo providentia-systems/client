@@ -15,6 +15,25 @@ import 'package:providentia/features/ai_integration/presentation/server_ai_works
 import 'test_fixtures.dart';
 
 void main() {
+  test(
+    'removing personal AI credentials feature keeps read access and disables use',
+    () {
+      final capabilities = AiHomeCapabilities.fromPermissions(
+        homeId: 'home-1',
+        permissions: const <String>{
+          'ai.read',
+          'ai.use',
+          'ai.manage',
+          'ownership.transfer',
+        },
+      );
+      expect(capabilities.mayRead, isTrue);
+      expect(capabilities.mayUse, isFalse);
+      expect(capabilities.mayManage, isFalse);
+      expect(capabilities.mayShareHomeProfiles, isFalse);
+    },
+  );
+
   test('exact permissions do not infer read access from manage', () async {
     final repository = _ServerRepository(_workspace());
     final controller = _controller(
@@ -1365,7 +1384,12 @@ void main() {
       await controller.updateCapabilities(
         AiHomeCapabilities.fromPermissions(
           homeId: 'home-2',
-          permissions: const <String>{'ai.read', 'ai.use', 'ai.manage'},
+          permissions: const <String>{
+            'ai.read',
+            'ai.use',
+            'ai.manage',
+            'ai.credentials.use',
+          },
         ),
       );
       expect(controller.status, ServerAiWorkspaceStatus.idle);
@@ -1819,6 +1843,7 @@ void main() {
           permissions: const <String>{
             'ai.read',
             'ai.manage',
+            'ai.credentials.use',
             'ownership.transfer',
           },
         ).mayShareHomeProfiles,
@@ -2171,6 +2196,7 @@ AiHomeCapabilities _ownerCapabilities() => AiHomeCapabilities.fromPermissions(
     'ai.read',
     'ai.use',
     'ai.manage',
+    'ai.credentials.use',
     'ownership.transfer',
   },
 );
@@ -2285,7 +2311,12 @@ ServerAiWorkspaceController _controller({
       capabilities ??
       AiHomeCapabilities.fromPermissions(
         homeId: 'home-1',
-        permissions: const <String>{'ai.read', 'ai.use', 'ai.manage'},
+        permissions: const <String>{
+          'ai.read',
+          'ai.use',
+          'ai.manage',
+          'ai.credentials.use',
+        },
       ),
   clock: () => DateTime.utc(2026, 8, 11),
 );

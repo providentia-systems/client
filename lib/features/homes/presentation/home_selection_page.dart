@@ -3,11 +3,14 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:providentia/features/homes/domain/home_models.dart';
 import 'package:providentia/features/homes/presentation/homes_controller.dart';
+import 'package:providentia/features/profile/profile_port.dart';
 
 final class HomeSelectionPage extends StatefulWidget {
   const HomeSelectionPage({
     required this.controller,
     this.accountAccess = const <String, Object?>{},
+    this.accountProfile = const <String, Object?>{},
+    this.profilePort,
     this.sessionActiveHomeId,
     this.loadOnStart = true,
     this.activeHomeBuilder,
@@ -18,6 +21,8 @@ final class HomeSelectionPage extends StatefulWidget {
 
   final HomesController controller;
   final Map<String, Object?> accountAccess;
+  final Map<String, Object?> accountProfile;
+  final ProfilePort? profilePort;
   final String? sessionActiveHomeId;
   final bool loadOnStart;
   final Widget Function(BuildContext context, HomeSummary home)?
@@ -32,16 +37,18 @@ final class HomeSelectionPage extends StatefulWidget {
 final class _HomeSelectionPageState extends State<HomeSelectionPage> {
   final GlobalKey<FormState> _form = GlobalKey<FormState>();
   final TextEditingController _name = TextEditingController();
-  final TextEditingController _locale = TextEditingController(text: 'en-NA');
-  final TextEditingController _currency = TextEditingController(text: 'NAD');
-  final TextEditingController _timezone = TextEditingController(
-    text: 'Africa/Windhoek',
-  );
+  final TextEditingController _locale = TextEditingController();
+  final TextEditingController _currency = TextEditingController();
+  final TextEditingController _timezone = TextEditingController();
+  bool _loadingDefaults = false;
+  String? _defaultsError;
+  int _defaultsGeneration = 0;
   bool _showCreate = false;
 
   @override
   void initState() {
     super.initState();
+    unawaited(_loadCountryDefaults());
     if (widget.loadOnStart) {
       unawaited(
         widget.controller.load(sessionActiveHomeId: widget.sessionActiveHomeId),
@@ -52,6 +59,11 @@ final class _HomeSelectionPageState extends State<HomeSelectionPage> {
   @override
   void didUpdateWidget(covariant HomeSelectionPage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.accountProfile['countryCode'] !=
+            widget.accountProfile['countryCode'] ||
+        (oldWidget.profilePort == null && widget.profilePort != null)) {
+      unawaited(_loadCountryDefaults());
+    }
     if (!widget.loadOnStart) {
       return;
     }
@@ -67,6 +79,42 @@ final class _HomeSelectionPageState extends State<HomeSelectionPage> {
     unawaited(
       widget.controller.reconcileSessionActiveHome(widget.sessionActiveHomeId),
     );
+  }
+
+  Future<void> _loadCountryDefaults() async {
+    final generation = ++_defaultsGeneration;
+    final countryCode = '${widget.accountProfile['countryCode'] ?? ''}';
+    _locale.text =
+        '${widget.accountProfile['locale'] ?? (countryCode.isEmpty ? 'en' : 'en-$countryCode')}';
+    _currency.text = '${widget.accountProfile['currency'] ?? ''}';
+    _timezone.text = '${widget.accountProfile['timezone'] ?? 'UTC'}';
+    if (widget.profilePort == null) return;
+    setState(() {
+      _loadingDefaults = true;
+      _defaultsError = null;
+    });
+    try {
+      final countries = profileRecords(
+        await widget.profilePort!.call('listAvailableCountries'),
+      );
+      final country = countries
+          .where((entry) => entry['code'] == countryCode)
+          .firstOrNull;
+      if (!mounted || generation != _defaultsGeneration) return;
+      setState(() {
+        if (country != null) {
+          _currency.text = '${country['defaultCurrency'] ?? ''}';
+          _timezone.text = '${country['defaultTimezone'] ?? 'UTC'}';
+        }
+        _loadingDefaults = false;
+      });
+    } on Object catch (error) {
+      if (!mounted || generation != _defaultsGeneration) return;
+      setState(() {
+        _loadingDefaults = false;
+        _defaultsError = profileError(error);
+      });
+    }
   }
 
   @override
@@ -311,6 +359,14 @@ final class _HomeSelectionPageState extends State<HomeSelectionPage> {
                 ),
               ),
               const SizedBox(height: 16),
+              if (_loadingDefaults) const LinearProgressIndicator(),
+              if (_defaultsError != null) ...<Widget>[
+                Text(_defaultsError!),
+                TextButton(
+                  onPressed: _loadCountryDefaults,
+                  child: const Text('Reload country defaults'),
+                ),
+              ],
               TextFormField(
                 key: const Key('create-home-name'),
                 controller: _name,
@@ -333,7 +389,7 @@ final class _HomeSelectionPageState extends State<HomeSelectionPage> {
                     child: TextFormField(
                       key: const Key('create-home-locale'),
                       controller: _locale,
-                      enabled: !widget.controller.isBusy,
+                      enabled: !widget.controller.isBusy && !_loadingDefaults,
                       decoration: const InputDecoration(labelText: 'Locale'),
                       validator: _required,
                     ),
@@ -343,7 +399,7 @@ final class _HomeSelectionPageState extends State<HomeSelectionPage> {
                     child: TextFormField(
                       key: const Key('create-home-currency'),
                       controller: _currency,
-                      enabled: !widget.controller.isBusy,
+                      enabled: !widget.controller.isBusy && !_loadingDefaults,
                       textCapitalization: TextCapitalization.characters,
                       decoration: const InputDecoration(labelText: 'Currency'),
                       validator: (value) =>
@@ -357,7 +413,7 @@ final class _HomeSelectionPageState extends State<HomeSelectionPage> {
                     child: TextFormField(
                       key: const Key('create-home-timezone'),
                       controller: _timezone,
-                      enabled: !widget.controller.isBusy,
+                      enabled: !widget.controller.isBusy && !_loadingDefaults,
                       decoration: const InputDecoration(labelText: 'Time zone'),
                       validator: _required,
                     ),
@@ -367,7 +423,9 @@ final class _HomeSelectionPageState extends State<HomeSelectionPage> {
               const SizedBox(height: 16),
               FilledButton.icon(
                 key: const Key('create-home-submit'),
-                onPressed: widget.controller.isBusy ? null : _createHome,
+                onPressed: widget.controller.isBusy || _loadingDefaults
+                    ? null
+                    : _createHome,
                 icon: const Icon(Icons.add_home_rounded),
                 label: const Text('Create and open home'),
               ),

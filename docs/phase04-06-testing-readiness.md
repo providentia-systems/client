@@ -102,7 +102,7 @@ backup/restore, signing, and store-publication evidence remains operator-owned.
 
 ## Paired-backend smoke path
 
-1. Sign in by login link, select a disposable home, and verify initial paged
+1. Sign in by emailed number, select a disposable home, and verify initial paged
    bootstrap.
 2. Create a product and manual adjustment offline; reconnect and verify exactly
    one movement after retry.

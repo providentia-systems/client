@@ -90,7 +90,7 @@ import 'package:providentia/features/inventory/infrastructure/generated_home_ite
 import 'package:providentia/features/inventory/infrastructure/item_master_refreshing_synchronization.dart';
 import 'package:providentia/features/inventory/presentation/inventory_controller.dart';
 import 'package:providentia/features/profile/account_profile_page.dart';
-import 'package:providentia/features/profile/generated_profile_port.dart';
+import 'package:providentia/features/profile/infrastructure/generated_profile_port.dart';
 import 'package:providentia/features/purchasing/application/purchase_repository.dart';
 import 'package:providentia/features/purchasing/presentation/purchasing_controller.dart';
 import 'package:providentia/features/reporting/application/household_report_service.dart';
@@ -255,6 +255,10 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp>
                     onSignOut: _signOut,
                   )
                 : HomeSelectionPage(
+                    accountProfile:
+                        identitySnapshot.currentUser?.profile ??
+                        const <String, Object?>{},
+                    profilePort: GeneratedProfilePort(_authorizedApi),
                     accountAccess: Map<String, Object?>.from(
                       identitySnapshot.currentUser?.profile['accountAccess']
                               as Map? ??

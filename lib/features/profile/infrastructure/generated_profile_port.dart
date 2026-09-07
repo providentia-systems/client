@@ -1,6 +1,6 @@
 import 'package:providentia_api_client/providentia_api_client.dart';
 
-import 'profile_port.dart';
+import '../profile_port.dart';
 
 final class GeneratedProfilePort implements ProfilePort {
   const GeneratedProfilePort(this.api);

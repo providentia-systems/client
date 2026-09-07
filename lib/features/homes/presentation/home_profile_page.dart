@@ -270,8 +270,12 @@ class _HomeProfilePageState extends State<HomeProfilePage> {
                               'countryCode': _profile!['countryCode'],
                               'stateId': _profile!['stateId'],
                               'cityId': _profile!['cityId'],
-                              'latitude': _profile!['latitude'],
-                              'longitude': _profile!['longitude'],
+                              'latitude': double.tryParse(
+                                '${_profile!['latitude']}',
+                              ),
+                              'longitude': double.tryParse(
+                                '${_profile!['longitude']}',
+                              ),
                               'expectedRevision': _profile!['revision'],
                             },
                           );

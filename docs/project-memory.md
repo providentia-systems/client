@@ -1,5 +1,11 @@
 # Project memory
 
+Current pre-release authority: [API 2.0.0 platform access](platform-access.md).
+The current implementation uses numeric email codes, separate account/home/admin
+groups and delegated audited operator inspection. Earlier entries below retain
+historical decisions and do not define the current sign-in or access model.
+
+
 ## Owner decision — 2026-07-29
 
 - `Providentia` is the official project name, product name, and base for

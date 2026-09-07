@@ -424,11 +424,7 @@ final class HomeSessionManager {
     }
     final token = stepUpToken.trim();
     if (token.length < 40) {
-      throw ArgumentError.value(
-        stepUpToken,
-        'stepUpToken',
-        'must be the complete emailed confirmation code',
-      );
+      throw ArgumentError('A recent email-confirmation proof is required.');
     }
     try {
       await _transport.proposeHomeOwnershipTransfer(

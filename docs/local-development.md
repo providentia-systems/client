@@ -1,7 +1,7 @@
 # Local backend and client testing
 
 This is the supported developer handoff for the pinned API contract. It tests
-the production-shaped login-link flow, session restoration, homes,
+the production-shaped email-code flow, session restoration, homes,
 invitations, roles, and homeowner account management against one local Providentia
 backend. The backend's canonical
 [client/user testing runbook](https://github.com/providentia-systems/backend/blob/main/docs/deployment/client-user-testing.md)
@@ -9,22 +9,18 @@ contains the complete security and cross-device acceptance matrix.
 
 ## 1. Start the backend and email delivery
 
-From the backend checkout, either start the published stack or build from the
-verified handover. Approval links open this Flutter homeowner client; the
-backend exposes JSON proof, review, and decision endpoints but no approval
-page. Keep the Flutter web origin in the backend CORS list. For the default
-loopback ports, start the chosen stack with the explicit allowlist and
-homeowner app-link base:
+From the backend checkout, start the development stack built from the matching
+branch. The API and notification worker send numeric codes; there is no
+backend login page or client callback URL. Keep the Flutter web origin in the
+backend CORS list:
 
 ```bash
 CORS_ALLOWED_ORIGINS='http://127.0.0.1:3000,http://localhost:3000,http://127.0.0.1:8081,http://localhost:8081' \
-HOMEOWNER_APP_LINK_BASE='http://localhost:8081/homeowner' \
   bash scripts/setup-prebuilt.sh
 ```
 
 ```bash
 CORS_ALLOWED_ORIGINS='http://127.0.0.1:3000,http://localhost:3000,http://127.0.0.1:8081,http://localhost:8081' \
-HOMEOWNER_APP_LINK_BASE='http://localhost:8081/homeowner' \
   bash scripts/setup-development.sh \
     --handover /absolute/path/Pantry_Stock_Project_Handover_2026-07-29.zip
 ```
@@ -48,10 +44,9 @@ curl --fail-with-body http://127.0.0.1:8080/api/v1/system/info
 Open Mailpit at `http://127.0.0.1:8025`. An accepted API request without a
 delivered message is not a successful onboarding test.
 
-Before requesting a login link, confirm that the running backend contract
-contains the JSON operations `proveLoginLinkApproval`,
-`reviewLoginLinkApproval`, and `decideLoginLinkApproval`. No HTML route or form
-POST is part of the supported backend surface.
+Before requesting a code, confirm that the running backend contract contains
+`requestEmailCode` and `verifyEmailCode`. Use the coordinated API 2.0.0 branch;
+old prebuilt images do not expose the new authentication contract.
 
 ## 2. Prepare the client
 
@@ -137,8 +132,7 @@ flutter run -d chrome \
   --web-header=Cross-Origin-Opener-Policy=same-origin \
   --web-header=Cross-Origin-Embedder-Policy=require-corp \
   --dart-define=PROVIDENTIA_ENVIRONMENT=development \
-  --dart-define=PROVIDENTIA_API_BASE_URL=http://localhost:8080 \
-  --dart-define=PROVIDENTIA_HOMEOWNER_APP_LINK_BASE=http://localhost:8081/homeowner
+  --dart-define=PROVIDENTIA_API_BASE_URL=http://localhost:8080
 ```
 
 For a desktop target on the backend workstation:
@@ -146,8 +140,7 @@ For a desktop target on the backend workstation:
 ```bash
 flutter run -d linux \
   --dart-define=PROVIDENTIA_ENVIRONMENT=development \
-  --dart-define=PROVIDENTIA_API_BASE_URL=http://127.0.0.1:8080 \
-  --dart-define=PROVIDENTIA_HOMEOWNER_APP_LINK_BASE=providentia://login-link/homeowner
+  --dart-define=PROVIDENTIA_API_BASE_URL=http://127.0.0.1:8080
 ```
 
 Replace `linux` with an available `windows`, `macos`, or iOS simulator/device
@@ -163,63 +156,51 @@ flutter run -d <android-device-id> \
   --dart-define=PROVIDENTIA_API_BASE_URL=http://127.0.0.1:8080
 ```
 
-The loopback golden path is same-workstation (or ADB-reversed) testing. To
-open the approval link on a genuinely different device, expose the API through
-a trusted reachable HTTPS endpoint, configure the backend's homeowner app-link
-base for the installed client (or its HTTPS PWA route), allow that client origin
-in CORS, and point Flutter at the same reachable API. Never expose loopback
-development secrets publicly.
+The loopback workflow uses the same workstation or ADB reverse. Reading email
+on another device is sufficient: enter the number in the requesting client.
+For a client on a different network, expose the API through trusted HTTPS and
+configure its exact origin in the client and the backend CORS allowlist.
 
-## 4. Verify the login-link flow
+## 4. Verify numeric email sign-in
 
-Use a new email address for the first pass, then repeat with the same email
-from another installation.
+1. Enter an email address and choose **Send code**.
+2. Confirm Mailpit receives **Your Providentia verification code**. The public
+   challenge response must not contain the code.
+3. Enter the eight digits in the same client. Wrong codes remain on the form;
+   expiry, five failed attempts or successful use require a new challenge.
+4. Complete name, country and privacy agreement for a new account. Only Namibia
+   is initially published. Other countries require administrator activation.
+5. Create a home when your account group allows it, or accept a pending
+   invitation. New standalone accounts may own one home by default; invited
+   accounts use their country's configured invited-account group.
+6. Repeat from another installation and verify the account and homes remain
+   the same. Verify an old consumed code cannot sign in again.
 
-1. Enter the email in the originating client and choose **Send login link**.
-2. Confirm the client shows its waiting screen and Mailpit receives one neutral
-   message without revealing whether the address already exists.
-3. Open the login link with the Providentia homeowner app. The link capability
-   remains in the URI fragment, is cleared from browser history on web, and is
-   held only in memory until the decision. Opening it must show a review page;
-   it must not approve the request by itself.
-4. Choose **Approve login**. The reviewing client must not
-   receive the originating client's application session.
-5. Return to the originating client. It polls the backend and exchanges its
-   private poll token, state, and PKCE verifier. A deep link may return focus as
-   a convenience, but is not required.
-6. Confirm `GET /api/v1/me` bootstraps the account. A first-time person gets
-   exactly one editable `My home` as `owner`; an existing person gets their
-   existing homes without another default home.
+Codes expire after ten minutes. Resend has a 60-second cooldown, replaces the
+prior code, and does not remove rate limits. No user should need to click an
+authentication link or open a backend URL.
 
-The login request expires after 15 minutes. **Resend**, **Cancel**, and retry
-must clear the prior protected pending proof. A lost or ambiguous exchange
-response is single-use and requires a new login-link request.
+## 5. Verify home groups, invitations and profiles
 
-Use only the newest message with subject **Approve your Providentia login**.
-Sending a new link retires the previous request, so an older link correctly
-becomes unavailable. The client removes the `approval` fragment before review
-and never places it in a cookie, persistent store, log, or route name. After a
-failed proof, request a new link and open that fresh message once.
-
-## 5. Verify homes, invitations, and roles
-
-- One default/active home opens automatically. Multiple homes show the home
-  chooser; the account and sign-out actions remain available even with no
-  active home.
-- Rename `My home` in **Home settings**, close the client, and confirm the same
-  home and session restore on relaunch.
-- As an `owner` or permitted `manager`, invite another email and choose its
-  home role. The invitee completes the ordinary login-link flow, sees the
-  pending invitation, accepts its current revision, and can then switch homes.
-- Verify `owner`, `manager`, `member`, and `viewer` screens expose only actions
-  allowed by the server permission policy. Platform roles are separate and do
-  not grant private-home access.
-- Before the first administrator login, set protected backend
-  `PLATFORM_BOOTSTRAP_ADMIN_EMAILS` to the exact test address and restart (or
-  recreate) the backend so startup validation applies. Complete the ordinary
-  login-link flow for that address, then verify list/grant/revoke in
-  **Account**. Onboard the delegated address through its own login link and
-  confirm the backend rejects removal of the final active administrator.
+- A single authorized home opens directly; multiple homes show the chooser.
+- Home settings support name, description, photo, country/region/city, map
+  location, currency and timezone. Creation uses the selected country's
+  administrator-configured currency and timezone.
+- Invitation access is disabled in the default home group. Enable it in the
+  separate admin client and configure total/role quotas before inviting.
+- Invite a second email, sign in with its code, then accept or decline the
+  pending invitation. Acceptance rechecks current invitation authority.
+- Individual member permissions support inherit/allow/deny, bounded by the
+  home group's delegable permissions. Verify `permissions.manage` can edit
+  those overrides without granting membership removal or role management.
+- Move the home to a less permissive group. Existing members and records remain;
+  additions above current quotas fail and disabled actions disappear.
+- Verify two homes never share permissions or private inventory.
+- In Account, edit the name/avatar, verify an additional email, make it primary,
+  then remove the old email. Removing the last verified email is refused.
+- Bootstrap the system owner with the backend `system:owner` command. Operator
+  approval, account/home group assignment and administrative inspection belong
+  only in the separate admin client.
 
 ## 6. Verify persistent sessions and sign-out
 

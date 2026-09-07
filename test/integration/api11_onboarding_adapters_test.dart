@@ -746,11 +746,6 @@ const _homeId = '0198a0b1-c2d3-7e4f-8123-456789abcded';
 const _secondHomeId = '0198a0b1-c2d3-7e4f-8123-456789abcdee';
 const _invitationId = '0198a0b1-c2d3-7e4f-8123-456789abcdef';
 const _pollToken = 'poll-token-000000000000000000000000000000000';
-const _verifier =
-    'code-verifier-000000000000000000000000000000000000000000000000';
-const _state = 'login-state-000000000000000000000000000000000';
-const _challengeA = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
-const _challengeB = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 
 ProvidentiaApiClient _client(
   Future<http.Response> Function(http.Request request) handler,

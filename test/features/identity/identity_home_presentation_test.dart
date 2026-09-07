@@ -40,14 +40,14 @@ void main() {
       find.byKey(const Key('identity-email')),
       'person@example.com',
     );
-    await tester.tap(find.byKey(const Key('identity-request-login-link')));
+    await tester.tap(find.byKey(const Key('identity-request-email-code')));
     await tester.pump();
 
     expect(find.text('Check your email'), findsOneWidget);
-    expect(find.textContaining('on any device'), findsOneWidget);
+    expect(find.textContaining('eight-digit code sent'), findsOneWidget);
     expect(find.textContaining('whether this address is new'), findsNothing);
-    expect(find.byKey(const Key('identity-check-login-link')), findsOneWidget);
-    expect(find.byKey(const Key('identity-cancel-login-link')), findsOneWidget);
+    expect(find.byKey(const Key('identity-verify-email-code')), findsOneWidget);
+    expect(find.byKey(const Key('identity-cancel-email-code')), findsOneWidget);
     await identity.controller.cancelEmailCode();
     await tester.pump();
   });
@@ -444,6 +444,16 @@ void main() {
       MaterialApp(
         home: HomeSelectionPage(
           controller: homes.controller,
+          accountAccess: const <String, Object?>{
+            'features': <String, bool>{'homes.create': true},
+            'limits': <String, int>{'homes.owned': 1},
+          },
+          accountProfile: const <String, Object?>{
+            'countryCode': 'NA',
+            'currency': 'NAD',
+            'locale': 'en-NA',
+            'timezone': 'Africa/Windhoek',
+          },
           loadOnStart: false,
           activeHomeBuilder: (context, home) =>
               Scaffold(body: Text('Opened ${home.name} as ${home.role.name}')),
@@ -528,9 +538,6 @@ void main() {
 
 const _requestId = '0198a0b1-c2d3-7e4f-8123-456789abcdef';
 const _pollToken = 'poll-token-000000000000000000000000000000000';
-const _verifier =
-    'code-verifier-000000000000000000000000000000000000000000000000';
-const _state = 'login-state-000000000000000000000000000000000';
 
 final class _IdentityFixture {
   _IdentityFixture() : transport = _PresentationIdentityTransport() {
