@@ -2,9 +2,10 @@ import 'package:providentia/features/homes/domain/home_models.dart';
 import 'package:providentia/features/profile/profile_port.dart';
 
 Set<String> fixtureHomePermissions(HomeRole role) {
-  if (role == HomeRole.owner)
+  if (role == HomeRole.owner) {
     return <String>{...HomePermissions.owner, 'ai.credentials.use'};
-  if (role == HomeRole.manager)
+  }
+  if (role == HomeRole.manager) {
     return <String>{...HomePermissions.owner, 'ai.credentials.use'}
       ..removeAll(<String>{
         'ownership.transfer',
@@ -12,6 +13,7 @@ Set<String> fixtureHomePermissions(HomeRole role) {
         'data.erasure',
         'billing.manage',
       });
+  }
   final permissions = <String>{
     'home.read',
     'members.read',
@@ -21,7 +23,7 @@ Set<String> fixtureHomePermissions(HomeRole role) {
     'ai.read',
     'reports.read',
   };
-  if (role == HomeRole.member)
+  if (role == HomeRole.member) {
     permissions.addAll(<String>{
       'inventory.write',
       'purchases.write',
@@ -29,6 +31,7 @@ Set<String> fixtureHomePermissions(HomeRole role) {
       'ai.use',
       'ai.credentials.use',
     });
+  }
   return permissions;
 }
 
@@ -62,7 +65,7 @@ final class FixtureProfilePort implements ProfilePort {
     Map<String, Object?>? body,
   }) async {
     operations.add(operation);
-    if (operation == 'requestSecurityCode')
+    if (operation == 'requestSecurityCode') {
       return <String, Object?>{
         'challengeId': '0198a0b1-c2d3-7e4f-8123-456789abcdef',
         'bindingToken': 'test-binding-0000000000000000000000000000000',
@@ -72,11 +75,13 @@ final class FixtureProfilePort implements ProfilePort {
             .toIso8601String(),
         'resendAfterSeconds': 60,
       };
-    if (operation == 'verifySecurityCode')
+    }
+    if (operation == 'verifySecurityCode') {
       return <String, Object?>{
         'proofToken': 'step-up-token-00000000000000000000000000000000',
         'action': 'ownership-transfer',
       };
+    }
     return <String, Object?>{};
   }
 }

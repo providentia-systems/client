@@ -112,7 +112,7 @@ void main() {
       'lib/features/homes/infrastructure/api11_home_transport.dart',
       'lib/features/household_sync/infrastructure/api17_callback_household_gateway.dart',
       'lib/features/identity/infrastructure/api11_identity_transport.dart',
-      'lib/features/identity/infrastructure/generated_login_link_approval_transport.dart',
+      'lib/features/profile/infrastructure/generated_profile_port.dart',
       'lib/features/inventory/infrastructure/generated_home_item_master_source.dart',
       'lib/features/reporting/infrastructure/generated_household_report_repository.dart',
       'lib/features/shopping/infrastructure/generated_online_shopping_suggestion_repository.dart',
@@ -153,7 +153,7 @@ void main() {
     for (final requiredSymbol in <String>[
       'Api11IdentityTransport',
       'PlatformPendingEmailCodeStore',
-      'SecureLoginLinkRequestFactory',
+      'GeneratedProfilePort',
       'EmailCodeSignInPage',
       'Api11HomeTransport',
       'HomeSelectionPage',
@@ -165,7 +165,7 @@ void main() {
         reason: '$requiredSymbol must remain reachable from production.',
       );
     }
-    // API 1.19.0 has no human-account password surface anywhere; the
+    // Email OTP has no human-account password surface anywhere; the
     // login-link flow is the only human authentication path.
     for (final removedSymbol in <String>[
       'enableDevelopmentPasswordLogin',

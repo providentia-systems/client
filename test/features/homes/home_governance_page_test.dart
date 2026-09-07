@@ -9,6 +9,123 @@ import 'package:providentia/features/homes/presentation/homes_controller.dart';
 import '../../support/access_fixture.dart';
 
 void main() {
+  for (final finalOwner in <bool>[false, true]) {
+    testWidgets(
+      finalOwner
+          ? 'last owner refusal preserves the active home'
+          : 'co-owner can leave after backend authorization',
+      (tester) async {
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = const Size(1000, 4000);
+        addTearDown(tester.view.reset);
+        final transport = _GovernanceTransport(role: HomeRole.owner);
+        if (finalOwner) {
+          transport.leaveFailure = const HomeTransportException(
+            kind: HomeFailureKind.conflict,
+            safeMessage:
+                'The final owner must transfer ownership before leaving.',
+          );
+        } else {
+          transport.memberships.add(
+            HomeMembership(
+              userId: 'co-owner',
+              displayName: 'Other owner',
+              role: HomeRole.owner,
+              revision: 1,
+            ),
+          );
+        }
+        final fixture = await _GovernanceFixture.create(transport);
+        addTearDown(fixture.dispose);
+        await tester.pumpWidget(
+          MaterialApp(
+            home: HomeGovernancePage(
+              profilePort: FixtureProfilePort(),
+              controller: fixture.controller,
+              currentUserId: _currentUserId,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('leave-active-home')));
+        await tester.pumpAndSettle();
+        expect(transport.leaveCalls, 1);
+        if (finalOwner) {
+          expect(
+            find.text(
+              'The final owner must transfer ownership before leaving.',
+            ),
+            findsOneWidget,
+          );
+          expect(fixture.manager.snapshot.activeHome?.id, _homeId);
+          expect(transport.leftHomeId, isNull);
+        } else {
+          expect(fixture.manager.snapshot.activeHome, isNull);
+          expect(transport.leftHomeId, _homeId);
+        }
+      },
+    );
+  }
+
+  testWidgets(
+    'individual permissions are delegated independently of membership management',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1000, 1600);
+      addTearDown(tester.view.reset);
+      final transport = _GovernanceTransport(role: HomeRole.manager)
+        ..home = HomeSummary(
+          id: _homeId,
+          name: 'My home',
+          locale: 'en-NA',
+          currency: 'NAD',
+          timezone: 'Africa/Windhoek',
+          role: HomeRole.manager,
+          revision: 1,
+          access: fixtureHomeAccess(),
+          effectivePermissions: const <String>{
+            HomePermissions.homeRead,
+            HomePermissions.membersRead,
+            HomePermissions.permissionsManage,
+          },
+        );
+      final fixture = await _GovernanceFixture.create(transport);
+      addTearDown(fixture.dispose);
+      final profile = FixtureProfilePort();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: HomeGovernancePage(
+            profilePort: profile,
+            controller: fixture.controller,
+            currentUserId: _currentUserId,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final member = find.byKey(const Key('home-membership-user-member'));
+      expect(
+        find.descendant(
+          of: member,
+          matching: find.byType(DropdownButton<HomeRole>),
+        ),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const Key('remove-home-membership-user-member')),
+        findsNothing,
+      );
+      await tester.tap(
+        find.descendant(
+          of: member,
+          matching: find.byTooltip('Individual permissions'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Household helper: permissions'), findsOneWidget);
+      expect(profile.operations, contains('getMemberPermissionOverrides'));
+    },
+  );
+
   testWidgets(
     'owner governance exposes and executes the server-authorized controls',
     (tester) async {
@@ -40,7 +157,7 @@ void main() {
       expect(find.text('Sent invitations'), findsOneWidget);
       expect(find.text('Role permissions'), findsOneWidget);
       expect(find.text('Your pending invitations'), findsOneWidget);
-      expect(find.byKey(const Key('leave-active-home')), findsNothing);
+      expect(find.byKey(const Key('leave-active-home')), findsOneWidget);
 
       await tester.tap(find.byKey(const Key('edit-home-settings')));
       await tester.pumpAndSettle();
@@ -132,7 +249,7 @@ void main() {
   );
 
   testWidgets(
-    'owner proposes and revokes an ownership transfer through step-up',
+    'owner proposes and revokes ownership with verified email confirmation',
     (tester) async {
       tester.view.devicePixelRatio = 1;
       tester.view.physicalSize = const Size(1000, 4000);
@@ -161,17 +278,11 @@ void main() {
       await tester.tap(find.byKey(const Key('propose-ownership-transfer')));
       await tester.pumpAndSettle();
 
-      expect(transport.stepUpRequests, 1);
-      expect(find.text('Confirm ownership transfer'), findsOneWidget);
-      final tokenField = tester.widget<TextField>(
-        find.byKey(const Key('ownership-step-up-token')),
-      );
-      expect(
-        tokenField.controller?.text,
-        _stepUpToken,
-        reason: 'development profiles prefill the emailed code',
-      );
-      await tester.tap(find.byKey(const Key('confirm-ownership-transfer')));
+      expect(find.text('Confirm with an email code'), findsOneWidget);
+      final codeField = find.widgetWithText(TextField, 'Eight-digit code');
+      expect(tester.widget<TextField>(codeField).controller?.text, isEmpty);
+      await tester.enterText(codeField, '12345678');
+      await tester.tap(find.widgetWithText(FilledButton, 'Verify code'));
       await tester.pumpAndSettle();
 
       expect(transport.proposedTransfer, (
@@ -452,8 +563,7 @@ void main() {
 
 const _homeId = 'home-primary';
 const _currentUserId = 'user-current';
-const _stepUpToken =
-    'development-step-up-token-0000000000000000000000000000000000000000';
+const _stepUpToken = 'step-up-token-00000000000000000000000000000000';
 
 HomeOwnershipTransfer _offeredTransfer() => HomeOwnershipTransfer(
   id: 'transfer-offer',
@@ -574,7 +684,8 @@ final class _GovernanceTransport implements HomeTransportPort {
   Set<String>? savedPolicyPermissions;
   String? acceptedInvitationId;
   String? leftHomeId;
-  int stepUpRequests = 0;
+  int leaveCalls = 0;
+  HomeTransportException? leaveFailure;
   int membershipListCalls = 0;
   HomeTransportException? removalFailure;
   ({String userId, int expectedRevision})? removedMembership;
@@ -826,7 +937,11 @@ final class _GovernanceTransport implements HomeTransportPort {
   }
 
   @override
-  Future<void> leaveHome(String homeId) async => leftHomeId = homeId;
+  Future<void> leaveHome(String homeId) async {
+    leaveCalls++;
+    if (leaveFailure case final failure?) throw failure;
+    leftHomeId = homeId;
+  }
 }
 
 final class _MemoryActiveHomeStore implements ActiveHomeStore {

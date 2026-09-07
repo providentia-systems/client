@@ -24,7 +24,7 @@ const scripts = [
   'tool/release/package_windows.ps1',
   'tool/release/prepare_apple_signing.sh',
   'tool/release/verify_web_runtime.mjs',
-  'tool/release/login_link_acceptance_protocol.mjs',
+  'tool/release/email_code_acceptance_protocol.mjs',
 ];
 
 test('release workflows are immutable, protected and artifact strict', async () => {
@@ -47,26 +47,12 @@ test('release workflows are immutable, protected and artifact strict', async () 
   }
 });
 
-test('every production artifact compiles the reviewed homeowner app-link base', async () => {
-  for (const relative of workflows.filter(
-    (entry) => !entry.endsWith('browser-acceptance.yml'),
-  )) {
+test('production artifacts compile the reviewed API origin without login callbacks', async () => {
+  for (const relative of workflows.filter((entry) => !entry.endsWith('browser-acceptance.yml'))) {
     const source = await readFile(path.join(root, relative), 'utf8');
-    assert.match(
-      source,
-      /PRODUCTION_HOMEOWNER_APP_LINK_BASE/u,
-      `${relative} must require the protected production app-link variable.`,
-    );
-    assert.match(
-      source,
-      /PROVIDENTIA_HOMEOWNER_APP_LINK_BASE/u,
-      `${relative} must compile the reviewed app-link base into Flutter.`,
-    );
-    assert.match(
-      source,
-      /\/homeowner/u,
-      `${relative} must fail closed outside the homeowner route.`,
-    );
+    assert.match(source, /PRODUCTION_API_BASE_URL/u);
+    assert.match(source, /PROVIDENTIA_API_BASE_URL/u);
+    assert.doesNotMatch(source, /HOMEOWNER_APP_LINK_BASE/u);
   }
 });
 
@@ -131,15 +117,12 @@ test('platform signing is real and independently verified', async () => {
     path.join(root, '.github/workflows/browser-acceptance.yml'),
     'utf8',
   );
-  assert.match(browser, /auth\/login-links/u);
-  assert.match(browser, /createLoginLinkProof/u);
-  assert.match(browser, /extractApprovalLink/u);
+  assert.match(browser, /auth\/email-codes/u);
+  assert.match(browser, /extractEmailCode/u);
   assert.match(browser, /applicationKind:\s*'homeowner'/u);
-  assert.match(browser, /\/proof`/u);
-  assert.match(browser, /\/review`/u);
-  assert.match(browser, /\/decision`/u);
-  assert.match(browser, /Approve login/u);
-  assert.match(browser, /scannerSafeReview/u);
+  assert.match(browser, /requestBinding/u);
+  assert.match(browser, /singleUseCode/u);
+  assert.doesNotMatch(browser, /auth\/login-links/u);
   assert.match(browser, /api\/v1\/me/u);
   assert.match(browser, /auth\/refresh/u);
   assert.match(browser, /auth\/logout/u);
@@ -148,7 +131,7 @@ test('platform signing is real and independently verified', async () => {
   assert.match(browserWorkflow, /imapflow@1\.6\.6/u);
   assert.match(browserWorkflow, /npm install --ignore-scripts --no-save --no-package-lock/u);
   assert.match(browserWorkflow, /E2E_MAILBOX_IMAP_PASSWORD/u);
-  assert.match(browserWorkflow, /E2E_HOMEOWNER_APP_LINK_BASE/u);
+  assert.doesNotMatch(browserWorkflow, /E2E_HOMEOWNER_APP_LINK_BASE/u);
   assert.doesNotMatch(browserWorkflow, /E2E_PUBLIC_BASE_URL/u);
   assert.doesNotMatch(browser, /Approve this login\?/u);
   assert.match(browserWorkflow, /authenticate: true/u);
@@ -160,7 +143,7 @@ test('platform signing is real and independently verified', async () => {
   );
 });
 
-test('every packaged client target registers the homeowner app-link scheme', async () => {
+test('packaged clients authenticate with entered codes without login-link registrations', async () => {
   const android = await readFile(
     path.join(root, 'android/app/src/main/AndroidManifest.xml'),
     'utf8',
@@ -180,17 +163,15 @@ test('every packaged client target registers the homeowner app-link scheme', asy
     'utf8',
   );
 
-  assert.match(android, /android:scheme="providentia"/u);
-  assert.match(android, /android:host="login-link"/u);
-  assert.match(android, /android:path="\/homeowner"/u);
-  assert.match(ios, /<string>providentia<\/string>/u);
-  assert.match(macos, /<string>providentia<\/string>/u);
-  assert.match(desktop, /^Exec=providentia %u$/mu);
-  assert.match(desktop, /^MimeType=x-scheme-handler\/providentia;$/mu);
-  assert.match(windows, /<uap:Protocol Name="providentia">/u);
-  assert.match(production, /didPushRouteInformation/u);
-  assert.match(production, /scrubBrowserFragment/u);
-  assert.match(production, /GeneratedLoginLinkApprovalTransport/u);
+  assert.doesNotMatch(android, /android:host="login-link"/u);
+  assert.doesNotMatch(ios, /providentia.login-link/u);
+  assert.doesNotMatch(macos, /providentia.login-link/u);
+  assert.match(desktop, /^Exec=providentia$/mu);
+  assert.doesNotMatch(desktop, /x-scheme-handler\/providentia/u);
+  assert.doesNotMatch(windows, /<uap:Protocol Name="providentia">/u);
+  assert.match(production, /EmailCodeSignInPage/u);
+  assert.doesNotMatch(production, /GeneratedLoginLinkApprovalTransport/u);
+
 });
 
 test('agent bootstrap repairs SDK corruption and pins its executable tools', async () => {

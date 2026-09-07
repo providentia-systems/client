@@ -898,7 +898,17 @@ void main() {
     'activation publishes backend-effective permissions fail closed',
     () async {
       final transport = _FakeHomeTransport(
-        homes: <HomeSummary>[_home('home-a', 'Home A', role: HomeRole.member)],
+        homes: <HomeSummary>[
+          _home(
+            'home-a',
+            'Home A',
+            role: HomeRole.member,
+            permissions: const <String>{
+              HomePermissions.homeRead,
+              HomePermissions.inventoryRead,
+            },
+          ),
+        ],
         policies: <HomePermissionPolicy>[
           HomePermissionPolicy(
             role: HomeRole.member,
@@ -925,10 +935,64 @@ void main() {
 
       final missingPolicy = HomeSessionSnapshot(
         status: HomeSessionStatus.ready,
-        homes: <HomeSummary>[_home('home-b', 'Home B', role: HomeRole.manager)],
-        activeHome: _home('home-b', 'Home B', role: HomeRole.manager),
+        homes: <HomeSummary>[
+          _home(
+            'home-b',
+            'Home B',
+            role: HomeRole.manager,
+            permissions: const <String>{},
+          ),
+        ],
+        activeHome: _home(
+          'home-b',
+          'Home B',
+          role: HomeRole.manager,
+          permissions: const <String>{},
+        ),
       );
       expect(missingPolicy.effectivePermissions, isEmpty);
+    },
+  );
+
+  test(
+    'switching homes replaces permissions instead of combining grants',
+    () async {
+      final transport = _FakeHomeTransport(
+        homes: <HomeSummary>[
+          _home(
+            'home-a',
+            'Home A',
+            role: HomeRole.member,
+            permissions: const <String>{
+              HomePermissions.homeRead,
+              HomePermissions.inventoryRead,
+              HomePermissions.inventoryWrite,
+            },
+          ),
+          _home(
+            'home-b',
+            'Home B',
+            role: HomeRole.owner,
+            permissions: const <String>{
+              HomePermissions.homeRead,
+              HomePermissions.inventoryRead,
+            },
+          ),
+        ],
+      );
+      final manager = HomeSessionManager(
+        transport: transport,
+        activeHomeStore: _MemoryActiveHomeStore(),
+      );
+      addTearDown(manager.dispose);
+      await manager.load(sessionActiveHomeId: 'home-a');
+      expect(manager.snapshot.allows(HomePermissions.inventoryWrite), isTrue);
+      await manager.selectHome('home-b');
+      expect(manager.snapshot.activeHome?.id, 'home-b');
+      expect(manager.snapshot.allows(HomePermissions.inventoryRead), isTrue);
+      expect(manager.snapshot.allows(HomePermissions.inventoryWrite), isFalse);
+      await manager.selectHome('home-a');
+      expect(manager.snapshot.allows(HomePermissions.inventoryWrite), isTrue);
     },
   );
 
@@ -985,7 +1049,14 @@ void main() {
       '${scenario.role.name} governance loads only permitted collections',
       () async {
         final transport = _FakeHomeTransport(
-          homes: <HomeSummary>[_home('home-a', 'Home A', role: scenario.role)],
+          homes: <HomeSummary>[
+            _home(
+              'home-a',
+              'Home A',
+              role: scenario.role,
+              permissions: scenario.permissions,
+            ),
+          ],
           policies: <HomePermissionPolicy>[
             HomePermissionPolicy(
               role: scenario.role,
@@ -1006,7 +1077,7 @@ void main() {
 
         expect(transport.membershipListCalls, scenario.membershipCalls);
         expect(transport.invitationListCalls, scenario.invitationCalls);
-        expect(manager.snapshot.permissionPolicies, hasLength(1));
+        expect(manager.snapshot.permissionPolicies, isEmpty);
       },
     );
   }
@@ -1015,9 +1086,14 @@ void main() {
 const String _stepUpToken =
     'development-step-up-token-0000000000000000000000000000000000000000';
 
-HomeSummary _home(String id, String name, {HomeRole role = HomeRole.owner}) {
+HomeSummary _home(
+  String id,
+  String name, {
+  HomeRole role = HomeRole.owner,
+  Set<String>? permissions,
+}) {
   return HomeSummary(
-    effectivePermissions: fixtureHomePermissions(role),
+    effectivePermissions: permissions ?? fixtureHomePermissions(role),
     access: fixtureHomeAccess(),
     id: id,
     name: name,

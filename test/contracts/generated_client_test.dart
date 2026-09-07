@@ -133,8 +133,8 @@ void main() {
       );
     });
 
-    test('publishes only the API 1.19.0 homeowner operation registry', () {
-      expect(ProvidentiaApiClient.operations, hasLength(140));
+    test('publishes only the API 2.0.0 homeowner operation registry', () {
+      expect(ProvidentiaApiClient.operations, hasLength(159));
       expect(
         ProvidentiaApiClient.operations['createAiExtraction'],
         isA<ApiOperation>()
@@ -161,11 +161,14 @@ void main() {
         ProvidentiaApiClient.operations.keys,
         containsAll(<String>[
           'requestEmailCode',
-          'proveLoginLinkApproval',
-          'reviewLoginLinkApproval',
-          'decideLoginLinkApproval',
-          'getLoginLinkStatus',
-          'exchangeLoginLink',
+          'verifyEmailCode',
+          'completeAccountOnboarding',
+          'getAccountProfile',
+          'requestAccountEmailCode',
+          'verifyAccountEmail',
+          'getHomeProfile',
+          'updateMemberPermissionOverrides',
+          'declineHomeInvitation',
           'refreshSession',
           'getCurrentUser',
           'removeHomeMembership',
@@ -185,9 +188,14 @@ void main() {
           'submitCatalogProposal',
         ]),
       );
-      // API 1.19.0 removed the entire human-account password and
-      // email-verification surface; login links are the only human sign-in.
+      // API 2.0.0 uses email codes; password and approval-link operations
+      // must remain absent from the homeowner transport.
       for (final forbiddenOperation in <String>[
+        'proveLoginLinkApproval',
+        'reviewLoginLinkApproval',
+        'decideLoginLinkApproval',
+        'getLoginLinkStatus',
+        'exchangeLoginLink',
         'registerAccount',
         'login',
         'verifyEmail',

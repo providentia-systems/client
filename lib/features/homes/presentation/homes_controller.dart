@@ -109,9 +109,7 @@ final class HomesController extends ChangeNotifier {
         stepUpToken: stepUpToken,
       );
     } on ArgumentError {
-      _localFailure(
-        'Enter the complete confirmation code from the ownership email.',
-      );
+      _localFailure('Confirm your email again before transferring ownership.');
     } on StateError catch (error) {
       _localFailure(error.message.toString());
     }

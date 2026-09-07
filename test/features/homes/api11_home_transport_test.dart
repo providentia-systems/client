@@ -7,7 +7,7 @@ import 'package:http/testing.dart';
 import 'package:providentia/features/homes/application/home_ports.dart';
 import 'package:providentia/features/homes/domain/home_models.dart';
 import 'package:providentia/features/homes/infrastructure/api11_home_transport.dart';
-import 'package:providentia/features/profile/generated_profile_port.dart';
+import 'package:providentia/features/profile/infrastructure/generated_profile_port.dart';
 import 'package:providentia_api_client/providentia_api_client.dart';
 
 void main() {

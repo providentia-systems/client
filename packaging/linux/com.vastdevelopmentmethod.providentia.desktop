@@ -2,10 +2,9 @@
 Type=Application
 Name=Providentia
 Comment=Household stock control
-Exec=providentia %u
+Exec=providentia
 Icon=com.vastdevelopmentmethod.providentia
 Terminal=false
 Categories=Utility;
-MimeType=x-scheme-handler/providentia;
 StartupNotify=true
 X-AppImage-Name=Providentia

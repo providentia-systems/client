@@ -24,9 +24,9 @@ contract update may not regress those semantics while adopting onboarding.
 
 | Capability | Current client implementation |
 |---|---|
-| Login-link onboarding | Email is entered in the originating client; it creates private poll/state/PKCE proofs, starts a generic request, polls with lifecycle-aware backoff, and exchanges once after browser approval |
-| Cross-device approval | The email may be opened in any browser; a deep/platform link is optional and never carries or authorizes the client session |
-| Pending request safety | Protected short-lived storage, 15-minute request boundary plus server-authoritative final status check, cancel/resend/expiry UI, and restart after an ambiguous single-use exchange |
+| Email-code onboarding | Email is entered in the client; the backend sends an eight-digit code, and the same client verifies its bound challenge once |
+| Cross-device email reading | Read the email anywhere, then enter its number in the requesting client; no callback URL is required |
+| Pending request safety | Protected challenge binding, ten-minute expiry, five attempts, resend cooldown, cancellation and rejection of late or replayed grants |
 | Current-user bootstrap | `GET /api/v1/me` supplies identity, current session, homes, roles, active home, pending invitations, and platform roles |
 | Session restoration | Approximately 15-minute access credentials; sliding 30-day web inactivity and 60-day native inactivity enforced by the backend |
 | Credential storage | Native refresh credential only in OS secure storage; access credential in memory; web session in Secure HttpOnly cookies with required CSRF |
@@ -42,16 +42,15 @@ contract update may not regress those semantics while adopting onboarding.
 | Browser/native platforms | Web, Android, iOS, Windows, macOS, and Linux share the same polling/exchange authority; platform return links are convenience only |
 | Release engineering | Fail-closed signing/package/deployment workflows remain for Android, Apple, Windows, Linux, web, and browser acceptance |
 
-Only the login-link workflow is production onboarding evidence; development
+Only the email-code workflow is production onboarding evidence; development
 compatibility surfaces do not satisfy this acceptance boundary.
 
 ## Connected acceptance boundary
 
-Against the pinned API `1.19.0` development stack, the production composition can:
+Against the pinned API `2.0.0` development stack, the production composition can:
 
-1. start and approve a neutral login-link request for a new or existing email;
-2. complete the private exchange in the originating client and bootstrap the
-   authoritative account;
+1. request an emailed numeric code for a new or existing email;
+2. enter the code in the requesting client and bootstrap the authoritative account;
 3. restore/rotate native or browser sessions, list devices, revoke a device,
    and sign out deterministically;
 4. auto-open one authorized default/active home or choose between multiple
@@ -135,7 +134,7 @@ same-site cookie topology required by browser sessions.
 
 ## Phase exit criteria
 
-Phase 9 exits when the complete API `1.13.2` login-link, session, home,
+Phase 9 exits when the complete API `2.0.0` email-code, session, home,
 invitation, role, and administration path passes against a live deployment on
 every selected platform, including expiry, retry, revoked membership, and
 cross-home isolation.

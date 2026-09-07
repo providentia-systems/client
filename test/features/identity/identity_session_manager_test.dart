@@ -16,7 +16,7 @@ void main() {
       addTearDown(fixture.dispose);
       await fixture.manager.requestEmailCode('Person@Example.com');
       expect(fixture.transport.started.single.email, 'person@example.com');
-      expect(fixture.pendingStore.value?.bindingToken, _pollToken);
+      expect(fixture.pendingStore.value?.bindingToken, _bindingToken);
       expect(
         fixture.manager.snapshot.status,
         IdentitySessionStatus.waitingForEmailCode,
@@ -39,7 +39,7 @@ void main() {
     await fixture.manager.verifyEmailCode('12345678');
 
     expect(fixture.transport.exchangeCalls, 1);
-    expect(fixture.transport.lastExchange?.bindingToken, _pollToken);
+    expect(fixture.transport.lastExchange?.bindingToken, _bindingToken);
     expect(
       fixture.manager.snapshot.status,
       IdentitySessionStatus.authenticated,
@@ -187,24 +187,21 @@ void main() {
     expect(fixture.transport.logoutCalls, 1);
   });
 
-  test(
-    'verification needs no second pending challenge write',
-    () async {
-      final fixture = _Fixture(pendingWriteFailsAfter: 1);
-      addTearDown(fixture.dispose);
+  test('verification needs no second pending challenge write', () async {
+    final fixture = _Fixture(pendingWriteFailsAfter: 1);
+    addTearDown(fixture.dispose);
 
-      await fixture.manager.requestEmailCode('person@example.com');
+    await fixture.manager.requestEmailCode('person@example.com');
 
-      await fixture.manager.verifyEmailCode('12345678');
+    await fixture.manager.verifyEmailCode('12345678');
 
-      expect(
-        fixture.manager.snapshot.status,
-        IdentitySessionStatus.authenticated,
-      );
-      expect(fixture.manager.snapshot.pendingEmailCode, isNull);
-      expect(fixture.pendingStore.writes, 1);
-    },
-  );
+    expect(
+      fixture.manager.snapshot.status,
+      IdentitySessionStatus.authenticated,
+    );
+    expect(fixture.manager.snapshot.pendingEmailCode, isNull);
+    expect(fixture.pendingStore.writes, 1);
+  });
 
   test('native restore rotates a 60-day sliding session', () async {
     final fixture = _Fixture(
@@ -450,7 +447,7 @@ void main() {
     );
   });
 
-  test('resend preempts an approval exchange already in flight', () async {
+  test('resend preempts email-code verification already in flight', () async {
     final fixture = _Fixture();
     addTearDown(fixture.dispose);
     await fixture.manager.requestEmailCode('a@example.com');
@@ -540,7 +537,7 @@ void main() {
   });
 
   test(
-    'definitive start rate limit does not poll a nonexistent request',
+    'definitive request rate limit does not verify a nonexistent challenge',
     () async {
       final fixture = _Fixture();
       addTearDown(fixture.dispose);
@@ -625,16 +622,28 @@ void main() {
     },
   );
 
-  test('a new account cannot start while old credentials cannot be retired', () async {
-    final fixture = _Fixture(stored: StoredNativeSession(sessionId: _sessionId, deviceId: _deviceId, refreshToken: 'account-a-refresh'));
-    addTearDown(fixture.dispose);
-    fixture.credentials.clearFails = true;
-    await expectLater(fixture.manager.requestEmailCode('account-b@example.com'), throwsA(isA<IdentityCredentialStoreException>()));
-    expect(fixture.transport.started, isEmpty);
-    expect(fixture.pendingStore.value, isNull);
-    expect(fixture.pendingStore.logoutIntent, isTrue);
-    expect(fixture.manager.snapshot.isAuthenticated, isFalse);
-  });
+  test(
+    'a new account cannot start while old credentials cannot be retired',
+    () async {
+      final fixture = _Fixture(
+        stored: StoredNativeSession(
+          sessionId: _sessionId,
+          deviceId: _deviceId,
+          refreshToken: 'account-a-refresh',
+        ),
+      );
+      addTearDown(fixture.dispose);
+      fixture.credentials.clearFails = true;
+      await expectLater(
+        fixture.manager.requestEmailCode('account-b@example.com'),
+        throwsA(isA<IdentityCredentialStoreException>()),
+      );
+      expect(fixture.transport.started, isEmpty);
+      expect(fixture.pendingStore.value, isNull);
+      expect(fixture.pendingStore.logoutIntent, isTrue);
+      expect(fixture.manager.snapshot.isAuthenticated, isFalse);
+    },
+  );
 
   test('delayed cross-tab grants cannot roll CSRF metadata backward', () async {
     final hub = _CoordinationHub();
@@ -704,7 +713,7 @@ void main() {
         email: 'person@example.com',
         createdAt: DateTime.utc(2026, 8, 9, 12),
         expiresAt: DateTime.utc(2026, 8, 9, 12, 15),
-        bindingToken: _pollToken,
+        bindingToken: _bindingToken,
         resendAt: (DateTime.utc(
           2026,
           8,
@@ -1176,7 +1185,16 @@ void main() {
       addTearDown(() {
         if (!cookieClearGate.isCompleted) cookieClearGate.complete();
       });
-      await sharedStore.cookieClearRead!.future.timeout(const Duration(seconds: 2), onTimeout: () { fail('journal not reached: state=' + first.manager.snapshot.status.name + ', reason=' + (first.manager.snapshot.safeMessage ?? '') + ', exchanges=' + first.transport.exchangeCalls.toString()); });
+      await sharedStore.cookieClearRead!.future.timeout(
+        const Duration(seconds: 2),
+        onTimeout: () {
+          fail(
+            'Journal not reached: state=${first.manager.snapshot.status.name}, '
+            'reason=${first.manager.snapshot.safeMessage ?? ""}, '
+            'exchanges=${first.transport.exchangeCalls}',
+          );
+        },
+      );
 
       final secondStart = second.manager.requestEmailCode('b@example.com');
       await Future<void>.delayed(const Duration(milliseconds: 50));
@@ -1327,12 +1345,7 @@ const _userId = '0198a0b1-c2d3-7e4f-8123-456789abcdec';
 const _secondSessionId = '0198a0b1-c2d3-7e4f-8123-456789abcdd1';
 const _secondUserId = '0198a0b1-c2d3-7e4f-8123-456789abcdd2';
 const _homeId = '0198a0b1-c2d3-7e4f-8123-456789abcdd3';
-const _pollToken = 'poll-token-private-proof-000000000000000000000000';
-const _verifier =
-    'pkce-verifier-private-proof-000000000000000000000000000000000000';
-const _state = 'state-private-proof-000000000000000000000000000000';
-const _pollChallenge = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
-const _codeChallenge = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+const _bindingToken = 'binding-token-private-proof-000000000000000000000000';
 
 final class _Fixture {
   _Fixture({
@@ -1552,7 +1565,7 @@ final class _FakeIdentityTransport implements IdentityTransportPort {
     return PendingEmailCode(
       requestId: requestId,
       email: email,
-      bindingToken: _pollToken,
+      bindingToken: _bindingToken,
       createdAt: clock.value,
       expiresAt: expiresAt,
       resendAt: clock.value.add(const Duration(seconds: 60)),

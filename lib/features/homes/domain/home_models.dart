@@ -29,6 +29,8 @@ final class HomePermissions {
   static const String aiRead = 'ai.read';
   static const String aiUse = 'ai.use';
   static const String aiManage = 'ai.manage';
+  static const String aiCredentialsUse = 'ai.credentials.use';
+  static const String aiPlatformUse = 'ai.platform.use';
   static const String reportsRead = 'reports.read';
   static const String catalogContribute = 'catalog.contribute';
   static const String catalogImport = 'catalog.import';
@@ -59,6 +61,8 @@ final class HomePermissions {
     aiRead,
     aiUse,
     aiManage,
+    aiCredentialsUse,
+    aiPlatformUse,
     reportsRead,
     catalogContribute,
     catalogImport,
@@ -268,9 +272,7 @@ final class HomeOwnershipTransfer {
   bool isOfferedTo(String userId) => isPending && targetUserId == userId;
 }
 
-/// Receipt for a queued step-up confirmation email. The single-use token is
-/// delivered out of band; only an explicitly enabled non-production
-/// development profile returns it inline for local flows.
+/// Backend-computed role defaults, bounded by the active home's group.
 final class HomePermissionPolicy {
   HomePermissionPolicy({
     required this.role,

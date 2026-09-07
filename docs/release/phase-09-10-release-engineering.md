@@ -15,7 +15,7 @@ for authorized distribution and do not add or imply an open-source licence.
 | `release-windows.yml` | Signed x64 MSIX | PFX subject must equal the MSIX publisher and its thumbprint must match |
 | `release-linux.yml` | x86-64 AppImage and Debian package with detached OpenPGP signatures | AppImage tool is checksum-pinned; package signatures use the protected key |
 | `release-web.yml` | Production PWA archive plus optional protected deployment hook | HTTPS API URL and, for publication, authenticated deployment hook |
-| `browser-acceptance.yml` | Per-browser PWA persistence plus end-to-end login-link approval, origin exchange, bootstrap, refresh and logout evidence | Deployed HTTPS target, dedicated synthetic account and operator-controlled test mailbox |
+| `browser-acceptance.yml` | Per-browser PWA persistence plus bound numeric email-code verification, bootstrap, refresh and logout evidence | Deployed HTTPS target, dedicated synthetic account and operator-controlled test mailbox |
 
 Each platform release contains SHA-256 checksums, a CycloneDX 1.5 dependency
 SBOM, an in-toto/SLSA-compatible provenance statement and a release manifest.
@@ -33,10 +33,6 @@ public tool digests; credentials and private keys must remain secrets.
 ### Shared
 
 - Variable `PRODUCTION_API_BASE_URL`: absolute HTTPS Laminas API origin.
-- Variable `PRODUCTION_HOMEOWNER_APP_LINK_BASE`: absolute HTTPS Flutter-client
-  route ending in `/homeowner`, without query or fragment. Every production
-  artifact compiles this same public boundary value; backend email delivery and
-  `E2E_HOMEOWNER_APP_LINK_BASE` must match it exactly.
 
 ### Android
 
@@ -109,9 +105,6 @@ desktop camera plugin is missing or has an unresolved native link dependency.
 - Variable `E2E_API_BASE_URL`: absolute HTTPS API origin. The legacy secret of
   the same name is accepted temporarily while deployments migrate it to a
   variable.
-- Variable `E2E_HOMEOWNER_APP_LINK_BASE`: the exact HTTPS route of the deployed
-  Flutter homeowner client configured in backend email delivery. The harness
-  rejects links for every other origin or path.
 - Secret `E2E_USER_EMAIL`: dedicated synthetic account address. Do not use a
   person's mailbox or an account with production household information.
 - Variable `E2E_MAILBOX_IMAP_HOST`
@@ -134,47 +127,24 @@ Chrome runs the authenticated mailbox flow. The other engines run the PWA and
 persistence checks without requesting another email, keeping a workflow retry
 inside the backend's five-attempt per-address window.
 
-Authenticated browser acceptance uses the production login-link protocol —
-the contract's only human authentication; API 1.19.0 has no password route
-anywhere — and it never opens an HTML route on the backend. For the
-authenticated Chrome entry the harness:
+Authenticated browser acceptance uses the API 2.0.0 email-code protocol. It
+requests a challenge for a fresh installation, reads only a newly arrived
+verification message addressed to the controlled synthetic account, and enters
+the code through the same browser's JSON API context. It verifies that an
+incorrect binding token fails and that a consumed code cannot be replayed.
 
-1. generates a fresh request ID, installation ID, private polling token, PKCE
-   verifier and state in memory;
-2. sends `applicationKind=homeowner` and only the SHA-256 polling and PKCE
-   challenges when starting the login request;
-3. reads the controlled mailbox over certificate-verified TLS IMAP and selects
-   only a message addressed to the synthetic account that contains that exact
-   request ID;
-4. opens the scanner-safe fragment link in the deployed Flutter client in a
-   separate, isolated browser context, verifies its JSON proof and review calls,
-   confirms the request is still pending, and deliberately presses **Approve
-   login** through the app-owned page;
-5. verifies that the approval browser did not receive a session;
-6. polls and exchanges from the original PWA context, then verifies `/api/v1/me`,
-   the authorized home list, current-session identity, the deliberately
-   requested 30-day idle bound (durable null-expiry sessions are the default
-   when no bound is requested), secure cookie attributes and another tab's
-   cookie session;
-7. refreshes the session, requires refresh-cookie rotation, logs out and proves
-   both `/api/v1/me` and the home list are unauthorized afterward.
+The harness checks `/api/v1/me`, the authorized home list, installation versus
+account-device identity, secure cookie attributes, another tab's cookie
+session, refresh rotation, and logout revocation. The synthetic account must
+already have a home for this release acceptance scenario. New account/profile
+creation is covered by the onboarding workflow tests.
 
-Mailbox and protocol waits are bounded. The workflow fails closed when the
-message is absent, malformed, delivered to another recipient, uses HTTP,
-comes from a route other than `E2E_HOMEOWNER_APP_LINK_BASE`, places its
-capability in a query string, or refers to another request. The
-harness neither deletes mail nor writes mailbox contents, email addresses,
-approval URLs, poll tokens, PKCE values, CSRF proofs or session-cookie values
-to its JSON evidence. Known credentials and capability-shaped fragments are
-redacted from failure messages.
-
-Use a mailbox reserved for automated acceptance. Restrict its credential to
-mail reading when the provider supports scoped access, require the protected
-`production-acceptance` environment's reviewers, rotate the credential on the
-normal secret schedule, disable link rewriting for this recipient, and prevent
-human or automated rules from approving the message. Only the authenticated
-Chrome job reads the mailbox. Firefox, WebKit, and Edge run the unauthenticated
-PWA/persistence checks and do not consume another login attempt.
+TLS IMAP and API waits are bounded. Evidence contains check outcomes and timing,
+not mailbox contents, addresses, numeric codes, challenge bindings, CSRF proofs
+or cookie values. The parser accepts only the backend verification template
+and rejects ambiguous code messages. Reserve the mailbox for automated
+acceptance and restrict its credentials to reading where supported. Only the
+Chrome job reads it; other engines test PWA persistence without sending codes.
 
 ## Fail-closed behavior
 
@@ -203,8 +173,7 @@ Attach the following to the release record before certification:
    including desktop integration and local database persistence.
 6. Real Safari testing on current macOS and iOS, in addition to WebKit CI.
 7. Chrome, Firefox and Edge tests against the hosted PWA, including offline
-   reload, IndexedDB persistence, login-link approval in an isolated browser,
-   originating-client exchange, session refresh and logout.
+   reload, IndexedDB persistence, numeric email-code verification in the requesting browser,, session refresh and logout.
 8. A dedicated synthetic account and controlled mailbox proving authenticated
    cross-device data convergence without exposing production household
    information.

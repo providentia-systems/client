@@ -169,17 +169,6 @@ PendingEmailCode _pending(String id, String email) => PendingEmailCode(
   resendAt: (DateTime.utc(2026, 8, 9, 12)).add(const Duration(seconds: 60)),
 );
 
-Map<String, Object?> _pendingJson(PendingEmailCode request) =>
-    <String, Object?>{
-      'status': 'active',
-      'requestId': request.requestId,
-      'email': request.email,
-      'bindingToken': request.bindingToken,
-      'createdAt': request.createdAt.toIso8601String(),
-      'expiresAt': request.expiresAt.toIso8601String(),
-      'resendAt': request.resendAt.toIso8601String(),
-    };
-
 final class _SerialOriginLock implements OriginLock {
   Future<void> _tail = Future<void>.value();
   int _concurrent = 0;

@@ -6,19 +6,15 @@ import process from 'node:process';
 import {chromium, firefox, webkit} from 'playwright';
 
 import {
-  createLoginLinkProof,
-  extractApprovalLink,
-  isLoginLinkProofShape,
+  extractEmailCode,
   isUuid,
   redactSensitiveText,
-} from './login_link_acceptance_protocol.mjs';
+} from './email_code_acceptance_protocol.mjs';
 
 const API_TIMEOUT_MS = 15_000;
-const APPROVAL_PAGE_TIMEOUT_MS = 30_000;
-const APPROVAL_STATUS_TIMEOUT_MS = 90_000;
 const WEB_IDLE_SECONDS = 30 * 24 * 60 * 60;
-const LOGIN_LINK_TTL_MS = 15 * 60 * 1000;
-const LOGIN_LINK_TTL_TOLERANCE_MS = 30_000;
+const EMAIL_CODE_TTL_MS = 10 * 60 * 1000;
+const EMAIL_CODE_TTL_TOLERANCE_MS = 30_000;
 const SESSION_COOKIE_NAMES = [
   'providentia_access',
   'providentia_refresh',
@@ -128,7 +124,7 @@ try {
   evidence.checks.offlineReload = true;
 
   if (process.env.E2E_REQUIRE_AUTH === '1') {
-    await verifyLoginLinkAuthentication({
+    await verifyEmailCodeAuthentication({
       browser,
       context,
       page,
@@ -156,7 +152,7 @@ try {
 
 if (failure) throw failure;
 
-async function verifyLoginLinkAuthentication({
+async function verifyEmailCodeAuthentication({
   browser,
   context,
   page,
@@ -167,7 +163,6 @@ async function verifyLoginLinkAuthentication({
 }) {
   for (const name of [
     'E2E_API_BASE_URL',
-    'E2E_HOMEOWNER_APP_LINK_BASE',
     'E2E_USER_EMAIL',
     'E2E_MAILBOX_IMAP_HOST',
     'E2E_MAILBOX_IMAP_USER',
@@ -181,14 +176,6 @@ async function verifyLoginLinkAuthentication({
   );
 
   const apiBase = secureUrl(process.env.E2E_API_BASE_URL, 'API base URL');
-  const appLinkBase = secureUrl(
-    process.env.E2E_HOMEOWNER_APP_LINK_BASE,
-    'homeowner app-link base URL',
-  );
-  assert(
-    appLinkBase.origin === pwaTarget.origin,
-    'The homeowner app-link must open the deployed PWA origin.',
-  );
   const email = process.env.E2E_USER_EMAIL.trim().toLowerCase();
   assert(/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email), 'The synthetic acceptance email is invalid.');
   const mailboxTimeoutMs = boundedInteger(
@@ -197,148 +184,48 @@ async function verifyLoginLinkAuthentication({
     300,
     'E2E_MAILBOX_TIMEOUT_SECONDS',
   ) * 1000;
-  const proof = createLoginLinkProof();
-  assert(isLoginLinkProofShape(proof), 'The origin login proof could not be generated safely.');
-  for (const value of [proof.pollToken, proof.codeVerifier, proof.state]) secrets.add(value);
-
+  const proof = {installationId: randomUUID()};
   const requestStartedAt = new Date();
-  const start = await browserJson(page, new URL('/api/v1/auth/login-links', apiBase), {
+  const start = await browserJson(page, new URL('/api/v1/auth/email-codes', apiBase), {
     method: 'POST',
     body: {
-      requestId: proof.requestId,
       email,
       applicationKind: 'homeowner',
-      pollChallenge: proof.pollChallenge,
-      codeChallenge: proof.codeChallenge,
-      codeChallengeMethod: 'S256',
-      state: proof.state,
       installationId: proof.installationId,
       deviceName: `release-${selectedBrowser}`,
       platform: `web-${selectedBrowser}`,
       transport: 'web',
-      requestedSessionIdleSeconds: WEB_IDLE_SECONDS,
     },
   });
-  assert(start.status === 202, `Login-link start returned HTTP ${start.status}.`);
-  assert(start.json, 'Login-link start did not return JSON.');
-  assert(start.body?.accepted === true, 'Login-link start was not accepted generically.');
-  assert(start.body?.requestId === proof.requestId, 'Login-link start returned another request identifier.');
-  assert(
-    Number.isInteger(start.body?.pollIntervalSeconds)
-      && start.body.pollIntervalSeconds >= 1
-      && start.body.pollIntervalSeconds <= 30,
-    'Login-link start returned an invalid polling interval.',
-  );
+  assert(start.status === 202 && start.json, `Email-code request returned HTTP ${start.status}.`);
+  assert(isUuid(start.body?.challengeId), 'Email-code challenge identifier is invalid.');
+  assert(/^[A-Za-z0-9_-]{43}$/u.test(start.body?.bindingToken ?? ''), 'Email-code binding is invalid.');
+  assert(start.body?.resendAfterSeconds === 60, 'The resend cooldown is invalid.');
+  assert(!Object.hasOwn(start.body, 'code'), 'The public challenge exposed the email code.');
+  secrets.add(start.body.bindingToken);
   const expiresAt = Date.parse(start.body?.expiresAt ?? '');
-  assert(Number.isFinite(expiresAt) && expiresAt > Date.now(), 'Login-link expiry is invalid.');
-  assert(
-    expiresAt <= requestStartedAt.getTime() + LOGIN_LINK_TTL_MS + LOGIN_LINK_TTL_TOLERANCE_MS,
-    'Login-link expiry exceeds the 15-minute acceptance policy.',
-  );
-  record.checks.loginLinkStarted = true;
+  assert(Number.isFinite(expiresAt) && expiresAt > Date.now(), 'Email-code expiry is invalid.');
+  assert(expiresAt <= requestStartedAt.getTime() + EMAIL_CODE_TTL_MS + EMAIL_CODE_TTL_TOLERANCE_MS,
+    'Email-code expiry exceeds the ten-minute policy.');
+  record.checks.emailCodeRequested = true;
 
-  const approvalLink = await waitForApprovalLink({
-    requestId: proof.requestId,
-    email,
-    startedAt: requestStartedAt,
-    timeoutMs: mailboxTimeoutMs,
-    expectedApprovalBase: appLinkBase.href,
-  });
-  secrets.add(approvalLink);
-  const approvalCapability = new URLSearchParams(
-    new URL(approvalLink).hash.slice(1),
-  ).get('approval') ?? '';
-  if (approvalCapability !== '') secrets.add(decodeURIComponent(approvalCapability));
+  const code = await waitForEmailCode({email, startedAt: requestStartedAt, timeoutMs: mailboxTimeoutMs});
+  secrets.add(code);
   record.checks.mailboxDelivery = true;
-
-  const approvalContext = await browser.newContext({serviceWorkers: 'block'});
-  try {
-    const approvalPage = await approvalContext.newPage();
-    const proofResponse = approvalPage.waitForResponse((response) =>
-      response.request().method() === 'POST'
-      && response.url().endsWith(`/api/v1/auth/login-links/${proof.requestId}/proof`),
-    );
-    const reviewResponse = approvalPage.waitForResponse((response) =>
-      response.request().method() === 'POST'
-      && response.url().endsWith(`/api/v1/auth/login-links/${proof.requestId}/review`),
-    );
-    await approvalPage.goto(approvalLink, {
-      waitUntil: 'domcontentloaded',
-      timeout: APPROVAL_PAGE_TIMEOUT_MS,
-    });
-    const [proofResult, reviewResult] = await Promise.all([
-      proofResponse,
-      reviewResponse,
-    ]);
-    assert(proofResult.status() === 200, `App-owned login proof returned HTTP ${proofResult.status()}.`);
-    assert(reviewResult.status() === 200, `App-owned login review returned HTTP ${reviewResult.status()}.`);
-    await approvalPage.getByText('A device wants to sign in', {exact: true}).waitFor({
-      timeout: APPROVAL_PAGE_TIMEOUT_MS,
-    });
-    assert(
-      new URL(approvalPage.url()).hash === '',
-      'The homeowner app did not remove the approval capability from browser history.',
-    );
-
-    const beforeDecision = await getLoginLinkStatus(page, apiBase, proof);
-    assert(beforeDecision === 'pending', 'Opening the email link unexpectedly approved the request.');
-    record.checks.scannerSafeReview = true;
-
-    const decisionResponse = approvalPage.waitForResponse((response) =>
-      response.request().method() === 'POST'
-      && response.url().endsWith(`/api/v1/auth/login-links/${proof.requestId}/decision`),
-    );
-    await approvalPage.getByRole('button', {name: 'Approve login', exact: true}).click({
-      timeout: APPROVAL_PAGE_TIMEOUT_MS,
-    });
-    const decisionResult = await decisionResponse;
-    assert(
-      decisionResult.status() === 202,
-      `App-owned login decision returned HTTP ${decisionResult.status()}.`,
-    );
-    await approvalPage.getByText(
-      'Login approved. Return to the requesting device.',
-      {exact: true},
-    ).waitFor({
-      timeout: APPROVAL_PAGE_TIMEOUT_MS,
-    });
-    const browserBootstrap = await approvalContext.request.get(
-      new URL('/api/v1/me', apiBase).href,
-      {timeout: API_TIMEOUT_MS},
-    );
-    assert(
-      browserBootstrap.status() === 401 || browserBootstrap.status() === 403,
-      'The approval browser received an authenticated session.',
-    );
-    record.checks.explicitAppOwnedApproval = true;
-    record.checks.approvalBrowserUnauthenticated = true;
-  } finally {
-    await approvalContext.close();
-  }
-
-  const approved = await waitForLoginLinkApproval({
-    page,
-    apiBase,
-    proof,
-    pollIntervalSeconds: start.body.pollIntervalSeconds,
+  const verification = {
+    challengeId: start.body.challengeId,
+    bindingToken: start.body.bindingToken,
+    code,
+  };
+  const verifyUrl = new URL('/api/v1/auth/email-codes/verify', apiBase);
+  const wrongBinding = await browserJson(page, verifyUrl, {
+    method: 'POST', body: {...verification, bindingToken: 'A'.repeat(43)},
   });
-  assert(approved === 'approved', `The login request reached terminal state ${approved}.`);
-  record.checks.originObservedApproval = true;
-
-  const exchange = await browserJson(
-    page,
-    new URL(`/api/v1/auth/login-links/${proof.requestId}/exchange`, apiBase),
-    {
-      method: 'POST',
-      body: {
-        pollToken: proof.pollToken,
-        codeVerifier: proof.codeVerifier,
-        state: proof.state,
-      },
-    },
-  );
-  assert(exchange.status === 200, `Login-link exchange returned HTTP ${exchange.status}.`);
-  assert(exchange.json, 'Login-link exchange did not return JSON.');
+  assert(wrongBinding.status === 422, 'A different challenge binding was not rejected.');
+  record.checks.requestBinding = true;
+  const exchange = await browserJson(page, verifyUrl, {method: 'POST', body: verification});
+  assert(exchange.status === 200, `Email-code verification returned HTTP ${exchange.status}.`);
+  assert(exchange.json, 'Email-code verification did not return JSON.');
   validateWebSession(exchange.body, proof.installationId);
   for (const value of [
     exchange.body?.csrfToken,
@@ -351,7 +238,10 @@ async function verifyLoginLinkAuthentication({
     !Object.hasOwn(exchange.body, 'accessToken') && !Object.hasOwn(exchange.body, 'refreshToken'),
     'Web exchange exposed bearer credentials.',
   );
-  record.checks.originExchange = true;
+  record.checks.emailCodeVerified = true;
+  const replay = await browserJson(page, verifyUrl, {method: 'POST', body: verification});
+  assert(replay.status === 422, 'A consumed email code was accepted again.');
+  record.checks.singleUseCode = true;
 
   const exchangeCookies = await sessionCookies(context, apiBase);
   validateSessionCookies(exchangeCookies, apiBase.protocol === 'https:');
@@ -361,7 +251,7 @@ async function verifyLoginLinkAuthentication({
   validateBootstrap(bootstrap, {
     email,
     sessionId: exchange.body.sessionId,
-    deviceId: proof.installationId,
+    deviceId: exchange.body.deviceId,
     activeHomeId: exchange.body.activeHomeId,
   });
   const homes = await browserJson(page, new URL('/api/v1/homes', apiBase), {method: 'GET'});
@@ -382,7 +272,7 @@ async function verifyLoginLinkAuthentication({
     validateBootstrap(secondBootstrap, {
       email,
       sessionId: exchange.body.sessionId,
-      deviceId: proof.installationId,
+      deviceId: exchange.body.deviceId,
       activeHomeId: exchange.body.activeHomeId,
     });
   } finally {
@@ -439,12 +329,10 @@ async function verifyLoginLinkAuthentication({
   record.checks.authentication = true;
 }
 
-async function waitForApprovalLink({
-  requestId,
+async function waitForEmailCode({
   email,
   startedAt,
   timeoutMs,
-  expectedApprovalBase,
 }) {
   const port = boundedInteger(
     process.env.E2E_MAILBOX_IMAP_PORT ?? '993',
@@ -482,22 +370,23 @@ async function waitForApprovalLink({
     });
     while (Date.now() < deadline) {
       const uids = (await client.search(
-        {since: searchedSince, subject: 'Approve your Providentia login'},
+        {since: searchedSince, subject: 'Your Providentia verification code'},
         {uid: true},
       )) || [];
       const candidates = uids.slice(-200).reverse();
       for (const uid of candidates) {
         if (inspected.has(uid)) continue;
         inspected.add(uid);
-        const message = await client.fetchOne(uid, {envelope: true, source: true}, {uid: true});
+        const message = await client.fetchOne(uid, {envelope: true, source: true, internalDate: true}, {uid: true});
         if (!message?.source || !recipientMatches(message.envelope?.to, email)) continue;
-        if (!message.source.includes(requestId)) continue;
-        return extractApprovalLink(message.source, requestId, expectedApprovalBase);
+        if (!(message.internalDate instanceof Date) ||
+            message.internalDate.getTime() < Math.floor(startedAt.getTime() / 1000) * 1000) continue;
+        return extractEmailCode(message.source);
       }
       await delay(Math.min(3000, Math.max(0, deadline - Date.now())));
     }
   } catch {
-    throw new Error('The controlled mailbox could not be read safely for login-link acceptance.');
+    throw new Error('The controlled mailbox could not be read safely for email-code acceptance.');
   } finally {
     lock?.release();
     if (client.usable) {
@@ -508,49 +397,7 @@ async function waitForApprovalLink({
       }
     }
   }
-  throw new Error('No matching login-link message arrived before the bounded mailbox deadline.');
-}
-
-async function getLoginLinkStatus(page, apiBase, proof) {
-  const result = await browserJson(
-    page,
-    new URL(`/api/v1/auth/login-links/${proof.requestId}/status`, apiBase),
-    {method: 'POST', body: {pollToken: proof.pollToken}},
-  );
-  assert(result.status === 200, `Login-link status returned HTTP ${result.status}.`);
-  assert(result.json, 'Login-link status did not return JSON.');
-  assert(result.body?.requestId === proof.requestId, 'Login-link status returned another request identifier.');
-  assert(result.body?.applicationKind === 'homeowner', 'Login-link status crossed the application boundary.');
-  assert(
-    ['pending', 'approved', 'denied', 'exchanged', 'expired', 'cancelled'].includes(result.body?.status),
-    'Login-link status returned an invalid state.',
-  );
-  return result.body.status;
-}
-
-async function waitForLoginLinkApproval({page, apiBase, proof, pollIntervalSeconds}) {
-  const deadline = Date.now() + APPROVAL_STATUS_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    const result = await browserJson(
-      page,
-      new URL(`/api/v1/auth/login-links/${proof.requestId}/status`, apiBase),
-      {method: 'POST', body: {pollToken: proof.pollToken}},
-    );
-    if (result.status === 200 && result.json) {
-      assert(result.body?.requestId === proof.requestId, 'Login-link status returned another request identifier.');
-      assert(result.body?.applicationKind === 'homeowner', 'Login-link status crossed the application boundary.');
-      const status = result.body?.status;
-      assert(
-        ['pending', 'approved', 'denied', 'exchanged', 'expired', 'cancelled'].includes(status),
-        'Login-link status returned an invalid state.',
-      );
-      if (status !== 'pending') return status;
-    } else if (result.status !== 429 && !result.networkError) {
-      throw new Error(`Login-link status returned HTTP ${result.status}.`);
-    }
-    await delay(Math.max(1000, Math.min(30_000, pollIntervalSeconds * 1000)));
-  }
-  throw new Error('The originating client did not observe approval before the bounded deadline.');
+  throw new Error('No matching email-code message arrived before the bounded mailbox deadline.');
 }
 
 async function authenticatedBootstrap(page, apiBase) {
@@ -563,13 +410,12 @@ async function authenticatedBootstrap(page, apiBase) {
 function validateWebSession(session, installationId) {
   assert(session && typeof session === 'object', 'The web session response is invalid.');
   assert(isUuid(session.sessionId), 'The web session identifier is invalid.');
-  assert(session.deviceId === installationId, 'The web session is not bound to the originating installation.');
+  assert(session.installationId === installationId, 'The web session is not bound to the originating installation.');
+  assert(isUuid(session.deviceId), 'The account device identifier is invalid.');
   assert(isUuid(session.userId), 'The authenticated account identifier is invalid.');
   assert(session.transport === 'web', 'The exchange did not issue a web session.');
   assert(typeof session.csrfToken === 'string' && session.csrfToken.length >= 40, 'The CSRF proof is invalid.');
-  // The harness deliberately requests a bounded 30-day session; a durable
-  // null-expiry session would mean the requested bound was ignored.
-  assert(session.refreshIdleTtlSeconds === WEB_IDLE_SECONDS, 'The web session did not honor the requested 30-day idle bound.');
+  assert(session.refreshIdleTtlSeconds === WEB_IDLE_SECONDS, 'The web session did not apply its configured 30-day idle bound.');
   for (const field of ['accessExpiresAt', 'refreshExpiresAt', 'idleExpiresAt']) {
     assert(Number.isFinite(Date.parse(session[field] ?? '')), `The web session ${field} is invalid.`);
   }

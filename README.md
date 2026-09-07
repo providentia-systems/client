@@ -13,23 +13,27 @@ architecture tests, and a full CI build matrix.
 Phases 5–8 add household inventory, count sessions, purchase history, shopping
 lists, AI review policies, private catalog data, explainable suggestions, price
 intelligence, reporting, and evaluation. The client pins the backend's API
-`1.19.0` contract: all 172 canonical operations remain reviewable, while the
-default-deny homeowner generator exposes only 140 callable operations. Admin,
+`2.0.0` contract: all 208 canonical operations remain reviewable, while the
+default-deny homeowner generator exposes only 159 callable operations. Admin,
 operator, billing-operator, catalog-moderation, and platform-administrator
 operations are excluded from the generated homeowner package and runtime. The
 separate `providentia-systems/admin` Flutter repository owns those staff
 surfaces.
 
-Email-only login-link onboarding — the only human authentication, with no
-password surface anywhere — app-owned cross-device approval, durable
-web/native trusted-device sessions that stay signed in until explicit
-sign-out or revocation, current-user bootstrap, multiple homes, recipient
-invitations, home governance, and signed-in-device management are composed in
-this application. Approval links open the Flutter homeowner route, keep the
-fragment capability in memory only, review the requesting device, and require
-an explicit approve or deny decision. The backend provides JSON proof, review,
-decision, polling, and exchange endpoints; it does not provide an interactive
-login page.
+Email sign-in uses an eight-digit code entered in the requesting client. The
+backend delivers the code, binds its challenge to the requesting installation
+and application, expires it after ten minutes, limits attempts and resends,
+and consumes it once. Native sessions use protected device credentials; web
+sessions use HttpOnly cookies and CSRF protection. No authentication callback
+URL or browser approval step is required.
+
+Account profiles, verified email aliases, cropped avatars, country-policy
+acceptance, home profiles, invitations and individual member permissions are
+composed in this client. Administrators assign one account group and one group
+per home. Every screen follows the active home's backend-issued permissions;
+access from a more permissive home never carries into another home. Lowered
+quotas preserve existing records and prevent further additions over the limit.
+See [platform access](docs/platform-access.md) for the runtime rules.
 
 Private home categories and products remain usable without contribution
 consent. Sharing is separately opt-in, field-scoped, active-home bound, and
@@ -117,12 +121,11 @@ stale rather than accepting a local placeholder.
 ## Development golden path
 
 Start the backend development stack first. It includes Mailpit and the
-notification worker needed to deliver login links. Then run Chrome on the
+notification worker needed to deliver sign-in codes. Then run Chrome on the
 fixed, backend-allowlisted `http://localhost:8081` origin:
 
 For the default loopback backend, put the Flutter web origins in
-`CORS_ALLOWED_ORIGINS` and configure `HOMEOWNER_APP_LINK_BASE` to the Flutter
-client route. The exact source and prebuilt commands are in
+`CORS_ALLOWED_ORIGINS`. The exact source and prebuilt commands are in
 [local development](docs/local-development.md).
 
 ```bash
@@ -132,23 +135,19 @@ flutter run -d chrome \
   --web-header=Cross-Origin-Opener-Policy=same-origin \
   --web-header=Cross-Origin-Embedder-Policy=require-corp \
   --dart-define=PROVIDENTIA_ENVIRONMENT=development \
-  --dart-define=PROVIDENTIA_API_BASE_URL=http://localhost:8080 \
-  --dart-define=PROVIDENTIA_HOMEOWNER_APP_LINK_BASE=http://localhost:8081/homeowner
+  --dart-define=PROVIDENTIA_API_BASE_URL=http://localhost:8080
 ```
 
-Enter an email in the client, open the delivered link in the Providentia
-homeowner client, explicitly approve the reviewed device, and return to the
-originating client. A genuinely different device requires a reachable trusted
-HTTPS API and a configured client app-link base. The originating client polls
-and exchanges its private PKCE proof; the reviewing client receives no session.
-Use the newest **Approve your Providentia login** message after every retry;
-resending deliberately retires older links, and a capability removed from the
-browser address cannot be recovered by refreshing the cleaned URL.
+Enter your email, request a code, read the newest **Your Providentia verification
+code** email and enter its eight digits in the same client. Complete your name,
+country and privacy agreement on first use, then create a home if the account
+group permits it or accept a pending invitation. Reading the email on another
+device does not require exposing a backend browser route.
 Build-time bearer tokens and home IDs are not supported. Native refresh tokens
 are kept in platform secure storage, access tokens remain in memory, and web
 authentication uses credentialed HttpOnly cookies.
 
-See [local development](docs/local-development.md) for the exact login-link
+See [local development](docs/local-development.md) for the exact email-code
 acceptance flow, Linux and Android commands, session restoration, invitation
 and role checks, and current end-to-end limitations. The backend's canonical
 [client/user testing runbook](https://github.com/providentia-systems/backend/blob/main/docs/deployment/client-user-testing.md)

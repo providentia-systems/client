@@ -14,10 +14,11 @@ in the master implementation prompt.
 - Every private record is authorized from the authenticated user and active
   home on the server. A path, body, cached, or locally selected home ID is
   never authorization.
-- Platform administrators, catalog reviewers, and catalog curators receive no
-  home access from their platform role. They cannot browse household stock,
-  locations, counts, purchases, prices, lists, AI settings, credentials, or
-  private media.
+- Ordinary home routes require active membership. Separately authorized
+  operators inspect application records through audited administrative routes;
+  the system owner delegates their scope. Public catalog sharing remains an
+  independent opt-in decision and never publishes household quantities.
+
 - Product identity, public product images, and store-price facts have separate,
   default-off household consent. A contribution contains no household or user
   attribution in moderation responses or published global data. Quantities,

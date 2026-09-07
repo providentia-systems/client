@@ -5,6 +5,7 @@ import 'package:providentia/features/homes/application/home_session_manager.dart
 import 'package:providentia/features/homes/domain/home_models.dart';
 import 'package:providentia/features/homes/presentation/home_selection_page.dart';
 import 'package:providentia/features/homes/presentation/homes_controller.dart';
+import 'package:providentia/features/profile/profile_port.dart';
 
 import '../../support/access_fixture.dart';
 
@@ -19,6 +20,7 @@ void main() {
         MaterialApp(
           home: HomeSelectionPage(
             controller: fixture.controller,
+            accountAccess: _createAccountAccess,
             activeHomeBuilder: (context, home) =>
                 Scaffold(body: Text('Opened ${home.name}')),
           ),
@@ -80,7 +82,12 @@ void main() {
     addTearDown(fixture.dispose);
 
     await tester.pumpWidget(
-      MaterialApp(home: HomeSelectionPage(controller: fixture.controller)),
+      MaterialApp(
+        home: HomeSelectionPage(
+          controller: fixture.controller,
+          accountAccess: _createAccountAccess,
+        ),
+      ),
     );
     await tester.pumpAndSettle();
 
@@ -90,7 +97,88 @@ void main() {
     expect(find.byKey(const Key('show-create-home')), findsNothing);
     expect(find.byKey(const Key('cancel-create-home')), findsNothing);
   });
+  testWidgets('new home uses the selected country currency and time zone', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1000, 1200);
+    addTearDown(tester.view.reset);
+    final fixture = _SelectionFixture(withInvitation: false);
+    addTearDown(fixture.dispose);
+    final profile = _CountryProfilePort();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: HomeSelectionPage(
+          controller: fixture.controller,
+          accountAccess: _createAccountAccess,
+          accountProfile: const <String, Object?>{
+            'countryCode': 'ZA',
+            'locale': 'af-ZA',
+            'timezone': 'Africa/Windhoek',
+          },
+          profilePort: profile,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('create-home-name')),
+      'Our home',
+    );
+    await tester.tap(find.byKey(const Key('create-home-submit')));
+    await tester.pumpAndSettle();
+    final created = fixture.transport.homes.single;
+    expect(created.locale, 'af-ZA');
+    expect(created.currency, 'ZAR');
+    expect(created.timezone, 'Africa/Johannesburg');
+    expect(profile.calls, <String>['listAvailableCountries']);
+  });
+
+  for (final access in <Map<String, Object?>>[
+    <String, Object?>{},
+    <String, Object?>{
+      'features': <String, bool>{'homes.create': false},
+      'limits': <String, int>{'homes.owned': 1},
+    },
+    <String, Object?>{
+      'features': <String, bool>{'homes.create': true},
+      'limits': <String, int>{'homes.owned': 0},
+    },
+  ]) {
+    testWidgets(
+      'invited account cannot create without an available allowance: $access',
+      (tester) async {
+        final fixture = _SelectionFixture(withInvitation: true);
+        addTearDown(fixture.dispose);
+        await tester.pumpWidget(
+          MaterialApp(
+            home: HomeSelectionPage(
+              controller: fixture.controller,
+              accountAccess: access,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          find.byKey(const Key('pending-home-invitation-invitation-id')),
+          findsOneWidget,
+        );
+        expect(find.byKey(const Key('show-create-home')), findsNothing);
+        expect(find.byKey(const Key('create-home-submit')), findsNothing);
+        expect(find.textContaining('join homes by invitation'), findsOneWidget);
+        await tester.tap(find.widgetWithText(FilledButton, 'Accept'));
+        await tester.pumpAndSettle();
+        expect(fixture.transport.acceptedRevision, 3);
+        expect(fixture.manager.snapshot.activeHome?.id, 'shared-home');
+      },
+    );
+  }
 }
+
+const _createAccountAccess = <String, Object?>{
+  'features': <String, bool>{'homes.create': true},
+  'limits': <String, int>{'homes.owned': 1},
+};
 
 final class _SelectionFixture {
   _SelectionFixture({required bool withInvitation})
@@ -303,4 +391,31 @@ final class _SelectionHomeTransport implements HomeTransportPort {
 
   @override
   Future<void> leaveHome(String homeId) => throw UnimplementedError();
+}
+
+final class _CountryProfilePort implements ProfilePort {
+  final List<String> calls = <String>[];
+  @override
+  Future<Object?> call(
+    String operation, {
+    Map<String, String>? path,
+    Map<String, String>? query,
+    Map<String, Object?>? body,
+  }) async {
+    calls.add(operation);
+    return <String, Object?>{
+      'data': <Map<String, Object?>>[
+        <String, Object?>{
+          'code': 'NA',
+          'defaultCurrency': 'NAD',
+          'defaultTimezone': 'Africa/Windhoek',
+        },
+        <String, Object?>{
+          'code': 'ZA',
+          'defaultCurrency': 'ZAR',
+          'defaultTimezone': 'Africa/Johannesburg',
+        },
+      ],
+    };
+  }
 }

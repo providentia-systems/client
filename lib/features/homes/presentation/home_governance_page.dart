@@ -223,21 +223,25 @@ final class _HomeGovernancePageState extends State<HomeGovernancePage> {
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                   const Text(
-                    'Permissions come from the server policy for each home role.',
+                    'Permissions follow this home’s group, role settings and individual choices.',
                   ),
                   ...snapshot.permissionPolicies.map(_policy),
                 ],
                 if (canTransferOwnership) ..._ownershipSection(snapshot),
-                if (home.role != HomeRole.owner) ...<Widget>[
-                  const SizedBox(height: 32),
-                  OutlinedButton.icon(
-                    key: const Key('leave-active-home'),
-                    onPressed: () =>
-                        unawaited(widget.controller.leaveActiveHome()),
-                    icon: const Icon(Icons.exit_to_app_rounded),
-                    label: const Text('Leave this home'),
+                const SizedBox(height: 32),
+                if (home.role == HomeRole.owner)
+                  const Text(
+                    'You can leave when another owner remains. The final owner '
+                    'must transfer ownership or delete the home first.',
                   ),
-                ],
+                OutlinedButton.icon(
+                  key: const Key('leave-active-home'),
+                  onPressed: widget.controller.isBusy
+                      ? null
+                      : () => unawaited(widget.controller.leaveActiveHome()),
+                  icon: const Icon(Icons.exit_to_app_rounded),
+                  label: const Text('Leave this home'),
+                ),
               ],
             ),
           );
@@ -266,10 +270,15 @@ final class _HomeGovernancePageState extends State<HomeGovernancePage> {
   }) {
     // The caller's own row ends through Leave and the owner row changes only
     // through an accepted ownership transfer, so neither is editable here.
-    final editable =
-        canManageMembers &&
+    final eligible =
         membership.role != HomeRole.owner &&
         membership.userId != widget.currentUserId;
+    final editable = eligible && canManageMembers;
+    final canEditPermissions =
+        eligible &&
+        widget.controller.snapshot.effectivePermissions.contains(
+          HomePermissions.permissionsManage,
+        );
     return Card(
       child: ListTile(
         key: Key('home-membership-${membership.userId}'),
@@ -280,13 +289,11 @@ final class _HomeGovernancePageState extends State<HomeGovernancePage> {
         ),
         title: Text(membership.displayName),
         subtitle: Text(membership.email ?? membership.role.name),
-        trailing: editable
+        trailing: editable || canEditPermissions
             ? Row(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  if (widget.controller.snapshot.effectivePermissions.contains(
-                    HomePermissions.permissionsManage,
-                  ))
+                  if (canEditPermissions)
                     IconButton(
                       tooltip: 'Individual permissions',
                       icon: const Icon(Icons.tune),
@@ -304,39 +311,41 @@ final class _HomeGovernancePageState extends State<HomeGovernancePage> {
                         await widget.controller.refreshGovernance();
                       },
                     ),
-                  DropdownButton<HomeRole>(
-                    value: membership.role,
-                    items:
-                        const <HomeRole>[
-                              HomeRole.manager,
-                              HomeRole.member,
-                              HomeRole.viewer,
-                            ]
-                            .map(
-                              (role) => DropdownMenuItem<HomeRole>(
-                                value: role,
-                                child: Text(role.name),
-                              ),
-                            )
-                            .toList(growable: false),
-                    onChanged: (role) {
-                      if (role != null) {
-                        unawaited(
-                          widget.controller.changeMembershipRole(
-                            membership: membership,
-                            role: role,
-                          ),
-                        );
-                      }
-                    },
-                  ),
-                  IconButton(
-                    key: Key('remove-home-membership-${membership.userId}'),
-                    tooltip: 'Remove ${membership.displayName}',
-                    onPressed: () =>
-                        unawaited(_confirmRemoval(membership, home)),
-                    icon: const Icon(Icons.person_remove_outlined),
-                  ),
+                  if (editable)
+                    DropdownButton<HomeRole>(
+                      value: membership.role,
+                      items:
+                          const <HomeRole>[
+                                HomeRole.manager,
+                                HomeRole.member,
+                                HomeRole.viewer,
+                              ]
+                              .map(
+                                (role) => DropdownMenuItem<HomeRole>(
+                                  value: role,
+                                  child: Text(role.name),
+                                ),
+                              )
+                              .toList(growable: false),
+                      onChanged: (role) {
+                        if (role != null) {
+                          unawaited(
+                            widget.controller.changeMembershipRole(
+                              membership: membership,
+                              role: role,
+                            ),
+                          );
+                        }
+                      },
+                    ),
+                  if (editable)
+                    IconButton(
+                      key: Key('remove-home-membership-${membership.userId}'),
+                      tooltip: 'Remove ${membership.displayName}',
+                      onPressed: () =>
+                          unawaited(_confirmRemoval(membership, home)),
+                      icon: const Icon(Icons.person_remove_outlined),
+                    ),
                 ],
               )
             : Chip(label: Text(membership.role.name)),

@@ -316,7 +316,7 @@ const generatedClientAdapters = new Set([
   'lib/features/homes/infrastructure/api11_home_transport.dart',
   'lib/features/household_sync/infrastructure/api17_callback_household_gateway.dart',
   'lib/features/identity/infrastructure/api11_identity_transport.dart',
-  'lib/features/identity/infrastructure/generated_login_link_approval_transport.dart',
+  'lib/features/profile/infrastructure/generated_profile_port.dart',
   'lib/features/inventory/infrastructure/generated_home_item_master_source.dart',
   'lib/features/inventory/infrastructure/item_master_refreshing_synchronization.dart',
   'lib/features/reporting/infrastructure/generated_household_report_repository.dart',
@@ -431,11 +431,11 @@ const generatedManifest = JSON.parse(
 );
 assert(
   generatedManifest.clientProfile === 'homeowner' &&
-    generatedManifest.contractVersion === '1.19.0' &&
+    generatedManifest.contractVersion === '2.0.0' &&
     generatedManifest.contractSha256 ===
-      '7e13d550e7a4438297766f654fadbd1e75894efac989229da6fcd0d9f7f97dda' &&
-    generatedManifest.canonicalOperationCount === 172 &&
-    generatedManifest.generatedOperationCount === 140,
+      '764f1b850a150f805eb178bf85cba802ba6b3ee35dcfbfae24a179049a7d55a7' &&
+    generatedManifest.canonicalOperationCount === 208 &&
+    generatedManifest.generatedOperationCount === 159,
   'Generated client manifest must distinguish the canonical and homeowner surfaces.',
 );
 try {
@@ -459,7 +459,7 @@ for (const relative of [
   'docs/release/phase-09-10-release-engineering.md',
   '.github/workflows/browser-acceptance.yml',
   'tool/release/verify_web_runtime.mjs',
-  'tool/release/login_link_acceptance_protocol.mjs',
+  'tool/release/email_code_acceptance_protocol.mjs',
 ]) {
   const source = await readFile(path.join(root, relative), 'utf8');
   const stalePublicBaseName = ['PUBLIC', 'BASE', 'URL'].join('_');

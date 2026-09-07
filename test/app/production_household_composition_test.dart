@@ -114,7 +114,11 @@ void main() {
             homeId: _homeId,
             capabilities: AiHomeCapabilities.fromPermissions(
               homeId: _homeId,
-              permissions: const <String>{'ai.read', 'ai.use'},
+              permissions: const <String>{
+                'ai.read',
+                'ai.use',
+                'ai.credentials.use',
+              },
             ),
             protectedRouteRegistry: ProductionProtectedRouteRegistry(),
             onAuthorizationLost: () async {
