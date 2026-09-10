@@ -251,7 +251,7 @@ void main() {
   });
 
   testWidgets(
-    'selected locations save, reopen with their names, and remain clearable',
+    'selected locations and city-only clearing survive save and reopen',
     (tester) async {
       _largeViewport(tester);
       final port = _ProfilePort(onboarded: true);
@@ -278,8 +278,32 @@ void main() {
       );
       expect(saved.body, containsPair('stateId', 1));
       expect(saved.body, containsPair('cityId', 2));
+      expect(
+        port.calls.where((call) => call.operation == 'getAccountProfile'),
+        hasLength(2),
+      );
       expect(find.text('Khomas'), findsOneWidget);
       expect(find.text('Windhoek'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Clear city'));
+      await tester.pumpAndSettle();
+      expect(find.text('Khomas'), findsOneWidget);
+      expect(find.text('Windhoek'), findsNothing);
+      expect(find.text('Not selected'), findsOneWidget);
+      await tester.tap(find.widgetWithText(FilledButton, 'Save profile'));
+      await tester.pumpAndSettle();
+
+      final cityCleared = port.calls
+          .where((call) => call.operation == 'updateAccountProfile')
+          .last;
+      expect(cityCleared.body, containsPair('stateId', 1));
+      expect(cityCleared.body, containsPair('cityId', null));
+      expect(
+        port.calls.where((call) => call.operation == 'getAccountProfile'),
+        hasLength(3),
+      );
+      expect(find.text('Khomas'), findsOneWidget);
+      expect(find.text('Not selected'), findsOneWidget);
 
       await tester.tap(find.byTooltip('Clear region'));
       await tester.tap(find.widgetWithText(FilledButton, 'Save profile'));
@@ -289,6 +313,39 @@ void main() {
           .last;
       expect(cleared.body, containsPair('stateId', null));
       expect(cleared.body, containsPair('cityId', null));
+      expect(find.text('Not selected'), findsNWidgets(2));
+    },
+  );
+
+  testWidgets(
+    'failed saved-location lookups show honest IDs and remain clearable',
+    (tester) async {
+      _largeViewport(tester);
+      final port = _ProfilePort(onboarded: true)
+        ..stateId = 1
+        ..cityId = 2
+        ..failLocationLookups = true;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: AccountProfilePage(port: port, onChanged: () async {}),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Saved region unavailable (ID 1)'), findsOneWidget);
+      expect(find.text('Saved city unavailable (ID 2)'), findsOneWidget);
+      expect(find.text('Region selected'), findsNothing);
+      expect(find.text('City selected'), findsNothing);
+
+      await tester.tap(find.byTooltip('Clear city'));
+      await tester.pumpAndSettle();
+      expect(find.text('Saved region unavailable (ID 1)'), findsOneWidget);
+      expect(find.text('Saved city unavailable (ID 2)'), findsNothing);
+      expect(find.text('Not selected'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Clear region'));
+      await tester.pumpAndSettle();
+      expect(find.text('Saved region unavailable (ID 1)'), findsNothing);
       expect(find.text('Not selected'), findsNWidgets(2));
     },
   );

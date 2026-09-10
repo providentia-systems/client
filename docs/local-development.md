@@ -274,12 +274,15 @@ authentication link or open a backend URL.
 
 ## 6. Verify persistent sessions and sign-out
 
-The backend enforces approximately 15-minute access credentials, sliding
-30-day web inactivity, and sliding 60-day native inactivity. Production HTTPS
-web sessions use Secure HttpOnly cookies and a required CSRF value. The
-isolated loopback HTTP profile relaxes only the cookie's Secure attribute;
-native refresh credentials remain in platform secure storage and access
-credentials remain in memory.
+The backend enforces approximately 15-minute access credentials and rotates a
+refresh credential whose default lifetime is 30 days. The current release sets
+both additional web and native inactivity ceilings to zero (disabled); an
+operator may configure positive ceilings, and a client may deliberately request
+a bounded session. Treat the matching backend environment reference as
+authoritative. Production HTTPS web sessions use Secure HttpOnly cookies and a
+required CSRF value. The isolated loopback HTTP profile relaxes only the
+cookie's Secure attribute; native refresh credentials remain in platform secure
+storage and access credentials remain in memory.
 
 Close and reopen each client to confirm restoration. In **Account → Signed-in
 devices**, confirm the current installation is identified, expired sessions are
@@ -287,6 +290,47 @@ not presented as active, and another device can be revoked. Sign out with an
 expired access credential as well: native uses its rotating refresh credential
 as logout proof, web uses its refresh cookie plus CSRF, and local state stays
 cleared even if remote cleanup cannot be completed.
+
+## 7. Update, rebuild and troubleshoot the Ubuntu client
+
+The backend origin is compiled into the Linux bundle. After installing a newer
+reviewed Client release—or whenever that origin changes—update the checkout and
+rerun the same guided command:
+
+```bash
+git status --short
+git pull --ff-only
+bash tools/setup-ubuntu-client.sh --api-url https://inventory.example.com
+```
+
+Stop before pulling if `git status` shows work you need to keep. The setup
+script revalidates its checksum-pinned toolchain, locked dependencies, generated
+contract client, Linux bundle and backend origin. It does not migrate or modify
+the server. For a rollback, use a separate checkout of the previous published
+Client tag and build it with the same public backend origin.
+
+If setup or sign-in fails:
+
+- **Backend readiness warning:** verify the public hostname, certificate and
+  `/health/live` plus `/health/ready`; the script still leaves a usable build.
+- **URL rejected:** supply an origin only—scheme, host and optional port—with no
+  credentials, path, query or fragment. Remote servers require HTTPS.
+- **Browser request blocked:** add the exact browser scheme/host/port to the
+  backend CORS allowlist and recreate the backend service. Native Linux does not
+  use browser CORS.
+- **No email code:** verify SMTP or the local Mailpit worker independently from
+  the accepted API request.
+- **Secure storage or launch failure:** run from the signed-in graphical desktop
+  with D-Bus/keyring available and confirm `pkg-config --modversion libsecret-1`.
+- **Flutter or native build failure:** rerun without
+  `--skip-system-packages`; for the documented Snap/GLib linker signature use the
+  checksum-verified archive path above.
+- **Wrong server after launch:** rebuild with the intended `--api-url`; the app
+  never reads a server address or credentials from a loose local file.
+
+When collecting support evidence, include Client/backend release versions and
+sanitized health/build errors. Never include email codes, session credentials,
+provider keys, mailbox passwords or private household data.
 
 ## Current integration boundary
 

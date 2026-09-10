@@ -285,73 +285,59 @@ void main() {
     },
   );
 
-  test(
-    'authoritative home category overrides a catalog product global category',
-    () async {
-      final catalogItem = InventoryItem(
-        id: _productId,
-        homeId: _homeId,
-        canonicalName: 'Long-grain rice',
-        packSize: '2 kg bag',
-        category: 'Global grains',
-        productId: _otherProductId,
-        packId: _productId,
-        categoryId: _globalCategoryId,
-        categorySource: InventoryCategorySource.global,
-      );
-      await repository.replaceCatalogItemMaster(
-        homeId: _homeId,
-        items: <InventoryItem>[catalogItem],
-      );
-      await _seedProjection(
-        database,
-        homeId: _homeId,
-        entityType: 'inventory-home-category',
-        entityId: _homeCategoryId,
-        revision: 1,
-        payload: const <String, Object?>{
-          'name': 'Long-term pantry',
-          'status': 'active',
-        },
-      );
-      await _seedProjection(
-        database,
-        homeId: _homeId,
-        entityType: 'inventory-home-product',
-        entityId: _createdProductId,
-        revision: 2,
-        payload: const <String, Object?>{
-          'productId': _otherProductId,
-          'packId': _productId,
-          'privateName': null,
-          'originalPackText': null,
-          'homeCategoryId': _homeCategoryId,
-          'status': 'active',
-        },
-      );
-      await _seedProjection(
-        database,
-        homeId: _homeId,
-        entityType: 'inventory-balance',
-        entityId: _createdProductId,
-        revision: 1,
-        payload: const <String, Object?>{
-          'homeProductId': _createdProductId,
-          'quantity': '6',
-        },
-      );
+  test('catalog-linked home product retains its global category', () async {
+    final catalogItem = InventoryItem(
+      id: _productId,
+      homeId: _homeId,
+      canonicalName: 'Long-grain rice',
+      packSize: '2 kg bag',
+      category: 'Global grains',
+      productId: _otherProductId,
+      packId: _productId,
+      categoryId: _globalCategoryId,
+      categorySource: InventoryCategorySource.global,
+    );
+    await repository.replaceCatalogItemMaster(
+      homeId: _homeId,
+      items: <InventoryItem>[catalogItem],
+    );
+    await _seedProjection(
+      database,
+      homeId: _homeId,
+      entityType: 'inventory-home-product',
+      entityId: _createdProductId,
+      revision: 2,
+      payload: const <String, Object?>{
+        'productId': _otherProductId,
+        'packId': _productId,
+        'privateName': null,
+        'originalPackText': null,
+        'homeCategoryId': null,
+        'status': 'active',
+      },
+    );
+    await _seedProjection(
+      database,
+      homeId: _homeId,
+      entityType: 'inventory-balance',
+      entityId: _createdProductId,
+      revision: 1,
+      payload: const <String, Object?>{
+        'homeProductId': _createdProductId,
+        'quantity': '6',
+      },
+    );
 
-      final item = (await repository.watchItems(homeId: _homeId).first).single;
-      expect(item.id, _createdProductId);
-      expect(item.productId, _otherProductId);
-      expect(item.packId, _productId);
-      expect(item.category, 'Long-term pantry');
-      expect(item.categoryId, isNull);
-      expect(item.homeCategoryId, _homeCategoryId);
-      expect(item.categorySource, InventoryCategorySource.home);
-      expect(item.currentQuantity, 6);
-    },
-  );
+    final item = (await repository.watchItems(homeId: _homeId).first).single;
+    expect(item.id, _createdProductId);
+    expect(item.productId, _otherProductId);
+    expect(item.packId, _productId);
+    expect(item.category, 'Global grains');
+    expect(item.categoryId, _globalCategoryId);
+    expect(item.homeCategoryId, isNull);
+    expect(item.categorySource, InventoryCategorySource.global);
+    expect(item.currentQuantity, 6);
+  });
 
   test(
     'closing a count atomically updates the balance and movement ledger',
@@ -735,7 +721,7 @@ void main() {
   );
 
   test(
-    'invalid home-category UUIDs leave product creation fully atomic',
+    'invalid private home-category UUID leaves creation fully atomic',
     () async {
       repository = DriftHouseholdRepository(
         database,
@@ -754,43 +740,24 @@ void main() {
       );
       expect(await database.select(database.localRecords).get(), isEmpty);
       expect(await database.select(database.clientOperations).get(), isEmpty);
-
-      final catalogItem = InventoryItem(
-        id: _productId,
-        homeId: _homeId,
-        productId: _otherProductId,
-        packId: _productId,
-        canonicalName: 'Long-grain rice',
-        packSize: '2 kg',
-        category: 'Grains',
-      );
-      await repository.replaceCatalogItemMaster(
-        homeId: _homeId,
-        items: <InventoryItem>[catalogItem],
-      );
-      await expectLater(
-        repository.createCatalogHomeProduct(
-          CatalogHomeProductDraft(
-            homeId: _homeId,
-            productId: _otherProductId,
-            packId: _productId,
-            canonicalName: 'Long-grain rice',
-            packSize: '2 kg',
-            category: 'Grains',
-            homeCategoryId: 'still-not-a-uuid',
-          ),
-        ),
-        throwsArgumentError,
-      );
-      expect(
-        await (database.select(database.localRecords)
-              ..where((row) => row.entityType.equals('inventory-home-product')))
-            .get(),
-        isEmpty,
-      );
-      expect(await database.select(database.clientOperations).get(), isEmpty);
     },
   );
+
+  test('catalog selection rejects private-category metadata', () {
+    final item = InventoryItem(
+      id: _productId,
+      homeId: _homeId,
+      productId: _otherProductId,
+      packId: _productId,
+      canonicalName: 'Long-grain rice',
+      packSize: '2 kg',
+      category: 'Private pantry',
+      homeCategoryId: _homeCategoryId,
+      categorySource: InventoryCategorySource.home,
+    );
+
+    expect(() => CatalogHomeProductDraft.fromItem(item), throwsArgumentError);
+  });
 
   test(
     'catalog item-master selection queues one typed home-product command',

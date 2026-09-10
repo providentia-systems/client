@@ -172,9 +172,9 @@ remains required.
 
 ## Current contract baseline
 
-- Backend API: `1.19.0`
+- Backend API: `2.0.0`
 - Client lock SHA-256:
-  `7e13d550e7a4438297766f654fadbd1e75894efac989229da6fcd0d9f7f97dda`
+  `7b1f1be5d9efd311254e9840c4595e08575e8c97d35da766dab0d291c165bcae`
 - Contract additions: public, bounded catalog contributions from API 1.12;
   revision-bound, movement-free stock-count cancellation and precise direct
   extraction versus encrypted private-media disclosure, and a typed paged
@@ -183,7 +183,9 @@ remains required.
   app-owned homeowner link approval, AI candidate schema v2, private taxonomy,
   and revision-correct stock-count lines through API 1.18.0; passwordless-only
   human authentication, durable trusted-device sessions, revision-guarded
-  home-membership removal, and scoped AI provider profiles in API 1.19.0.
+  home-membership removal, and scoped AI provider profiles in API 1.19.0;
+  unique effective-permission sets, distinct BYOK/platform AI capabilities,
+  and profile state/city read-back names in API 2.0.0.
 - Generic protocol-v1 entities: `home-preference`, `private-note`
 - Pantry mutations: closed protocol-v2 commands only, including count cancel
   and revisioned receipt-line unresolved decisions

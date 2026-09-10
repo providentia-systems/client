@@ -50,13 +50,13 @@ historical decisions and do not define the current sign-in or access model.
 Domain, app-store, and trademark due diligence remains mandatory before public
 launch. It does not reopen the owner-selected name.
 
-## Current integration note — 2026-08-26
+## Current integration note — 2026-09-10
 
-- The client pins the reviewed OpenAPI `1.19.0` boundary at SHA-256
-  `7e13d550e7a4438297766f654fadbd1e75894efac989229da6fcd0d9f7f97dda`.
-  The canonical contract contains 172 operations; the default-deny homeowner
-  facade generates 140 and excludes every admin/operator/moderation method.
-- API 1.19.0 has no human-account password surface: registration, password
+- The client pins the reviewed OpenAPI `2.0.0` boundary at SHA-256
+  `7b1f1be5d9efd311254e9840c4595e08575e8c97d35da766dab0d291c165bcae`.
+  The canonical contract contains 208 operations; the default-deny homeowner
+  facade generates 159 and excludes every admin/operator/moderation method.
+- API 2.0.0 has no human-account password surface: registration, password
   login, email verification, and password reset are gone from the contract,
   and the client's development-password transport, controller, UI, and
   runtime define were removed with it. Trusted-device sessions are durable —

@@ -50,7 +50,7 @@ trap 'rm -f -- "${pending_archive:-}"; rm -rf -- "${staging_directory:-}"' EXIT
 tar --no-same-owner --extract --xz --strip-components=1 \
   --file "$archive_path" --directory "$staging_directory"
 
-actual_version="$($staging_directory/bin/node --version)"
+actual_version="$("$staging_directory/bin/node" --version)"
 if [[ "$actual_version" != "v$version" ]]; then
   echo "Expected Node.js v$version, found $actual_version." >&2
   exit 65

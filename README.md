@@ -54,7 +54,7 @@ Household AI is likewise production-composed from Account & access behind the
 active home's exact `ai.read` permission. Receipt intake re-encodes one to eight
 ordered photos or locally rasterized PDF pages. Stock counting accepts one to
 eight images from the camera, gallery, or file picker on supported targets and
-uses API 1.19 schema-v2 quantity ranges. Each route owns and clears transient
+uses API 2.0 schema-v2 quantity ranges. Each route owns and clears transient
 bytes, binds every operation to exact `ai.read`/`ai.use`/`ai.manage`
 capabilities, and produces only a reviewed handoff. A server candidate is
 accepted before its confirmed `photo-confirmed` count is recorded through the
@@ -183,9 +183,11 @@ flutter build linux --release
 flutter build web --release
 ```
 
-Production signing and store packaging are Phase 9 concerns. Current artifacts
-are non-production engineering build proofs; Android local release
-configuration uses the debug key.
+The commands above create local engineering builds and do not supply production
+signing identities. Protected Phase 9–10 release workflows now implement the
+signed/store-ready package formats, but a release is accepted only when its
+environment-owned credentials and external device/store evidence pass. Android
+local release configuration continues to use the debug key.
 
 ## Documentation
 
