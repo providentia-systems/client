@@ -275,9 +275,6 @@ final class _OnlineProbe implements ConnectivityProbe {
 }
 
 final class _AuthoritativeGateway implements SyncRemoteGateway {
-  final List<RemoteChange> _changes = <RemoteChange>[];
-  var _sequence = 0;
-
   _AuthoritativeGateway() {
     _append(
       entityType: 'inventory-home-category',
@@ -336,6 +333,9 @@ final class _AuthoritativeGateway implements SyncRemoteGateway {
     );
   }
 
+  final List<RemoteChange> _changes = <RemoteChange>[];
+  var _sequence = 0;
+
   void deleteProducts() {
     _append(
       entityType: 'inventory-home-product',
@@ -375,10 +375,7 @@ final class _AuthoritativeGateway implements SyncRemoteGateway {
   );
 
   @override
-  Future<PullPage> pull({
-    required String homeId,
-    required String? afterCursor,
-  }) async {
+  Future<PullPage> pull({required String homeId, String? afterCursor}) async {
     final after = _parseCursor(afterCursor);
     final changes = _changes
         .where((change) => _parseCursor(change.cursor) > after)
