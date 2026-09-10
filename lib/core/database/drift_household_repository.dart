@@ -221,9 +221,6 @@ final class DriftHouseholdRepository
     _requireHomeUuid(draft.homeId);
     _requireUuid(draft.productId, 'catalog product');
     _requireUuid(draft.packId, 'catalog pack');
-    if (draft.homeCategoryId != null) {
-      _requireUuid(draft.homeCategoryId!, 'home category');
-    }
     final at = _clock().toUtc();
     final result = await _database.transaction<InventoryProductCreationResult>(
       () async {
@@ -284,7 +281,7 @@ final class DriftHouseholdRepository
           'categoryName': cachedItem.category,
           'brandName': cachedItem.brand,
           'aliases': cachedItem.aliases,
-          'homeCategoryId': draft.homeCategoryId,
+          'homeCategoryId': null,
           'status': 'active',
         };
         await _writeProjection(
@@ -306,7 +303,7 @@ final class DriftHouseholdRepository
             'packId': draft.packId,
             'privateName': null,
             'originalPackText': null,
-            'homeCategoryId': draft.homeCategoryId,
+            'homeCategoryId': null,
           },
           at: at,
         );

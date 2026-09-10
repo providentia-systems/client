@@ -1,7 +1,7 @@
 # Server AI integration
 
-Status: production-composed for testing against API `1.19.0`, SHA-256
-`7e13d550e7a4438297766f654fadbd1e75894efac989229da6fcd0d9f7f97dda`.
+Status: production-composed for testing against API `2.0.0`, SHA-256
+`7b1f1be5d9efd311254e9840c4595e08575e8c97d35da766dab0d291c165bcae`.
 This is not live-provider or production-acceptance evidence.
 
 ## Delivered user paths
@@ -46,7 +46,7 @@ line, balance, or stock movement.
 
 The server AI workspace uses `GeneratedServerAiRepository` and
 `Api17AiGateway` (the historical class name remains, but the enforced contract
-pin is API `1.19.0`). Cloud media goes through the authenticated server proxy.
+pin is API `2.0.0`). Cloud media goes through the authenticated server proxy.
 OpenAI credentials remain server-owned and write-only.
 
 The production stock-photo workflow uses an active, verified direct-local

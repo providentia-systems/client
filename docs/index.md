@@ -22,7 +22,7 @@
   current-contract report mapping, export/erasure safeguards, exact
   permissions, and production composition.
 - [Server AI integration](server-ai-integration.md): active-home capability
-  gates, one-image privacy lifecycle, mandatory review, and the non-mutating
+  gates, one-to-eight-image privacy lifecycle, mandatory review, and the non-mutating
   ordinary-command handoff.
 - [Phases 04–06 testing readiness](phase04-06-testing-readiness.md): delivered
   synchronization, household parity, AI boundaries, and paired smoke path.

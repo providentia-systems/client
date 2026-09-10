@@ -20,7 +20,7 @@ and release test pass.
 The earlier Ubuntu 26.04 statement is not carried forward because the official
 Flutter table verified for this phase ends at Ubuntu 24.04 LTS.
 
-Required release formats remain future acceptance work:
+Protected Phase 9–10 workflows implement these release formats:
 
 - Android App Bundle plus test APK
 - signed iOS archive
@@ -29,10 +29,11 @@ Required release formats remain future acceptance work:
 - AppImage and Debian package
 - hosted authenticated Flutter web/PWA build
 
-Phase 1 CI uploads non-production build proofs only. Android local release
-configuration uses the debug key; other targets are not production-signed. CI
-does not claim notarization, installer quality, browser compatibility, Arm64
-coverage, or store acceptance.
+Routine pull-request CI and local commands still produce non-production build
+proofs. Android local release configuration uses the debug key. The protected
+release workflows require environment-owned signing identities and fail closed
+when those inputs are absent; their existence alone does not claim device,
+notarization, installer, browser, Arm64, or store acceptance.
 
 The first Linux release lane is x86-64. Its desktop camera plugin uses the
 host's GTK and GStreamer runtime; exact AppImage host packages and Debian

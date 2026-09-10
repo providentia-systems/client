@@ -6,7 +6,8 @@
 set -Eeuo pipefail
 umask 077
 
-readonly project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly project_root
 readonly tool_root="${PROVIDENTIA_CLIENT_TOOL_ROOT:-$project_root/.agent-tools}"
 readonly node_root="$tool_root/node"
 readonly flutter_parent="$tool_root/sdk"
@@ -146,7 +147,7 @@ quarantine_runtime() {
   mv -- "$path" "$quarantine/${name}-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 }
 
-if [[ ! -x "$node_root/bin/node" || "$($node_root/bin/node --version 2>/dev/null || true)" != "$node_version" ]]; then
+if [[ ! -x "$node_root/bin/node" || "$("$node_root/bin/node" --version 2>/dev/null || true)" != "$node_version" ]]; then
   [[ ! -e "$node_root" ]] || quarantine_runtime "$node_root" node
   bash "$project_root/tools/install_node_linux.sh" "$node_root"
 fi
@@ -154,7 +155,7 @@ export PATH="$node_root/bin:$PATH"
 
 flutter_identity=''
 if [[ -x "$flutter_root/bin/flutter" ]]; then
-  flutter_identity="$($flutter_root/bin/flutter --version --machine 2>/dev/null \
+  flutter_identity="$("$flutter_root/bin/flutter" --version --machine 2>/dev/null \
     | "$node_root/bin/node" -e '
       let value = "";
       process.stdin.on("data", chunk => value += chunk);
@@ -168,7 +169,7 @@ if [[ "$flutter_identity" != "$flutter_version"$'\t'"$flutter_revision" ]]; then
   [[ ! -e "$flutter_root" ]] || quarantine_runtime "$flutter_root" flutter
   mkdir -p "$flutter_parent"
   bash "$project_root/tool/install_flutter_linux.sh" "$flutter_parent"
-  flutter_identity="$($flutter_root/bin/flutter --version --machine \
+  flutter_identity="$("$flutter_root/bin/flutter" --version --machine \
     | "$node_root/bin/node" -e '
       let value = "";
       process.stdin.on("data", chunk => value += chunk);
