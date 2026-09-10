@@ -79,6 +79,23 @@ installation, refresh, and native dependency commands. FVM/asdf and the
 checksum-verifying scripts in `tool/` retain the exact baseline for
 reproducible CI and release investigation.
 
+For a guided Ubuntu desktop install, clone this repository and run the
+checked-in setup command as your normal desktop user:
+
+```bash
+git clone https://github.com/providentia-systems/client.git
+cd client
+bash tools/setup-ubuntu-client.sh
+```
+
+The command asks for the public backend origin, validates it, installs the
+reviewed native prerequisites, downloads checksum-pinned Node and Flutter
+runtimes, verifies the generated API client, builds the Linux release, and
+launches it. It never asks for a database, administrator, or AI-provider
+credential. See the [guided Ubuntu setup](docs/local-development.md#guided-ubuntu-client-setup)
+for non-interactive use, safe URL rules, firewall/CORS boundaries, upgrades,
+and troubleshooting.
+
 Fresh Linux development agents can provision and validate themselves with the
 vendor-neutral bootstrap documented in
 [agent development](docs/agent-development.md):

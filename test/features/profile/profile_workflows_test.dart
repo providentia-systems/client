@@ -218,6 +218,145 @@ void main() {
     },
   );
 
+  testWidgets('onboarding still requires a nonblank display name', (
+    tester,
+  ) async {
+    _largeViewport(tester);
+    final port = _ProfilePort();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: AccountProfilePage(
+          port: port,
+          onboarding: true,
+          onChanged: () async {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Your name'),
+      '   ',
+    );
+    await tester.tap(find.byType(CheckboxListTile));
+    await tester.tap(
+      find.widgetWithText(FilledButton, 'Complete account setup'),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Enter your name.'), findsOneWidget);
+    expect(
+      port.calls.where((call) => call.operation == 'completeAccountOnboarding'),
+      isEmpty,
+    );
+  });
+
+  testWidgets(
+    'selected locations save, reopen with their names, and remain clearable',
+    (tester) async {
+      _largeViewport(tester);
+      final port = _ProfilePort(onboarded: true);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: AccountProfilePage(port: port, onChanged: () async {}),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(ListTile, 'Region (optional)'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Khomas'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(ListTile, 'City (optional)'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Windhoek'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Save profile'));
+      await tester.pumpAndSettle();
+
+      final saved = port.calls.singleWhere(
+        (call) => call.operation == 'updateAccountProfile',
+      );
+      expect(saved.body, containsPair('stateId', 1));
+      expect(saved.body, containsPair('cityId', 2));
+      expect(find.text('Khomas'), findsOneWidget);
+      expect(find.text('Windhoek'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Clear region'));
+      await tester.tap(find.widgetWithText(FilledButton, 'Save profile'));
+      await tester.pumpAndSettle();
+      final cleared = port.calls
+          .where((call) => call.operation == 'updateAccountProfile')
+          .last;
+      expect(cleared.body, containsPair('stateId', null));
+      expect(cleared.body, containsPair('cityId', null));
+      expect(find.text('Not selected'), findsNWidgets(2));
+    },
+  );
+
+  testWidgets(
+    'older profile responses resolve saved names with country and state scope',
+    (tester) async {
+      _largeViewport(tester);
+      final port = _ProfilePort(onboarded: true)
+        ..stateId = 1
+        ..cityId = 2;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: AccountProfilePage(port: port, onChanged: () async {}),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Khomas'), findsOneWidget);
+      expect(find.text('Windhoek'), findsOneWidget);
+      final stateCall = port.calls.singleWhere(
+        (call) => call.operation == 'listCountryStates',
+      );
+      final cityCall = port.calls.singleWhere(
+        (call) => call.operation == 'listCountryCities',
+      );
+      expect(stateCall.path, <String, String>{'countryCode': 'NA'});
+      expect(stateCall.query, isNot(contains('stateId')));
+      expect(cityCall.path, <String, String>{'countryCode': 'NA'});
+      expect(cityCall.query, containsPair('stateId', '1'));
+    },
+  );
+
+  testWidgets(
+    'country change clears optional locations but still requires its policy',
+    (tester) async {
+      _largeViewport(tester);
+      final port = _ProfilePort(onboarded: true)
+        ..stateId = 1
+        ..cityId = 2
+        ..stateName = 'Khomas'
+        ..cityName = 'Windhoek';
+      await tester.pumpWidget(
+        MaterialApp(
+          home: AccountProfilePage(port: port, onChanged: () async {}),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(ListTile, 'Country'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Botswana'));
+      await tester.pumpAndSettle();
+      expect(find.text('Not selected'), findsNWidgets(2));
+      await tester.tap(find.byType(CheckboxListTile));
+      await tester.tap(find.widgetWithText(FilledButton, 'Save profile'));
+      await tester.pumpAndSettle();
+
+      final saved = port.calls.singleWhere(
+        (call) => call.operation == 'updateAccountProfile',
+      );
+      expect(saved.body, containsPair('countryCode', 'BW'));
+      expect(saved.body, containsPair('stateId', null));
+      expect(saved.body, containsPair('cityId', null));
+      expect(saved.body, containsPair('policyAccepted', true));
+    },
+  );
+
   testWidgets('profile edits retain the verified primary login address', (
     tester,
   ) async {
@@ -283,8 +422,19 @@ void _largeViewport(WidgetTester tester) {
 final class _ProfilePort implements ProfilePort {
   _ProfilePort({this.onboarded = false});
   final bool onboarded;
+  String countryCode = 'NA';
+  int? stateId;
+  int? cityId;
+  String? stateName;
+  String? cityName;
+  bool failLocationLookups = false;
   final List<
-    ({String operation, Map<String, String>? path, ProfileRecord? body})
+    ({
+      String operation,
+      Map<String, String>? path,
+      Map<String, String>? query,
+      ProfileRecord? body,
+    })
   >
   calls = [];
   @override
@@ -297,8 +447,22 @@ final class _ProfilePort implements ProfilePort {
     calls.add((
       operation: operation,
       path: path,
+      query: query,
       body: body == null ? null : Map<String, Object?>.from(body),
     ));
+    if (operation == 'updateAccountProfile' ||
+        operation == 'completeAccountOnboarding') {
+      countryCode = '${body!['countryCode']}';
+      stateId = body['stateId'] as int?;
+      cityId = body['cityId'] as int?;
+      stateName = stateId == 1 ? 'Khomas' : null;
+      cityName = cityId == 2 ? 'Windhoek' : null;
+    }
+    if (failLocationLookups &&
+        (operation == 'listCountryStates' ||
+            operation == 'listCountryCities')) {
+      throw const ProfileFailure('Location reference unavailable.');
+    }
     return switch (operation) {
       'getHomeProfile' => <String, Object?>{
         'description': 'My home',
@@ -317,7 +481,11 @@ final class _ProfilePort implements ProfilePort {
       },
       'getAccountProfile' => <String, Object?>{
         'displayName': 'Person',
-        'countryCode': 'NA',
+        'countryCode': countryCode,
+        'stateId': stateId,
+        'cityId': cityId,
+        if (stateName != null) 'stateName': stateName,
+        if (cityName != null) 'cityName': cityName,
         'onboardingComplete': onboarded,
         'timezone': 'Africa/Windhoek',
         'locale': 'en-NA',
@@ -340,6 +508,22 @@ final class _ProfilePort implements ProfilePort {
             'defaultTimezone': 'Africa/Windhoek',
             'defaultCurrency': 'NAD',
           },
+          <String, Object?>{
+            'code': 'BW',
+            'name': 'Botswana',
+            'defaultTimezone': 'Africa/Gaborone',
+            'defaultCurrency': 'BWP',
+          },
+        ],
+      },
+      'listCountryStates' => <String, Object?>{
+        'data': <ProfileRecord>[
+          <String, Object?>{'id': 1, 'name': 'Khomas'},
+        ],
+      },
+      'listCountryCities' => <String, Object?>{
+        'data': <ProfileRecord>[
+          <String, Object?>{'id': 2, 'name': 'Windhoek'},
         ],
       },
       'getCountryPrivacyPolicy' => <String, Object?>{

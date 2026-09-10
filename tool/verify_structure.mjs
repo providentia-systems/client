@@ -57,10 +57,12 @@ const requiredFiles = [
   'AGENTS.md',
   'tools/agent-requirements.json',
   'tools/agent-setup.sh',
+  'tools/setup-ubuntu-client.sh',
   'tools/install_node_linux.sh',
   'packaging/linux/APPIMAGE-RUNTIME.md',
   'tool/release/verify_linux_deb.sh',
   'tool/materialize-openapi-contract.sh',
+  'tool/ubuntu_client_setup.test.mjs',
 ];
 
 for (const relativePath of requiredDirectories) {
@@ -433,7 +435,7 @@ assert(
   generatedManifest.clientProfile === 'homeowner' &&
     generatedManifest.contractVersion === '2.0.0' &&
     generatedManifest.contractSha256 ===
-      '764f1b850a150f805eb178bf85cba802ba6b3ee35dcfbfae24a179049a7d55a7' &&
+      '7b1f1be5d9efd311254e9840c4595e08575e8c97d35da766dab0d291c165bcae' &&
     generatedManifest.canonicalOperationCount === 208 &&
     generatedManifest.generatedOperationCount === 159,
   'Generated client manifest must distinguish the canonical and homeowner surfaces.',

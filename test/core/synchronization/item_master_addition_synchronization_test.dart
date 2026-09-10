@@ -76,6 +76,7 @@ void main() {
         'packId': _packId,
         'privateName': null,
         'originalPackText': null,
+        'homeCategoryId': null,
       });
 
       server.loseNextResponse = true;
@@ -240,7 +241,16 @@ final class _ItemMasterSyncServer implements SyncRemoteGateway {
         operation.operationType != 'inventory.home-product.create' ||
         operation.baseRevision != null ||
         operation.payload['productId'] != _productId ||
-        operation.payload['packId'] != _packId) {
+        operation.payload['packId'] != _packId ||
+        operation.payload['homeCategoryId'] != null ||
+        operation.payload.keys.toSet().difference(const <String>{
+          'productId',
+          'packId',
+          'privateName',
+          'originalPackText',
+          'homeCategoryId',
+        }).isNotEmpty ||
+        operation.payload.length != 5) {
       throw const FormatException('Unexpected item-master create command.');
     }
     applications++;

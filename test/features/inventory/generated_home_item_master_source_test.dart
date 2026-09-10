@@ -132,6 +132,54 @@ void main() {
     expect(item.currentQuantity, 4);
   });
 
+  test(
+    'accepts one mixed public and pure-private snapshot atomically',
+    () async {
+      final source = GeneratedHomeItemMasterSource(
+        _client(
+          (_) async => _page(
+            data: <Object?>[
+              _item(
+                productId: _productOne,
+                packId: _packOne,
+                homeProductId: null,
+                quantity: '0',
+              ),
+              _item(
+                productId: null,
+                packId: null,
+                homeProductId: _homeProduct,
+                quantity: '4',
+                categoryId: null,
+                homeCategoryId: _homeCategory,
+                categorySource: 'home',
+                packStatus: null,
+              ),
+            ],
+            offset: 0,
+            total: 2,
+            hasMore: false,
+            nextOffset: null,
+          ),
+        ),
+      );
+
+      final items = await source.loadAll(homeId: _homeId);
+
+      expect(items, hasLength(2));
+      expect(items.where((item) => item.packId != null), hasLength(1));
+      expect(
+        items.where(
+          (item) =>
+              item.isHomeProduct &&
+              item.productId == null &&
+              item.packId == null,
+        ),
+        hasLength(1),
+      );
+    },
+  );
+
   for (final statusCode in <int>[403, 404]) {
     test(
       'maps HTTP $statusCode to authorization denied at the adapter boundary',

@@ -132,7 +132,7 @@ final class Api11IdentityTransport
         profile: profile,
         email: _string(object, 'email'),
         emailVerified: _boolean(object, 'emailVerified'),
-        displayName: _optionalString(object['displayName']),
+        displayName: _optionalDisplayName(object['displayName']),
         locale: _optionalString(object['locale']),
         timezone: _optionalString(object['timezone']),
         activeHomeId: _optionalString(object['activeHomeId']),
@@ -434,6 +434,20 @@ String? _optionalString(Object? value) {
   if (value == null) return null;
   if (value case final String text when text.isNotEmpty) return text;
   throw const FormatException('Expected a non-empty string or null.');
+}
+
+/// A newly provisioned account has no name until onboarding is completed.
+///
+/// This is deliberately narrower than [_optionalString]. Blank identifiers,
+/// credentials, invitation fields and every other contract value continue to
+/// fail closed; only the current account's not-yet-supplied display name maps
+/// to `null` in the client view.
+String? _optionalDisplayName(Object? value) {
+  if (value == null) return null;
+  if (value case final String text) {
+    return text.trim().isEmpty ? null : text;
+  }
+  throw const FormatException('Expected a display name string or null.');
 }
 
 int _integer(Map<String, Object?> json, String key) {

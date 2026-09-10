@@ -26,6 +26,9 @@ final class AccountProfilePage extends StatefulWidget {
 }
 
 class _AccountProfilePageState extends State<AccountProfilePage> {
+  static const _locationPageSize = 100;
+  static const _maximumLocationLookupPages = 100;
+
   final _form = GlobalKey<FormState>();
   final _name = TextEditingController();
   final _timezone = TextEditingController();
@@ -80,6 +83,7 @@ class _AccountProfilePageState extends State<AccountProfilePage> {
       final avatar = profile['avatarSource'] == 'upload'
           ? profileBytes(await widget.port.call('getOwnAvatar'))
           : null;
+      final locations = await _restoreSavedLocations(profile, country);
       if (!mounted) return;
       setState(() {
         _profile = profile;
@@ -91,18 +95,8 @@ class _AccountProfilePageState extends State<AccountProfilePage> {
         _timezone.text = profile['onboardingComplete'] == true
             ? '${profile['timezone']}'
             : '${country?['defaultTimezone'] ?? 'UTC'}';
-        _state = profile['stateId'] == null
-            ? null
-            : <String, Object?>{
-                'id': profile['stateId'],
-                'name': profile['stateName'] ?? 'Region selected',
-              };
-        _city = profile['cityId'] == null
-            ? null
-            : <String, Object?>{
-                'id': profile['cityId'],
-                'name': profile['cityName'] ?? 'City selected',
-              };
+        _state = locations.state;
+        _city = locations.city;
         _busy = false;
       });
     } on Object catch (error) {
@@ -117,6 +111,88 @@ class _AccountProfilePageState extends State<AccountProfilePage> {
 
   bool get _requiresAcceptance =>
       widget.onboarding || _country?['code'] != _profile?['countryCode'];
+
+  Future<({ProfileRecord? state, ProfileRecord? city})> _restoreSavedLocations(
+    ProfileRecord profile,
+    ProfileRecord? country,
+  ) async {
+    final countryCode = _nonBlankText(country?['code']);
+    final stateId = _locationId(profile['stateId']);
+    final cityId = _locationId(profile['cityId']);
+    if (countryCode == null) return (state: null, city: null);
+
+    ProfileRecord? state;
+    if (stateId != null) {
+      final suppliedName = _nonBlankText(profile['stateName']);
+      state = suppliedName == null
+          ? await _findSavedLocation(
+              operation: 'listCountryStates',
+              countryCode: countryCode,
+              locationId: stateId,
+            )
+          : <String, Object?>{'id': stateId, 'name': suppliedName};
+      state ??= <String, Object?>{
+        'id': stateId,
+        'name': 'Saved region unavailable (ID $stateId)',
+      };
+    }
+
+    ProfileRecord? city;
+    if (cityId != null) {
+      final suppliedName = _nonBlankText(profile['cityName']);
+      city = suppliedName == null
+          ? await _findSavedLocation(
+              operation: 'listCountryCities',
+              countryCode: countryCode,
+              locationId: cityId,
+              stateId: stateId,
+            )
+          : <String, Object?>{'id': cityId, 'name': suppliedName};
+      city ??= <String, Object?>{
+        'id': cityId,
+        'name': 'Saved city unavailable (ID $cityId)',
+      };
+    }
+    return (state: state, city: city);
+  }
+
+  Future<ProfileRecord?> _findSavedLocation({
+    required String operation,
+    required String countryCode,
+    required int locationId,
+    int? stateId,
+  }) async {
+    var offset = 0;
+    try {
+      for (var page = 0; page < _maximumLocationLookupPages; page++) {
+        final places = profileRecords(
+          await widget.port.call(
+            operation,
+            path: <String, String>{'countryCode': countryCode},
+            query: <String, String>{
+              'search': '',
+              'offset': '$offset',
+              if (stateId != null) 'stateId': '$stateId',
+            },
+          ),
+        );
+        for (final place in places) {
+          if (_locationId(place['id']) == locationId &&
+              _nonBlankText(place['name']) != null) {
+            return place;
+          }
+        }
+        if (places.length < _locationPageSize) return null;
+        offset += places.length;
+      }
+    } on Object {
+      // Older servers may not return names and a reference can later be
+      // removed or temporarily unavailable. Keep the saved ID visible and
+      // clearable instead of making the complete profile unusable.
+    }
+    return null;
+  }
+
   Future<void> _selectCountry() async {
     final country = await chooseLocation(context, widget.port);
     if (country == null || !mounted) return;
@@ -535,4 +611,16 @@ class _AccountProfilePageState extends State<AccountProfilePage> {
       ),
     );
   }
+}
+
+int? _locationId(Object? value) {
+  if (value == null) return null;
+  if (value is int) return value;
+  throw const ProfileFailure('The saved profile location was invalid.');
+}
+
+String? _nonBlankText(Object? value) {
+  if (value == null) return null;
+  if (value case final String text when text.trim().isNotEmpty) return text;
+  return null;
 }
