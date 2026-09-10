@@ -55,6 +55,76 @@ The client accepts Flutter `>=3.44.7 <4.0.0` and Dart
 retains `3.44.7` as the reproducible minimum baseline. A pubspec checks the SDK
 already selected by the `flutter` command; it cannot install or update Flutter.
 
+### Guided Ubuntu client setup
+
+The supported beginner path builds and launches the native homeowner client
+from a clean Ubuntu or Debian x86-64 desktop. Run it as the signed-in desktop
+user, not with `sudo`:
+
+```bash
+git clone https://github.com/providentia-systems/client.git
+cd client
+bash tools/setup-ubuntu-client.sh
+```
+
+Enter only the public origin of the matching Providentia backend, such as
+`https://inventory.example.com` or `https://inventory.example.com:8443`.
+The value must not contain credentials, a path, query, or fragment. Plain HTTP
+is accepted only for `localhost` or `127.0.0.1` in development. The script:
+
+1. installs the Linux desktop, Libsecret, camera/media, and build packages;
+2. downloads the repository's checksum-pinned Node and Flutter runtimes into
+   the ignored `.agent-tools/` directory;
+3. resolves the locked dependencies and verifies the pinned API bindings;
+4. builds the release with that public backend origin; and
+5. warns when backend readiness is unavailable, then launches the client from
+   the generated Linux bundle.
+
+For unattended building, or to build before DNS is live, pass the origin and
+skip launch:
+
+```bash
+bash tools/setup-ubuntu-client.sh \
+  --api-url https://inventory.example.com \
+  --no-launch
+```
+
+Use `--skip-system-packages` only after installing the packages listed below.
+Rerun the same command after pulling a newer release or when the public backend
+origin changes. The origin is compiled into that client build; the script does
+not store server, database, administrator, or AI-provider credentials. The
+separate `tools/agent-setup.sh` remains the contributor/CI bootstrap and is not
+the end-user launcher.
+
+### Network, browser, and firewall boundary
+
+The native client makes outbound HTTPS requests to the configured API origin.
+A normal installation needs no inbound client firewall rule. Publish only the
+reverse-proxy HTTPS port (normally TCP 443, or the explicitly chosen custom
+port). Keep MySQL/MariaDB 3306, Redis 6379, PHP-FPM 9000, metrics, and container
+management sockets on private networks; none belongs in a client URL.
+
+Browser builds have an additional boundary: the backend must allow the exact
+browser origin (scheme, host, and port) in `CORS_ALLOWED_ORIGINS`, and production
+cookies require HTTPS. CORS is not a firewall and does not make a private API
+public. If an OPNsense or another gateway fronts the server, forward the public
+HTTPS port only, retain internal service isolation, and verify both
+`/health/live` and `/health/ready` through the public hostname before onboarding.
+The backend deployment guide owns the authoritative proxy, certificate,
+Compose, secret-generation, and firewall procedure.
+
+### AI-provider handoff
+
+The client setup command configures the API origin only. Never put an AI key in
+this repository, a Dart define, a desktop launcher, or browser storage. An
+authorized homeowner creates a provider profile through the product workflow;
+the backend encrypts the credential in its configured vault and performs all
+provider calls. `ai.credentials.use` authorizes bring-your-own provider
+credentials, while `ai.platform.use` is reserved for operator-funded usage.
+Receipt and stock-count results remain proposals until the user reviews and
+accepts them. Follow the matching backend release's `docs/deployment/ai-byok.md`
+for provider allowlists, vault keys, worker operation, quotas, and readiness.
+
 ### Ubuntu and Debian-based Linux prerequisites
 
 Install Flutter's Linux desktop build tools and the Libsecret development and
@@ -220,9 +290,9 @@ cleared even if remote cleanup cannot be completed.
 
 ## Current integration boundary
 
-Login-link onboarding and app-owned approval, session/device management,
-current-user bootstrap, multiple homes, invitations, home governance, and
-editable home settings are composed against API `1.19.0`. Household
+Email-code onboarding, session/device management, current-user bootstrap,
+multiple homes, invitations, home governance, and editable home settings are
+composed against API `2.0.0`. Household
 inventory, purchase, and shopping-list screens still include local Drift
 projections; those screens alone are not proof of cross-device convergence for
 every backend resource. Catalog consent and homeowner contributions, household

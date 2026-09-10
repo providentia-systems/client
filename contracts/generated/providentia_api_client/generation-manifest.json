@@ -4,7 +4,7 @@
   "clientProfile": "homeowner",
   "contract": "../../providentia-v1.json",
   "contractVersion": "2.0.0",
-  "contractSha256": "764f1b850a150f805eb178bf85cba802ba6b3ee35dcfbfae24a179049a7d55a7",
+  "contractSha256": "7b1f1be5d9efd311254e9840c4595e08575e8c97d35da766dab0d291c165bcae",
   "canonicalOperationCount": 208,
   "generatedOperationCount": 159,
   "generatedFiles": [

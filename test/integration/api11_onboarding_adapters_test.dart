@@ -411,7 +411,10 @@ void main() {
       final transport = Api11IdentityTransport(
         _client((request) async {
           expect(request.headers['Authorization'], 'Bearer access-secret');
-          return _json(_currentUserJson(), 200);
+          return _json(<String, Object?>{
+            ..._currentUserJson(),
+            'displayName': 'Existing Person',
+          }, 200);
         }),
         sessionTransport: ClientSessionTransport.nativeBearer,
       );
@@ -423,11 +426,40 @@ void main() {
       expect(current.homes.single.name, 'My home');
       expect(current.homes.single.role, 'owner');
       expect(current.pendingInvitations.single.homeName, 'Shared pantry');
+      expect(current.displayName, 'Existing Person');
       expect(current.isPlatformAdministrator, isTrue);
       expect(current.platformRoles, contains(PlatformRole.billingOperator));
       expect(current.currentSession.current, isTrue);
     },
   );
+
+  for (final scenario in <({String label, String displayName, bool invited})>[
+    (label: 'ordinary new user', displayName: '', invited: false),
+    (label: 'invited new user', displayName: '', invited: true),
+    (label: 'whitespace-only new user', displayName: '   ', invited: false),
+  ]) {
+    test('${scenario.label} can reach setup before supplying a name', () async {
+      final response = <String, Object?>{
+        ..._currentUserJson(),
+        'displayName': scenario.displayName,
+        'homes': <Object?>[],
+        'activeHomeId': null,
+        if (!scenario.invited) 'pendingInvitations': <Object?>[],
+      };
+      final transport = Api11IdentityTransport(
+        _client((_) async => _json(response, 200)),
+        sessionTransport: ClientSessionTransport.nativeBearer,
+      );
+
+      final current = await transport.getCurrentUser(
+        accessToken: 'access-secret',
+      );
+
+      expect(current.displayName, isNull);
+      expect(current.homes, isEmpty);
+      expect(current.pendingInvitations.isNotEmpty, scenario.invited);
+    });
+  }
 
   test('malformed nullable account fields fail closed', () async {
     final transport = Api11IdentityTransport(

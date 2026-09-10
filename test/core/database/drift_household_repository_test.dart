@@ -166,6 +166,194 @@ void main() {
   );
 
   test(
+    'mixed item master caches public packs only and restores private state from sync',
+    () async {
+      final selectedCatalogRow = InventoryItem(
+        id: _createdProductId,
+        homeId: _homeId,
+        canonicalName: 'Long-grain rice',
+        packSize: '2 kg bag',
+        category: 'Global grains',
+        brand: 'Harvest',
+        aliases: const <String>['Rice long grain'],
+        currentQuantity: 7,
+        isHomeProduct: true,
+        productId: _otherProductId,
+        packId: _productId,
+        categoryId: _globalCategoryId,
+        categorySource: InventoryCategorySource.global,
+      );
+      final privateItemMasterRow = InventoryItem(
+        id: _privateItemMasterId,
+        homeId: _homeId,
+        canonicalName: 'Family chilli blend',
+        packSize: '250 g jar',
+        category: 'Family spices',
+        currentQuantity: 4,
+        isHomeProduct: true,
+        homeCategoryId: _homeCategoryId,
+        categorySource: InventoryCategorySource.home,
+      );
+
+      await repository.replaceCatalogItemMaster(
+        homeId: _homeId,
+        items: <InventoryItem>[selectedCatalogRow, privateItemMasterRow],
+      );
+
+      final cacheRows =
+          await (database.select(database.localRecords)..where(
+                (row) => row.entityType.equals('inventory-item-master-product'),
+              ))
+              .get();
+      expect(cacheRows, hasLength(1));
+      expect(cacheRows.single.entityId, _productId);
+      expect(jsonDecode(cacheRows.single.payload), <String, Object?>{
+        'id': _productId,
+        'homeId': _homeId,
+        'canonicalName': 'Long-grain rice',
+        'packSize': '2 kg bag',
+        'category': 'Global grains',
+        'brand': 'Harvest',
+        'unit': 'units',
+        'aliases': <Object?>['Rice long grain'],
+        'currentQuantity': null,
+        'isHomeProduct': false,
+        'productId': _otherProductId,
+        'packId': _productId,
+        'categoryId': _globalCategoryId,
+        'categorySource': 'global',
+      });
+
+      repository = DriftHouseholdRepository(database, clock: () => now);
+      var projected = await repository.watchItems(homeId: _homeId).first;
+      expect(projected, hasLength(1));
+      expect(projected.single.id, _productId);
+      expect(projected.single.isHomeProduct, isFalse);
+      expect(projected.single.currentQuantity, isNull);
+      expect(projected.single.categoryId, _globalCategoryId);
+      expect(projected.single.categorySource, InventoryCategorySource.global);
+
+      await _seedProjection(
+        database,
+        homeId: _homeId,
+        entityType: 'inventory-home-category',
+        entityId: _homeCategoryId,
+        revision: 1,
+        payload: const <String, Object?>{
+          'name': 'Family spices',
+          'status': 'active',
+        },
+      );
+      await _seedProjection(
+        database,
+        homeId: _homeId,
+        entityType: 'inventory-home-product',
+        entityId: _privateItemMasterId,
+        revision: 2,
+        payload: const <String, Object?>{
+          'productId': null,
+          'packId': null,
+          'privateName': 'Family chilli blend',
+          'originalPackText': '250 g jar',
+          'homeCategoryId': _homeCategoryId,
+          'status': 'active',
+        },
+      );
+      await _seedProjection(
+        database,
+        homeId: _homeId,
+        entityType: 'inventory-balance',
+        entityId: _privateItemMasterId,
+        revision: 3,
+        payload: const <String, Object?>{
+          'homeProductId': _privateItemMasterId,
+          'quantity': '4',
+        },
+      );
+
+      projected = await repository.watchItems(homeId: _homeId).first;
+      final privateItem = projected.singleWhere(
+        (item) => item.id == _privateItemMasterId,
+      );
+      expect(projected, hasLength(2));
+      expect(privateItem.canonicalName, 'Family chilli blend');
+      expect(privateItem.category, 'Family spices');
+      expect(privateItem.currentQuantity, 4);
+      expect(privateItem.categoryId, isNull);
+      expect(privateItem.homeCategoryId, _homeCategoryId);
+      expect(privateItem.categorySource, InventoryCategorySource.home);
+    },
+  );
+
+  test(
+    'authoritative home category overrides a catalog product global category',
+    () async {
+      final catalogItem = InventoryItem(
+        id: _productId,
+        homeId: _homeId,
+        canonicalName: 'Long-grain rice',
+        packSize: '2 kg bag',
+        category: 'Global grains',
+        productId: _otherProductId,
+        packId: _productId,
+        categoryId: _globalCategoryId,
+        categorySource: InventoryCategorySource.global,
+      );
+      await repository.replaceCatalogItemMaster(
+        homeId: _homeId,
+        items: <InventoryItem>[catalogItem],
+      );
+      await _seedProjection(
+        database,
+        homeId: _homeId,
+        entityType: 'inventory-home-category',
+        entityId: _homeCategoryId,
+        revision: 1,
+        payload: const <String, Object?>{
+          'name': 'Long-term pantry',
+          'status': 'active',
+        },
+      );
+      await _seedProjection(
+        database,
+        homeId: _homeId,
+        entityType: 'inventory-home-product',
+        entityId: _createdProductId,
+        revision: 2,
+        payload: const <String, Object?>{
+          'productId': _otherProductId,
+          'packId': _productId,
+          'privateName': null,
+          'originalPackText': null,
+          'homeCategoryId': _homeCategoryId,
+          'status': 'active',
+        },
+      );
+      await _seedProjection(
+        database,
+        homeId: _homeId,
+        entityType: 'inventory-balance',
+        entityId: _createdProductId,
+        revision: 1,
+        payload: const <String, Object?>{
+          'homeProductId': _createdProductId,
+          'quantity': '6',
+        },
+      );
+
+      final item = (await repository.watchItems(homeId: _homeId).first).single;
+      expect(item.id, _createdProductId);
+      expect(item.productId, _otherProductId);
+      expect(item.packId, _productId);
+      expect(item.category, 'Long-term pantry');
+      expect(item.categoryId, isNull);
+      expect(item.homeCategoryId, _homeCategoryId);
+      expect(item.categorySource, InventoryCategorySource.home);
+      expect(item.currentQuantity, 6);
+    },
+  );
+
+  test(
     'closing a count atomically updates the balance and movement ledger',
     () async {
       final source = _baselineFixture();
@@ -459,6 +647,7 @@ void main() {
           homeId: _homeId,
           privateName: '  Family spice mix  ',
           originalPackText: '  250 g jar  ',
+          homeCategoryId: _homeCategoryId,
         ),
       );
 
@@ -476,6 +665,7 @@ void main() {
         'packId': null,
         'privateName': 'Family spice mix',
         'originalPackText': '250 g jar',
+        'homeCategoryId': _homeCategoryId,
         'status': 'active',
         'id': _createdProductId,
         'revision': 1,
@@ -498,8 +688,9 @@ void main() {
         'packId': null,
         'privateName': 'Family spice mix',
         'originalPackText': '250 g jar',
+        'homeCategoryId': _homeCategoryId,
       });
-      expect(command.keys, hasLength(4));
+      expect(command.keys, hasLength(5));
       expect(command.containsKey('quantity'), isFalse);
       expect(command.containsKey('homeId'), isFalse);
       final item = await repository.watchItems(homeId: _homeId).first;
@@ -539,6 +730,64 @@ void main() {
         throwsArgumentError,
       );
       expect(await database.select(database.localRecords).get(), isEmpty);
+      expect(await database.select(database.clientOperations).get(), isEmpty);
+    },
+  );
+
+  test(
+    'invalid home-category UUIDs leave product creation fully atomic',
+    () async {
+      repository = DriftHouseholdRepository(
+        database,
+        clock: () => now,
+        deviceId: _deviceId,
+      );
+      await expectLater(
+        repository.createPrivateHomeProduct(
+          PrivateHomeProductDraft(
+            homeId: _homeId,
+            privateName: 'Family spice mix',
+            homeCategoryId: 'not-a-uuid',
+          ),
+        ),
+        throwsArgumentError,
+      );
+      expect(await database.select(database.localRecords).get(), isEmpty);
+      expect(await database.select(database.clientOperations).get(), isEmpty);
+
+      final catalogItem = InventoryItem(
+        id: _productId,
+        homeId: _homeId,
+        productId: _otherProductId,
+        packId: _productId,
+        canonicalName: 'Long-grain rice',
+        packSize: '2 kg',
+        category: 'Grains',
+      );
+      await repository.replaceCatalogItemMaster(
+        homeId: _homeId,
+        items: <InventoryItem>[catalogItem],
+      );
+      await expectLater(
+        repository.createCatalogHomeProduct(
+          CatalogHomeProductDraft(
+            homeId: _homeId,
+            productId: _otherProductId,
+            packId: _productId,
+            canonicalName: 'Long-grain rice',
+            packSize: '2 kg',
+            category: 'Grains',
+            homeCategoryId: 'still-not-a-uuid',
+          ),
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        await (database.select(database.localRecords)
+              ..where((row) => row.entityType.equals('inventory-home-product')))
+            .get(),
+        isEmpty,
+      );
       expect(await database.select(database.clientOperations).get(), isEmpty);
     },
   );
@@ -594,6 +843,7 @@ void main() {
         'packId': _productId,
         'privateName': null,
         'originalPackText': null,
+        'homeCategoryId': null,
       });
       final selected = await repository.watchItems(homeId: _homeId).first;
       expect(selected, hasLength(1));
@@ -672,6 +922,56 @@ void main() {
 
       await RevokedHomeDataPurger(database).purge(_homeId);
       expect(await repository.watchItems(homeId: _homeId).first, isEmpty);
+    },
+  );
+
+  test(
+    'validates a complete item-master snapshot before replacing cache',
+    () async {
+      final retained = InventoryItem(
+        id: _productId,
+        homeId: _homeId,
+        productId: _otherProductId,
+        packId: _productId,
+        canonicalName: 'Retained product',
+        packSize: '1 unit',
+        category: 'Staples',
+      );
+      await repository.replaceCatalogItemMaster(
+        homeId: _homeId,
+        items: <InventoryItem>[retained],
+      );
+
+      await expectLater(
+        repository.replaceCatalogItemMaster(
+          homeId: _homeId,
+          items: <InventoryItem>[
+            InventoryItem(
+              id: _selectedPackId,
+              homeId: _homeId,
+              productId: _suggestionId,
+              packId: _selectedPackId,
+              canonicalName: 'New public product',
+              packSize: '2 units',
+              category: 'Staples',
+            ),
+            InventoryItem(
+              id: _privateItemMasterId,
+              homeId: _homeId,
+              canonicalName: 'Malformed private product',
+              packSize: '1 unit',
+              category: 'Private',
+              isHomeProduct: true,
+            ),
+          ],
+        ),
+        throwsFormatException,
+      );
+
+      final items = await repository.watchItems(homeId: _homeId).first;
+      expect(items, hasLength(1));
+      expect(items.single.id, _productId);
+      expect(items.single.canonicalName, 'Retained product');
     },
   );
 
@@ -1678,6 +1978,9 @@ const _deviceId = '0198a0b1-c2d3-7e4f-a345-6789abcdef01';
 const _productId = '0198a0b1-c2d3-7e4f-b456-789abcdef012';
 const _createdProductId = '0198a0b1-c2d3-7e4f-b456-789abcdef013';
 const _otherProductId = '0198a0b1-c2d3-7e4f-b456-789abcdef099';
+const _privateItemMasterId = '0198a0b1-c2d3-7e4f-b456-789abcdef088';
+const _globalCategoryId = '0198a0b1-c2d3-7e4f-b456-789abcdef077';
+const _homeCategoryId = '0198a0b1-c2d3-7e4f-b456-789abcdef066';
 const _sessionId = '0198a0b1-c2d3-7e4f-a567-89abcdef0123';
 const _countLineId = '0198a0b1-c2d3-7e4f-9678-9abcdef01234';
 const _storeId = '0198a0b1-c2d3-7e4f-a678-9abcdef01234';

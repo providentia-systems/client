@@ -7,8 +7,9 @@
   the amended Providentia architecture and phased delivery mandate.
 - [Architecture](architecture.md): dependency direction, phase boundaries, and
   runtime configuration.
-- [Local development](local-development.md): backend handoff, client login,
-  platform launch commands, test-user setup, and current limitations.
+- [Local development](local-development.md): guided Ubuntu installation,
+  backend handoff, client login, platform launch commands, test-user setup,
+  firewall/CORS boundaries, and current limitations.
 - [Contracts](contracts.md): backend-owned OpenAPI and design-token pinning.
 - [Platform support](platform-support.md): upstream baselines, CI evidence, and
   packaging status.

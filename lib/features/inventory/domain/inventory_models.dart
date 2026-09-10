@@ -57,6 +57,7 @@ final class CatalogHomeProductDraft {
     required this.packSize,
     required this.category,
     this.brand = '',
+    this.homeCategoryId,
     List<String> aliases = const <String>[],
   }) : aliases = List<String>.unmodifiable(aliases) {
     _requireText(homeId, 'homeId');
@@ -65,6 +66,13 @@ final class CatalogHomeProductDraft {
     _requireText(canonicalName, 'canonicalName');
     _requireText(packSize, 'packSize');
     _requireText(category, 'category');
+    if (homeCategoryId != null && homeCategoryId!.trim().isEmpty) {
+      throw ArgumentError.value(
+        homeCategoryId,
+        'homeCategoryId',
+        'must not be empty',
+      );
+    }
   }
 
   factory CatalogHomeProductDraft.fromItem(InventoryItem item) {
@@ -81,6 +89,7 @@ final class CatalogHomeProductDraft {
       packSize: item.packSize,
       category: item.category,
       brand: item.brand,
+      homeCategoryId: item.homeCategoryId,
       aliases: item.aliases,
     );
   }
@@ -92,6 +101,7 @@ final class CatalogHomeProductDraft {
   final String packSize;
   final String category;
   final String brand;
+  final String? homeCategoryId;
   final List<String> aliases;
 }
 

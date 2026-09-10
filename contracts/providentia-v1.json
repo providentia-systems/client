@@ -10639,6 +10639,8 @@
           "ai.read",
           "ai.use",
           "ai.manage",
+          "ai.credentials.use",
+          "ai.platform.use",
           "reports.read",
           "catalog.contribute",
           "catalog.import",
@@ -10863,6 +10865,7 @@
           },
           "effectivePermissions": {
             "type": "array",
+            "uniqueItems": true,
             "items": {
               "type": "string"
             }
@@ -19553,9 +19556,21 @@
               "null"
             ]
           },
+          "stateName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "cityId": {
             "type": [
               "integer",
+              "null"
+            ]
+          },
+          "cityName": {
+            "type": [
+              "string",
               "null"
             ]
           },
