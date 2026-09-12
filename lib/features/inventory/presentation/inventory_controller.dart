@@ -64,10 +64,15 @@ final class InventoryController extends ChangeNotifier {
   InventoryViewState _state = const InventoryViewState();
   bool _started = false;
   StreamSubscription<List<HomeInventoryCategory>>? _categoriesSubscription;
+  StreamSubscription<List<InventoryItem>>? _archivedSubscription;
+  List<InventoryItem> _archivedProducts = const [];
+  List<InventoryItem> get archivedProducts => _archivedProducts;
   List<HomeInventoryCategory> _categories = const [];
   List<HomeInventoryCategory> get homeCategories => _categories;
   InventoryMetadataRepository? get _metadata =>
-      _repository is InventoryMetadataRepository ? _repository : null;
+      _repository is InventoryMetadataRepository
+      ? _repository as InventoryMetadataRepository
+      : null;
   bool get canEditMetadata => _metadata?.supportsInventoryMetadata == true;
 
   Future<bool> saveCategory({
@@ -91,11 +96,13 @@ final class InventoryController extends ChangeNotifier {
     String? categoryId,
     bool archived = false,
   }) => _metadataMutation(() async {
-    if (item.homeId != homeId)
+    if (item.homeId != homeId) {
       throw StateError('Product belongs to another home.');
+    }
     await _metadata!.updateHomeProduct(
       homeId: homeId,
       productId: item.id,
+      expectedRevision: item.revision,
       privateName: name,
       originalPackText: pack,
       homeCategoryId: categoryId,
@@ -135,6 +142,18 @@ final class InventoryController extends ChangeNotifier {
   void start() {
     if (_started) return;
     _started = true;
+    _archivedSubscription = _metadata?.watchArchivedHomeProducts(homeId).listen(
+      (items) {
+        if (items.any((item) => item.homeId != homeId)) {
+          _setSafeError('Archived product access was rejected.');
+          return;
+        }
+        _archivedProducts = List.unmodifiable(items);
+        notifyListeners();
+      },
+      onError: (Object _) =>
+          _setSafeError('Archived products could not be loaded.'),
+    );
     _categoriesSubscription = _metadata?.watchHomeCategories(homeId).listen((
       rows,
     ) {
@@ -532,6 +551,7 @@ final class InventoryController extends ChangeNotifier {
 
   @override
   void dispose() {
+    unawaited(_archivedSubscription?.cancel());
     unawaited(_categoriesSubscription?.cancel());
     unawaited(_itemsSubscription?.cancel());
     unawaited(_sessionSubscription?.cancel());

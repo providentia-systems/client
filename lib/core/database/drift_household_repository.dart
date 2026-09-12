@@ -153,6 +153,18 @@ final class DriftHouseholdRepository
   bool get supportsInventoryMetadata => _synchronizesMutations;
 
   @override
+  Stream<List<InventoryItem>> watchArchivedHomeProducts(String homeId) =>
+      _watchRecordTypes(
+        homeId: homeId,
+        entityTypes: const {
+          _catalogItemType,
+          _homeCategoryType,
+          _homeProductType,
+          _balanceType,
+        },
+      ).map((rows) => _projectInventoryItems(homeId, rows, archivedOnly: true));
+
+  @override
   Stream<List<HomeInventoryCategory>> watchHomeCategories(String homeId) =>
       _watchRecordTypes(
         homeId: homeId,
@@ -177,8 +189,9 @@ final class DriftHouseholdRepository
     required bool archived,
     int? expectedRevision,
   }) async {
-    if (!_synchronizesMutations)
+    if (!_synchronizesMutations) {
       throw StateError('Synchronization is required.');
+    }
     _requireHomeUuid(homeId);
     final label = name.trim();
     if (label.isEmpty || label.length > 191) {
@@ -231,9 +244,11 @@ final class DriftHouseholdRepository
     String? originalPackText,
     String? homeCategoryId,
     required bool archived,
+    int? expectedRevision,
   }) async {
-    if (!_synchronizesMutations)
+    if (!_synchronizesMutations) {
       throw StateError('Synchronization is required.');
+    }
     final draft = PrivateHomeProductDraft(
       homeId: homeId,
       privateName: privateName,
@@ -251,6 +266,9 @@ final class DriftHouseholdRepository
         entityId: productId,
       );
       if (previous == null) throw StateError('The product is unavailable.');
+      if (expectedRevision != null && previous.revision != expectedRevision) {
+        throw StateError('The product changed. Reload before saving.');
+      }
       final data = _validatedProjection(previous, homeId);
       final catalogBacked = data['productId'] != null;
       if (archived) {
@@ -1330,8 +1348,9 @@ final class DriftHouseholdRepository
 
   List<InventoryItem> _projectInventoryItems(
     String homeId,
-    List<LocalRecord> rows,
-  ) {
+    List<LocalRecord> rows, {
+    bool archivedOnly = false,
+  }) {
     final items = <String, InventoryItem>{};
     final catalogItems = <String, InventoryItem>{};
     final balances = <String, double>{};
@@ -1369,7 +1388,7 @@ final class DriftHouseholdRepository
       if (row.homeId != homeId || item.homeId != homeId) {
         throw StateError('Cross-home inventory projection was rejected.');
       }
-      items[item.id] = item;
+      if (!archivedOnly) items[item.id] = item;
     }
 
     for (final row in rows.where((row) => row.entityType == _catalogItemType)) {
@@ -1412,14 +1431,14 @@ final class DriftHouseholdRepository
             : InventoryCategorySource.global,
       );
       catalogItems[packId] = normalized;
-      items[packId] = normalized;
+      if (!archivedOnly) items[packId] = normalized;
     }
 
     for (final row in rows.where((row) => row.entityType == _homeProductType)) {
       _requireUuid(row.entityId, 'home product projection');
       final payload = _validatedProjection(row, homeId);
       final status = _optionalString(payload['status'], fallback: 'active');
-      if (status != 'active') continue;
+      if (status != (archivedOnly ? 'archived' : 'active')) continue;
       final privateName = _nullableString(payload['privateName']);
       final productName = _nullableString(payload['productName']);
       final productId = _nullableUuid(payload['productId'], 'productId');
@@ -1475,6 +1494,7 @@ final class DriftHouseholdRepository
         categorySource: usesHomeCategory
             ? InventoryCategorySource.home
             : catalogItem?.categorySource,
+        revision: row.revision,
       );
     }
 

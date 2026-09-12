@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:providentia/features/inventory/presentation/inventory_metadata_dialogs.dart';
 import 'package:providentia/features/inventory/application/stock_photo_count_controller.dart';
 import 'package:providentia/features/inventory/domain/inventory_models.dart';
 import 'package:providentia/features/inventory/presentation/inventory_controller.dart';
+import 'package:providentia/features/inventory/presentation/inventory_metadata_dialogs.dart';
 import 'package:providentia/features/inventory/presentation/stock_photo_count_panel.dart';
 
 class InventoryWorkspace extends StatefulWidget {
@@ -55,6 +55,15 @@ class _InventoryWorkspaceState extends State<InventoryWorkspace> {
                           style: Theme.of(context).textTheme.headlineLarge,
                         ),
                       ),
+                      if (widget.controller.canEditMetadata)
+                        IconButton(
+                          tooltip: 'Removed products',
+                          icon: const Icon(Icons.inventory_2_outlined),
+                          onPressed: () => showArchivedInventoryProducts(
+                            context,
+                            widget.controller,
+                          ),
+                        ),
                       if (widget.controller.canEditMetadata)
                         IconButton(
                           tooltip: 'Manage categories',

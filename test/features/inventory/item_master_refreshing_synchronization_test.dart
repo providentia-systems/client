@@ -199,7 +199,10 @@ void main() {
       gateway.deleteProducts();
       // A failed refresh cannot preserve the deleted private projection via
       // item-master data from the previous successful run.
-      expect((await synchronization.synchronize(_homeId)).completed, isTrue);
+      expect(
+        (await synchronization.synchronize(_homeId)).status,
+        SyncRunStatus.retryableFailure,
+      );
       items = await household.watchItems(homeId: _homeId).first;
       expect(items, hasLength(1));
       expect(items.single.id, _packId);

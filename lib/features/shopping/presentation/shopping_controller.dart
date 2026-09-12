@@ -139,21 +139,34 @@ final class ShoppingController extends ChangeNotifier {
   }
 
   bool get canGenerateSuggestions =>
+      !_suggestionAuthorizationDenied &&
       _suggestionRepository is OnlineShoppingSuggestionRunner;
 
   Future<void> generateSuggestions() async {
     final repository = _suggestionRepository;
     if (repository is! OnlineShoppingSuggestionRunner ||
-        _state.suggestionsLoading)
+        _suggestionAuthorizationDenied ||
+        _state.suggestionsLoading) {
       return;
+    }
+    final generation = ++_suggestionRequestGeneration;
     _state = _copyState(suggestionsLoading: true, clearSafeError: true);
     notifyListeners();
     try {
-      await repository.regenerate(homeId: homeId);
-      if (_disposed) return;
+      await (repository as OnlineShoppingSuggestionRunner).regenerate(
+        homeId: homeId,
+      );
+      if (!_requestIsCurrent(generation)) return;
       await refreshSuggestions();
-    } on OnlineSuggestionException {
-      if (_disposed) return;
+    } on OnlineSuggestionException catch (error) {
+      if (!_requestIsCurrent(generation)) return;
+      if (error.kind == OnlineSuggestionFailureKind.authorizationDenied) {
+        _denySuggestionAccess();
+      } else {
+        _clearSuggestions(_suggestionFailureMessage(error.kind));
+      }
+    } catch (_) {
+      if (!_requestIsCurrent(generation)) return;
       _clearSuggestions(
         'Suggestions could not be regenerated. Check your access and connection.',
       );
@@ -205,9 +218,7 @@ final class ShoppingController extends ChangeNotifier {
       } else if (error.kind ==
               OnlineSuggestionFailureKind.authenticationRequired ||
           error.kind == OnlineSuggestionFailureKind.invalidResponse) {
-        _clearSuggestions(
-          'Suggestions could not be regenerated. Check your access and connection.',
-        );
+        _clearSuggestions(_suggestionFailureMessage(error.kind));
       } else {
         _state = _copyState(
           suggestionsLoading: false,
@@ -602,9 +613,7 @@ final class ShoppingController extends ChangeNotifier {
     }
     if (error.kind == OnlineSuggestionFailureKind.authenticationRequired ||
         error.kind == OnlineSuggestionFailureKind.invalidResponse) {
-      _clearSuggestions(
-        'Suggestions could not be regenerated. Check your access and connection.',
-      );
+      _clearSuggestions(_suggestionFailureMessage(error.kind));
       return;
     }
     _setError(_suggestionFailureMessage(error.kind));
