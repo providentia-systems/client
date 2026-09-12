@@ -37,6 +37,7 @@ abstract interface class InventoryProductCreationRepository
 abstract interface class InventoryMetadataRepository {
   bool get supportsInventoryMetadata;
   Stream<List<HomeInventoryCategory>> watchHomeCategories(String homeId);
+  Stream<List<InventoryItem>> watchArchivedHomeProducts(String homeId);
   Future<void> saveHomeCategory({
     required String homeId,
     String? categoryId,
@@ -51,5 +52,6 @@ abstract interface class InventoryMetadataRepository {
     String? originalPackText,
     String? homeCategoryId,
     required bool archived,
+    int? expectedRevision,
   });
 }

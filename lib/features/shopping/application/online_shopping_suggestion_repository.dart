@@ -99,17 +99,6 @@ final class CachedOnlineShoppingSuggestionRepository
     implements
         OnlineShoppingSuggestionRepository,
         OnlineShoppingSuggestionRunner {
-  @override
-  Future<void> regenerate({required String homeId}) async {
-    final remote = _remote;
-    if (remote is! OnlineShoppingSuggestionRunner) {
-      throw const OnlineSuggestionException(
-        OnlineSuggestionFailureKind.unavailable,
-      );
-    }
-    await remote.regenerate(homeId: homeId);
-  }
-
   factory CachedOnlineShoppingSuggestionRepository({
     required OnlineShoppingSuggestionRepository remote,
     required ShoppingSuggestionCache cache,
@@ -119,6 +108,17 @@ final class CachedOnlineShoppingSuggestionRepository
 
   final OnlineShoppingSuggestionRepository _remote;
   final ShoppingSuggestionCache _cache;
+
+  @override
+  Future<void> regenerate({required String homeId}) async {
+    final remote = _remote;
+    if (remote is! OnlineShoppingSuggestionRunner) {
+      throw const OnlineSuggestionException(
+        OnlineSuggestionFailureKind.unavailable,
+      );
+    }
+    await (remote as OnlineShoppingSuggestionRunner).regenerate(homeId: homeId);
+  }
 
   @override
   Future<ShoppingSuggestionFeed> list({required String homeId}) async {

@@ -654,6 +654,17 @@ void main() {
       expect(item.canonicalName, 'Brown rice');
       expect(item.packSize, '500 g');
       expect(item.category, 'Dry goods');
+      expect(item.revision, 2);
+      await expectLater(
+        repository.updateHomeProduct(
+          homeId: _homeId,
+          productId: created.homeProductId,
+          privateName: 'Stale editor name',
+          archived: false,
+          expectedRevision: 1,
+        ),
+        throwsStateError,
+      );
       final operations = await database.select(database.clientOperations).get();
       expect(operations.map((row) => row.operationType), [
         'inventory.home-category.create',
