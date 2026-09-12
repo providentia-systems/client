@@ -32,6 +32,10 @@ final class ShoppingSuggestionFeed {
   final DateTime verifiedAt;
 }
 
+abstract interface class OnlineShoppingSuggestionRunner {
+  Future<void> regenerate({required String homeId});
+}
+
 abstract interface class OnlineShoppingSuggestionRepository {
   Future<ShoppingSuggestionFeed> list({required String homeId});
 
@@ -92,7 +96,20 @@ final class NoShoppingSuggestionCache implements ShoppingSuggestionCache {
 /// Adds offline last-verified reads without hiding authentication,
 /// authorization, or response-integrity failures behind stale data.
 final class CachedOnlineShoppingSuggestionRepository
-    implements OnlineShoppingSuggestionRepository {
+    implements
+        OnlineShoppingSuggestionRepository,
+        OnlineShoppingSuggestionRunner {
+  @override
+  Future<void> regenerate({required String homeId}) async {
+    final remote = _remote;
+    if (remote is! OnlineShoppingSuggestionRunner) {
+      throw const OnlineSuggestionException(
+        OnlineSuggestionFailureKind.unavailable,
+      );
+    }
+    await remote.regenerate(homeId: homeId);
+  }
+
   factory CachedOnlineShoppingSuggestionRepository({
     required OnlineShoppingSuggestionRepository remote,
     required ShoppingSuggestionCache cache,

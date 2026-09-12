@@ -131,7 +131,7 @@ function validateContract(document) {
   }
   if (
     document.info?.title !== 'Providentia API' ||
-    document.info?.version !== '2.0.0'
+    document.info?.version !== '2.1.0'
   ) {
     throw new Error('Unexpected API identity or version.');
   }
@@ -191,7 +191,7 @@ function validateContract(document) {
       operationIds.add(operation.operationId);
     }
   }
-  if (operationIds.size !== 208) {
+  if (operationIds.size !== 210) {
     throw new Error(`Expected the API 2.0 surface, found ${operationIds.size} operations.`);
   }
 

@@ -613,6 +613,78 @@ void main() {
   );
 
   test(
+    'category and product edits preserve ordered durable intent across restart',
+    () async {
+      var next = 200;
+      repository = DriftHouseholdRepository(
+        database,
+        clock: () => now,
+        deviceId: _deviceId,
+        idGenerator: () => _fixtureUuid(3, next++),
+      );
+      await repository.saveHomeCategory(
+        homeId: _homeId,
+        name: 'Dry goods',
+        archived: false,
+      );
+      final category =
+          (await repository.watchHomeCategories(_homeId).first).single;
+      final created = await repository.createPrivateHomeProduct(
+        PrivateHomeProductDraft(
+          homeId: _homeId,
+          privateName: 'Rice',
+          originalPackText: '1 kg',
+          homeCategoryId: category.id,
+        ),
+      );
+      await repository.updateHomeProduct(
+        homeId: _homeId,
+        productId: created.homeProductId,
+        privateName: 'Brown rice',
+        originalPackText: '500 g',
+        homeCategoryId: category.id,
+        archived: false,
+      );
+      final restarted = DriftHouseholdRepository(
+        database,
+        clock: () => now,
+        deviceId: _deviceId,
+      );
+      final item = (await restarted.watchItems(homeId: _homeId).first).single;
+      expect(item.canonicalName, 'Brown rice');
+      expect(item.packSize, '500 g');
+      expect(item.category, 'Dry goods');
+      final operations = await database.select(database.clientOperations).get();
+      expect(operations.map((row) => row.operationType), [
+        'inventory.home-category.create',
+        'inventory.home-product.create',
+        'inventory.home-product.update',
+      ]);
+      expect(operations.last.baseRevision, 1);
+      await expectLater(
+        repository.saveHomeCategory(
+          homeId: _homeId,
+          categoryId: category.id,
+          name: 'Lost update',
+          archived: false,
+          expectedRevision: 99,
+        ),
+        throwsStateError,
+      );
+      expect(
+        await database.select(database.clientOperations).get(),
+        hasLength(3),
+      );
+      expect(
+        await restarted
+            .watchHomeCategories('0198a0b1-c2d3-7e4f-8123-456789abcdee')
+            .first,
+        isEmpty,
+      );
+    },
+  );
+
+  test(
     'private product creation is atomic private and protocol allowlisted',
     () async {
       var idIndex = 0;

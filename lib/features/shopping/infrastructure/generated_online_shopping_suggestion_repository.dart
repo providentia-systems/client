@@ -7,7 +7,9 @@ import 'package:providentia_api_client/providentia_api_client.dart';
 /// intelligence operations. No response map or backend problem detail leaves
 /// this adapter.
 final class GeneratedOnlineShoppingSuggestionRepository
-    implements OnlineShoppingSuggestionRepository {
+    implements
+        OnlineShoppingSuggestionRepository,
+        OnlineShoppingSuggestionRunner {
   GeneratedOnlineShoppingSuggestionRepository(
     this._client, {
     DateTime Function()? clock,
@@ -15,6 +17,15 @@ final class GeneratedOnlineShoppingSuggestionRepository
 
   final ProvidentiaApiClient _client;
   final DateTime Function() _clock;
+
+  @override
+  Future<void> regenerate({required String homeId}) => _run(() async {
+    _uuidValue(homeId, 'homeId');
+    await _client.createShoppingSuggestionRun(
+      homeId: homeId,
+      body: const <String, Object?>{'horizonDays': 14},
+    );
+  });
 
   @override
   Future<ShoppingSuggestionFeed> list({required String homeId}) =>

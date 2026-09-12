@@ -47,6 +47,7 @@ final class BaselineImportReport {
 final class DriftHouseholdRepository
     implements
         InventoryProductCreationRepository,
+        InventoryMetadataRepository,
         PurchaseCaptureRepository,
         ShoppingRepository {
   factory DriftHouseholdRepository(
@@ -146,6 +147,155 @@ final class DriftHouseholdRepository
         _balanceType,
       },
     ).map((rows) => _projectInventoryItems(homeId, rows));
+  }
+
+  @override
+  bool get supportsInventoryMetadata => _synchronizesMutations;
+
+  @override
+  Stream<List<HomeInventoryCategory>> watchHomeCategories(String homeId) =>
+      _watchRecordTypes(
+        homeId: homeId,
+        entityTypes: const {_homeCategoryType},
+      ).map(
+        (rows) => rows.map((row) {
+          final data = _validatedProjection(row, homeId);
+          return HomeInventoryCategory(
+            id: row.entityId,
+            name: _requiredString(data, 'name'),
+            revision: row.revision,
+            archived: data['status'] == 'archived',
+          );
+        }).toList()..sort((a, b) => a.name.compareTo(b.name)),
+      );
+
+  @override
+  Future<void> saveHomeCategory({
+    required String homeId,
+    String? categoryId,
+    required String name,
+    required bool archived,
+    int? expectedRevision,
+  }) async {
+    if (!_synchronizesMutations)
+      throw StateError('Synchronization is required.');
+    _requireHomeUuid(homeId);
+    final label = name.trim();
+    if (label.isEmpty || label.length > 191) {
+      throw ArgumentError('Enter a category name of at most 191 characters.');
+    }
+    final at = _clock().toUtc();
+    await _database.transaction(() async {
+      final id = categoryId ?? _nextUuid('home category');
+      final previous = await _record(
+        homeId: homeId,
+        entityType: _homeCategoryType,
+        entityId: id,
+      );
+      if (categoryId != null &&
+          (previous == null || previous.revision != expectedRevision)) {
+        throw StateError('The category changed. Refresh and try again.');
+      }
+      final payload = <String, Object?>{
+        'name': label,
+        'status': archived ? 'archived' : 'active',
+      };
+      await _writeProjection(
+        homeId: homeId,
+        entityType: _homeCategoryType,
+        entityId: id,
+        revision: (previous?.revision ?? 0) + 1,
+        representation: payload,
+        at: at,
+      );
+      await _insertGeneratedCommand(
+        homeId: homeId,
+        entityType: _homeCategoryType,
+        entityId: id,
+        commandType: previous == null
+            ? 'inventory.home-category.create'
+            : 'inventory.home-category.update',
+        baseRevision: previous?.revision,
+        payload: previous == null ? {'name': label} : payload,
+        at: at,
+      );
+    });
+    _triggerForegroundSync();
+  }
+
+  @override
+  Future<void> updateHomeProduct({
+    required String homeId,
+    required String productId,
+    required String privateName,
+    String? originalPackText,
+    String? homeCategoryId,
+    required bool archived,
+  }) async {
+    if (!_synchronizesMutations)
+      throw StateError('Synchronization is required.');
+    final draft = PrivateHomeProductDraft(
+      homeId: homeId,
+      privateName: privateName,
+      originalPackText: originalPackText,
+      homeCategoryId: homeCategoryId,
+    );
+    _requireHomeUuid(homeId);
+    _requireUuid(productId, 'home product');
+    if (homeCategoryId != null) _requireUuid(homeCategoryId, 'home category');
+    final at = _clock().toUtc();
+    await _database.transaction(() async {
+      final previous = await _record(
+        homeId: homeId,
+        entityType: _homeProductType,
+        entityId: productId,
+      );
+      if (previous == null) throw StateError('The product is unavailable.');
+      final data = _validatedProjection(previous, homeId);
+      final catalogBacked = data['productId'] != null;
+      if (archived) {
+        final balance = await _record(
+          homeId: homeId,
+          entityType: _balanceType,
+          entityId: productId,
+        );
+        if (balance != null &&
+            _requiredDecimal(
+                  _validatedProjection(balance, homeId),
+                  'quantity',
+                ) !=
+                0) {
+          throw StateError(
+            'Adjust remaining stock to zero before removing this product.',
+          );
+        }
+      }
+      final payload = <String, Object?>{
+        if (!catalogBacked) 'privateName': draft.privateName.trim(),
+        if (!catalogBacked)
+          'originalPackText': _trimToNull(draft.originalPackText),
+        'homeCategoryId': draft.homeCategoryId,
+        'status': archived ? 'archived' : 'active',
+      };
+      await _writeProjection(
+        homeId: homeId,
+        entityType: _homeProductType,
+        entityId: productId,
+        revision: previous.revision + 1,
+        representation: {..._withoutProjectionMetadata(data), ...payload},
+        at: at,
+      );
+      await _insertGeneratedCommand(
+        homeId: homeId,
+        entityType: _homeProductType,
+        entityId: productId,
+        commandType: 'inventory.home-product.update',
+        baseRevision: previous.revision,
+        payload: payload,
+        at: at,
+      );
+    });
+    _triggerForegroundSync();
   }
 
   @override

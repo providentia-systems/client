@@ -1,6 +1,6 @@
 # Project memory
 
-Current pre-release authority: [API 2.0.0 platform access](platform-access.md).
+Current access authority: [Platform access](platform-access.md).
 The current implementation uses numeric email codes, separate account/home/admin
 groups and delegated audited operator inspection. Earlier entries below retain
 historical decisions and do not define the current sign-in or access model.
@@ -50,52 +50,16 @@ historical decisions and do not define the current sign-in or access model.
 Domain, app-store, and trademark due diligence remains mandatory before public
 launch. It does not reopen the owner-selected name.
 
-## Current integration note — 2026-09-10
+## Current integration note — 2026-09-12
 
-- The client pins the reviewed OpenAPI `2.0.0` boundary at SHA-256
-  `7b1f1be5d9efd311254e9840c4595e08575e8c97d35da766dab0d291c165bcae`.
-  The canonical contract contains 208 operations; the default-deny homeowner
-  facade generates 159 and excludes every admin/operator/moderation method.
-- API 2.0.0 has no human-account password surface: registration, password
-  login, email verification, and password reset are gone from the contract,
-  and the client's development-password transport, controller, UI, and
-  runtime define were removed with it. Trusted-device sessions are durable —
-  null idle/refresh expiry means signed in until explicit sign-out or
-  revocation — while `requestedSessionIdleSeconds` still bounds a session
-  deliberately. Revision-guarded `removeHomeMembership` joined the homeowner
-  facade.
-- Product onboarding is email-only login-link authentication. The originating
-  client owns a private poll token, state, and PKCE verifier. The emailed
-  fragment-secret homeowner link opens this Flutter client, which proves,
-  reviews, and approves or denies through JSON APIs. The originating client
-  then polls and exchanges; session credentials never appear in URLs.
-- The backend creates a verified account only after approval. A new person gets
-  exactly one editable `My home` and becomes its `owner`; an existing person
-  restores the same account and memberships without another default home.
-- Web sessions use sliding 30-day inactivity and native sessions use sliding
-  60-day inactivity, subject to backend enforcement. Signed-in devices and
-  revocation are visible from the account screen.
-- Recipient invitations and home selection/settings/governance are composed
-  homeowner workflows. Platform administration exists only in the separate
-  Admin Flutter client.
-- Catalog sharing consent and explicit product-identity, product-image, and
-  store-price contributions are production-composed behind home permissions.
-  Product-image input is reachable from camera, gallery, and file selection;
-  MIME type and dimensions are derived from bounded bytes, the local preview
-  requires rights plus exact-submission confirmation, and bytes are zeroized
-  on replacement, completion, revocation, or session loss. Consent and
-  selection do not submit. A durable submission UUID is bound to the exact
-  payload and consent revision before transport. Review/publication remains in
-  the separate Admin Flutter client.
-- Home roles (`owner`, `manager`, `member`, `viewer`) and platform roles are
-  separate authorization domains. A platform role grants no private home
-  access.
-- Household mutations commit to Drift first and use the durable typed sync
-  outbox. Local and simulated convergence tests are not a substitute for live
-  backend, provider, or supported-platform acceptance evidence.
-- Local Drift storage is not application-encrypted. Encryption and key
-  lifecycle remain an explicit release decision and must not be claimed as a
-  completed control.
+The coordinated API 2.1.0 work is described in
+[Product lifecycle integration](product-lifecycle-integration.md). Numeric email
+codes authenticate accounts; homes are explicitly created or joined. Homeowner
+permissions and administrator group permissions are separate. Authorized system
+operators can inspect private home records through dedicated audited routes,
+independently of public catalog contribution consent. The client keeps household
+mutations in its typed durable outbox. Runtime acceptance remains open; do not
+interpret historical notes as claims that these PRs have passed production tests.
 
 ## Owner licensing decision — 2026-08-26
 

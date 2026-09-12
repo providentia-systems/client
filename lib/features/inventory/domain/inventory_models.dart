@@ -546,3 +546,17 @@ void _requireQuantity(
     throw ArgumentError.value(value, name, 'must be a valid quantity');
   }
 }
+
+/// A private category from the home change feed, including its edit revision.
+final class HomeInventoryCategory {
+  const HomeInventoryCategory({
+    required this.id,
+    required this.name,
+    required this.revision,
+    required this.archived,
+  });
+  final String id;
+  final String name;
+  final int revision;
+  final bool archived;
+}

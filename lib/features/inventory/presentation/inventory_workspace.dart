@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:providentia/features/inventory/presentation/inventory_metadata_dialogs.dart';
 import 'package:providentia/features/inventory/application/stock_photo_count_controller.dart';
 import 'package:providentia/features/inventory/domain/inventory_models.dart';
 import 'package:providentia/features/inventory/presentation/inventory_controller.dart';
@@ -8,10 +9,12 @@ class InventoryWorkspace extends StatefulWidget {
   const InventoryWorkspace({
     required this.controller,
     this.stockPhotoController,
+    this.contributionPageBuilder,
     this.stockPhotoAcquisition,
     super.key,
   });
 
+  final WidgetBuilder? contributionPageBuilder;
   final InventoryController controller;
   final StockPhotoCountController? stockPhotoController;
   final StockPhotoAcquisitionActions? stockPhotoAcquisition;
@@ -52,6 +55,15 @@ class _InventoryWorkspaceState extends State<InventoryWorkspace> {
                           style: Theme.of(context).textTheme.headlineLarge,
                         ),
                       ),
+                      if (widget.controller.canEditMetadata)
+                        IconButton(
+                          tooltip: 'Manage categories',
+                          icon: const Icon(Icons.category_outlined),
+                          onPressed: () => showInventoryCategories(
+                            context,
+                            widget.controller,
+                          ),
+                        ),
                       if (widget.controller.canCreatePrivateProduct)
                         FilledButton.icon(
                           key: const Key('inventory-add-private-product'),
@@ -63,6 +75,19 @@ class _InventoryWorkspaceState extends State<InventoryWorkspace> {
                         ),
                     ],
                   ),
+                  if (widget.contributionPageBuilder != null)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: () => Navigator.of(context).push<void>(
+                          MaterialPageRoute<void>(
+                            builder: widget.contributionPageBuilder!,
+                          ),
+                        ),
+                        icon: const Icon(Icons.volunteer_activism_outlined),
+                        label: const Text('Share a product for catalog review'),
+                      ),
+                    ),
                   if (state.productCreationNotice != null) ...<Widget>[
                     const SizedBox(height: 8),
                     Text(
@@ -161,20 +186,24 @@ class _InventoryWorkspaceState extends State<InventoryWorkspace> {
   }
 
   Future<void> _showAddPrivateProduct() async {
-    final draft = await showDialog<(String, String?)>(
+    final draft = await showDialog<(String, String?, String?)>(
       context: context,
-      builder: (_) => const _PrivateHomeProductDialog(),
+      builder: (_) => _PrivateHomeProductDialog(
+        categories: widget.controller.homeCategories,
+      ),
     );
     if (draft == null || !mounted) return;
     await widget.controller.createPrivateProduct(
       privateName: draft.$1,
       originalPackText: draft.$2,
+      homeCategoryId: draft.$3,
     );
   }
 }
 
 class _PrivateHomeProductDialog extends StatefulWidget {
-  const _PrivateHomeProductDialog();
+  const _PrivateHomeProductDialog({required this.categories});
+  final List<HomeInventoryCategory> categories;
 
   @override
   State<_PrivateHomeProductDialog> createState() =>
@@ -185,6 +214,7 @@ class _PrivateHomeProductDialogState extends State<_PrivateHomeProductDialog> {
   final _name = TextEditingController();
   final _pack = TextEditingController();
   String? _safeError;
+  String? _categoryId;
 
   @override
   void dispose() {
@@ -218,6 +248,20 @@ class _PrivateHomeProductDialogState extends State<_PrivateHomeProductDialog> {
               labelText: 'Original pack text (optional)',
             ),
           ),
+          DropdownButtonFormField<String>(
+            initialValue: '',
+            decoration: const InputDecoration(labelText: 'Home category'),
+            items: [
+              const DropdownMenuItem(value: '', child: Text('Uncategorized')),
+              for (final category in widget.categories)
+                if (!category.archived)
+                  DropdownMenuItem(
+                    value: category.id,
+                    child: Text(category.name),
+                  ),
+            ],
+            onChanged: (value) => _categoryId = value == '' ? null : value,
+          ),
           if (_safeError != null)
             Text(
               _safeError!,
@@ -249,7 +293,7 @@ class _PrivateHomeProductDialogState extends State<_PrivateHomeProductDialog> {
       });
       return;
     }
-    Navigator.pop(context, (name, pack.isEmpty ? null : pack));
+    Navigator.pop(context, (name, pack.isEmpty ? null : pack, _categoryId));
   }
 }
 
@@ -319,6 +363,14 @@ class _InventoryRow extends StatelessWidget {
       child: ListTile(
         onTap: belongsToHome ? () => _editQuantity(context) : null,
         title: Text(item.canonicalName),
+        leading: belongsToHome && controller.canEditMetadata
+            ? IconButton(
+                tooltip: 'Edit product',
+                icon: const Icon(Icons.edit_outlined),
+                onPressed: () =>
+                    showInventoryProductEditor(context, controller, item),
+              )
+            : null,
         subtitle: Text(_metadata),
         trailing: belongsToHome
             ? Text(
