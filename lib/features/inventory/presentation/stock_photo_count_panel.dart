@@ -433,14 +433,32 @@ final class _CandidateReviewCardState extends State<_CandidateReviewCard> {
     final pack = TextEditingController(
       text: proposal.packDescription.value ?? '',
     );
+    String? categoryId;
     try {
-      final input = await showDialog<(String, String?)>(
+      final input = await showDialog<(String, String?, String?)>(
         context: context,
         builder: (context) => AlertDialog(
           title: const Text('Create private home product'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
+              DropdownButtonFormField<String>(
+                initialValue: '',
+                decoration: const InputDecoration(labelText: 'Home category'),
+                items: [
+                  const DropdownMenuItem(
+                    value: '',
+                    child: Text('Uncategorized'),
+                  ),
+                  for (final category in widget.controller.homeCategories)
+                    if (!category.archived)
+                      DropdownMenuItem(
+                        value: category.id,
+                        child: Text(category.name),
+                      ),
+                ],
+                onChanged: (value) => categoryId = value == '' ? null : value,
+              ),
               TextField(
                 key: const Key('stock-photo-private-name'),
                 controller: name,
@@ -465,9 +483,11 @@ final class _CandidateReviewCardState extends State<_CandidateReviewCard> {
                 final privateName = name.text.trim();
                 if (privateName.isEmpty) return;
                 final packText = pack.text.trim();
-                Navigator.of(
-                  context,
-                ).pop((privateName, packText.isEmpty ? null : packText));
+                Navigator.of(context).pop((
+                  privateName,
+                  packText.isEmpty ? null : packText,
+                  categoryId,
+                ));
               },
               child: const Text('Create and match'),
             ),
@@ -479,6 +499,7 @@ final class _CandidateReviewCardState extends State<_CandidateReviewCard> {
         candidateId: proposal.candidateId,
         privateName: input.$1,
         packText: input.$2,
+        homeCategoryId: input.$3,
       );
     } finally {
       name.dispose();

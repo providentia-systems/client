@@ -891,6 +891,7 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
         return ProvidentiaApp(
           controller: _app,
           features: _features,
+          catalogContributionPageBuilder: _catalogContributionPageBuilder,
           access: widget.access,
           navigatorKey: widget.workspaceNavigatorKey,
           onChangeHome: widget.onChangeHome,

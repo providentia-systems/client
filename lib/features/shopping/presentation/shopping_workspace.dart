@@ -104,6 +104,14 @@ class _ShoppingWorkspaceState extends State<ShoppingWorkspace> {
                     ),
                   ),
                 ),
+              if (widget.controller.canGenerateSuggestions)
+                OutlinedButton.icon(
+                  onPressed: state.suggestionsLoading
+                      ? null
+                      : widget.controller.generateSuggestions,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Generate recommendations'),
+                ),
               if (state.suggestionsLoading)
                 const LinearProgressIndicator(
                   key: Key('shopping-suggestions-loading'),

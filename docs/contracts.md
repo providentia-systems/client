@@ -13,13 +13,13 @@ local `providentia_api_client` Dart package.
 
 ## Current pin
 
-- Client OpenAPI version: `2.0.0`
+- Client OpenAPI version: `2.1.0`
 - Contract SHA-256:
-  `7b1f1be5d9efd311254e9840c4595e08575e8c97d35da766dab0d291c165bcae`
-- Canonical backend operations: 208
+  `62612d00deaf16ba92ec29d836aa940c16e2370b9925676fe241a1d958941304`
+- Canonical backend operations: 210
 - Generated homeowner operations: 159
 
-API 2.0.0 replaces login links with `requestEmailCode` and `verifyEmailCode`,
+API 2.1.0 replaces login links with `requestEmailCode` and `verifyEmailCode`,
 adds country onboarding and policy records, account aliases and media, scoped
 access groups, operator approval, and per-member permission overrides. The
 generator rejects retired password and login-link routes. This is a pre-release

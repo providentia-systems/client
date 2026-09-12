@@ -96,6 +96,7 @@ extension StockPhotoCountReview on StockPhotoCountController {
     required String candidateId,
     required String privateName,
     String? packText,
+    String? homeCategoryId,
   }) async {
     if (_disposed || _state.status != StockPhotoCountStatus.review) return;
     final review = _state.candidates
@@ -117,6 +118,7 @@ extension StockPhotoCountReview on StockPhotoCountController {
       await _inventory.createPrivateProduct(
         privateName: name,
         originalPackText: pack == null || pack.isEmpty ? null : pack,
+        homeCategoryId: homeCategoryId,
       );
       final projected = await _awaitProjectedHomeProduct(
         (candidate) =>

@@ -138,6 +138,28 @@ final class ShoppingController extends ChangeNotifier {
     }
   }
 
+  bool get canGenerateSuggestions =>
+      _suggestionRepository is OnlineShoppingSuggestionRunner;
+
+  Future<void> generateSuggestions() async {
+    final repository = _suggestionRepository;
+    if (repository is! OnlineShoppingSuggestionRunner ||
+        _state.suggestionsLoading)
+      return;
+    _state = _copyState(suggestionsLoading: true, clearSafeError: true);
+    notifyListeners();
+    try {
+      await repository.regenerate(homeId: homeId);
+      if (_disposed) return;
+      await refreshSuggestions();
+    } on OnlineSuggestionException {
+      if (_disposed) return;
+      _clearSuggestions(
+        'Suggestions could not be regenerated. Check your access and connection.',
+      );
+    }
+  }
+
   Future<void> refreshSuggestions() async {
     final repository = _suggestionRepository;
     if (repository == null || _suggestionAuthorizationDenied) return;
@@ -183,7 +205,9 @@ final class ShoppingController extends ChangeNotifier {
       } else if (error.kind ==
               OnlineSuggestionFailureKind.authenticationRequired ||
           error.kind == OnlineSuggestionFailureKind.invalidResponse) {
-        _clearSuggestions(_suggestionFailureMessage(error.kind));
+        _clearSuggestions(
+          'Suggestions could not be regenerated. Check your access and connection.',
+        );
       } else {
         _state = _copyState(
           suggestionsLoading: false,
@@ -578,7 +602,9 @@ final class ShoppingController extends ChangeNotifier {
     }
     if (error.kind == OnlineSuggestionFailureKind.authenticationRequired ||
         error.kind == OnlineSuggestionFailureKind.invalidResponse) {
-      _clearSuggestions(_suggestionFailureMessage(error.kind));
+      _clearSuggestions(
+        'Suggestions could not be regenerated. Check your access and connection.',
+      );
       return;
     }
     _setError(_suggestionFailureMessage(error.kind));

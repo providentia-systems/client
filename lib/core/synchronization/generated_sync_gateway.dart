@@ -16,6 +16,9 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
   static const Map<String, String> _protocolTwoProjections = <String, String>{
     'inventory.location.create': 'inventory-location',
     'inventory.home-product.create': 'inventory-home-product',
+    'inventory.home-product.update': 'inventory-home-product',
+    'inventory.home-category.create': 'inventory-home-category',
+    'inventory.home-category.update': 'inventory-home-category',
     'inventory.adjustment.create': 'inventory-balance',
     'inventory.count-session.create': 'inventory-count-session',
     'inventory.count-line.upsert': 'inventory-count-line',
@@ -33,6 +36,8 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
   };
 
   static const Set<String> _commandsRequiringRevision = <String>{
+    'inventory.home-category.update',
+    'inventory.home-product.update',
     'inventory.count-line.upsert',
     'inventory.count-session.close',
     'inventory.count-session.cancel',

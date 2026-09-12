@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Providentia API",
-    "version": "2.0.0",
+    "version": "2.1.0",
     "summary": "Authoritative Providentia backend contract through the production-readiness programme",
     "description": "Providentia pre-release API: email-code authentication, account/home/administrator groups, household stock, operator access, profiles and country onboarding. Billing collection remains a future capability."
   },
@@ -10042,6 +10042,163 @@
           }
         }
       }
+    },
+    "/api/v1/catalog-admin/entities/{entityType}": {
+      "get": {
+        "operationId": "listCatalogEntities",
+        "summary": "List catalog entities including archived identities",
+        "tags": [
+          "Catalog Governance"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "entityType",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "category",
+                "product",
+                "unit",
+                "pack",
+                "variant",
+                "alias",
+                "barcode",
+                "identity-rule"
+              ]
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "maxItems": 100,
+                      "items": {
+                        "$ref": "#/components/schemas/CatalogEntity"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/catalog-admin/entities/{entityType}/{entityId}": {
+      "put": {
+        "operationId": "saveCatalogEntity",
+        "summary": "Create, revise, archive or restore an audited catalog entity",
+        "description": "Requires catalog.curate. Referenced measurement identities cannot be reinterpreted. Archives retain history and reject active dependents. Field shape must match entityType. Client-supplied UUID and revision prevent duplicate creation on retry.",
+        "tags": [
+          "Catalog Governance"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "entityType",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "category",
+                "product",
+                "unit",
+                "pack",
+                "variant",
+                "alias",
+                "barcode",
+                "identity-rule"
+              ]
+            }
+          },
+          {
+            "name": "entityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveCatalogEntityRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogEntity"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "description": "Stale revision, identity conflict or entity in use"
+          },
+          "422": {
+            "description": "Invalid request"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -16939,6 +17096,20 @@
           "categoryId": {
             "type": "string",
             "format": "uuid"
+          },
+          "packText": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 191
+          },
+          "barcode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64
           }
         }
       },
@@ -18455,7 +18626,8 @@
             "type": "integer",
             "minimum": 1
           }
-        }
+        },
+        "description": "Updates home metadata. Catalog-backed products permit home category and status changes; global identity changes require catalog curation."
       },
       "HomeProductMutationResult": {
         "type": "object",
@@ -18996,12 +19168,7 @@
       "SyncHomeProductUpdatePayload": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "privateName",
-          "originalPackText",
-          "homeCategoryId",
-          "status"
-        ],
+        "required": [],
         "properties": {
           "privateName": {
             "type": "string",
@@ -19974,6 +20141,370 @@
         "required": [
           "changed"
         ]
+      },
+      "CatalogCategoryFields": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "canonicalName"
+        ],
+        "properties": {
+          "canonicalName": {
+            "type": "string",
+            "maxLength": 191
+          }
+        }
+      },
+      "CatalogProductFields": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "canonicalName",
+          "brand",
+          "categoryId"
+        ],
+        "properties": {
+          "canonicalName": {
+            "type": "string",
+            "maxLength": 191
+          },
+          "brand": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "categoryId": {
+            "type": "string",
+            "maxLength": 36,
+            "format": "uuid"
+          },
+          "packText": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 191
+          },
+          "barcode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64
+          }
+        }
+      },
+      "CatalogUnitFields": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "symbol",
+          "name",
+          "dimension",
+          "baseFactor"
+        ],
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "maxLength": 32
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "dimension": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "baseFactor": {
+            "type": "string",
+            "maxLength": 21
+          }
+        }
+      },
+      "CatalogPackFields": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "productId",
+          "variantId",
+          "unitId",
+          "originalPackText",
+          "amount",
+          "multiplicity"
+        ],
+        "properties": {
+          "productId": {
+            "type": "string",
+            "maxLength": 36,
+            "format": "uuid"
+          },
+          "variantId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 36,
+            "format": "uuid"
+          },
+          "unitId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 36,
+            "format": "uuid"
+          },
+          "originalPackText": {
+            "type": "string",
+            "maxLength": 191
+          },
+          "amount": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 21
+          },
+          "multiplicity": {
+            "type": "string",
+            "maxLength": 4
+          }
+        }
+      },
+      "CatalogVariantFields": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "productId",
+          "canonicalLabel",
+          "attributesJson"
+        ],
+        "properties": {
+          "productId": {
+            "type": "string",
+            "maxLength": 36,
+            "format": "uuid"
+          },
+          "canonicalLabel": {
+            "type": "string",
+            "maxLength": 191
+          },
+          "attributesJson": {
+            "type": "string",
+            "maxLength": 8000
+          }
+        }
+      },
+      "CatalogAliasFields": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "productId",
+          "variantId",
+          "packId",
+          "rawAlias"
+        ],
+        "properties": {
+          "productId": {
+            "type": "string",
+            "maxLength": 36,
+            "format": "uuid"
+          },
+          "variantId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 36,
+            "format": "uuid"
+          },
+          "packId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 36,
+            "format": "uuid"
+          },
+          "rawAlias": {
+            "type": "string",
+            "maxLength": 191
+          }
+        }
+      },
+      "CatalogBarcodeFields": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "packId",
+          "barcode",
+          "barcodeType"
+        ],
+        "properties": {
+          "packId": {
+            "type": "string",
+            "maxLength": 36,
+            "format": "uuid"
+          },
+          "barcode": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "barcodeType": {
+            "type": "string",
+            "maxLength": 24
+          }
+        }
+      },
+      "CatalogIdentityRuleFields": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ruleKey",
+          "family",
+          "ruleDefinition",
+          "provenance"
+        ],
+        "properties": {
+          "ruleKey": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "family": {
+            "type": "string",
+            "maxLength": 191
+          },
+          "ruleDefinition": {
+            "type": "string",
+            "maxLength": 16000
+          },
+          "provenance": {
+            "type": "string",
+            "maxLength": 191
+          }
+        }
+      },
+      "CatalogEntity": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "type",
+          "status",
+          "revision",
+          "fields"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "category",
+              "product",
+              "unit",
+              "pack",
+              "variant",
+              "alias",
+              "barcode",
+              "identity-rule"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "fields": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CatalogCategoryFields"
+              },
+              {
+                "$ref": "#/components/schemas/CatalogProductFields"
+              },
+              {
+                "$ref": "#/components/schemas/CatalogUnitFields"
+              },
+              {
+                "$ref": "#/components/schemas/CatalogPackFields"
+              },
+              {
+                "$ref": "#/components/schemas/CatalogVariantFields"
+              },
+              {
+                "$ref": "#/components/schemas/CatalogAliasFields"
+              },
+              {
+                "$ref": "#/components/schemas/CatalogBarcodeFields"
+              },
+              {
+                "$ref": "#/components/schemas/CatalogIdentityRuleFields"
+              }
+            ]
+          }
+        }
+      },
+      "SaveCatalogEntityRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "fields",
+          "status",
+          "expectedRevision",
+          "reason"
+        ],
+        "properties": {
+          "fields": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CatalogCategoryFields"
+              },
+              {
+                "$ref": "#/components/schemas/CatalogProductFields"
+              },
+              {
+                "$ref": "#/components/schemas/CatalogUnitFields"
+              },
+              {
+                "$ref": "#/components/schemas/CatalogPackFields"
+              },
+              {
+                "$ref": "#/components/schemas/CatalogVariantFields"
+              },
+              {
+                "$ref": "#/components/schemas/CatalogAliasFields"
+              },
+              {
+                "$ref": "#/components/schemas/CatalogBarcodeFields"
+              },
+              {
+                "$ref": "#/components/schemas/CatalogIdentityRuleFields"
+              }
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "published",
+              "archived"
+            ]
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Zero creates a new identity with a client-generated UUID; edits and archive/restore require the current revision."
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
       }
     }
   },

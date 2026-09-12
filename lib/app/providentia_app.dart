@@ -72,12 +72,14 @@ class ProvidentiaApp extends StatefulWidget {
     this.onChangeHome,
     this.onSignOut,
     this.accountPageBuilder,
+    this.catalogContributionPageBuilder,
     this.syncConflictController,
     this.onCountReconciliation,
     this.onDispose,
     super.key,
   });
 
+  final WidgetBuilder? catalogContributionPageBuilder;
   final AppController controller;
   final HouseholdFeatures? features;
   final HouseholdWorkspaceAccess access;
@@ -150,6 +152,8 @@ class _ProvidentiaAppState extends State<ProvidentiaApp> {
             onChangeHome: widget.onChangeHome,
             onSignOut: widget.onSignOut,
             accountPageBuilder: widget.accountPageBuilder,
+            catalogContributionPageBuilder:
+                widget.catalogContributionPageBuilder,
             syncConflictController: widget.syncConflictController,
             onCountReconciliation: widget.onCountReconciliation,
           );
@@ -167,6 +171,7 @@ class _AdaptiveShell extends StatelessWidget {
     required this.onChangeHome,
     required this.onSignOut,
     required this.accountPageBuilder,
+    required this.catalogContributionPageBuilder,
     required this.syncConflictController,
     required this.onCountReconciliation,
   });
@@ -177,6 +182,7 @@ class _AdaptiveShell extends StatelessWidget {
   final Future<void> Function()? onChangeHome;
   final Future<void> Function()? onSignOut;
   final WidgetBuilder? accountPageBuilder;
+  final WidgetBuilder? catalogContributionPageBuilder;
   final SyncConflictController? syncConflictController;
   final SyncCountReconciliationHandler? onCountReconciliation;
 
@@ -190,6 +196,7 @@ class _AdaptiveShell extends StatelessWidget {
         final width = constraints.maxWidth;
         final content = _ContentViewport(
           controller: controller,
+          catalogContributionPageBuilder: catalogContributionPageBuilder,
           features: features,
           access: access,
           syncConflictController: syncConflictController,
@@ -335,12 +342,14 @@ class _AccountActionsButton extends StatelessWidget {
 class _ContentViewport extends StatelessWidget {
   const _ContentViewport({
     required this.controller,
+    required this.catalogContributionPageBuilder,
     required this.features,
     required this.access,
     required this.syncConflictController,
     required this.onCountReconciliation,
   });
 
+  final WidgetBuilder? catalogContributionPageBuilder;
   final AppController controller;
   final HouseholdFeatures? features;
   final HouseholdWorkspaceAccess access;
@@ -366,6 +375,7 @@ class _ContentViewport extends StatelessWidget {
             : access.inventoryWrite
             ? InventoryWorkspace(
                 controller: features!.inventory,
+                contributionPageBuilder: catalogContributionPageBuilder,
                 stockPhotoController: features!.stockPhotoCount,
                 stockPhotoAcquisition: features!.stockPhotoAcquisition,
               )

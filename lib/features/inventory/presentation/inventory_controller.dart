@@ -63,6 +63,58 @@ final class InventoryController extends ChangeNotifier {
   StreamSubscription<StockCountSession?>? _sessionSubscription;
   InventoryViewState _state = const InventoryViewState();
   bool _started = false;
+  StreamSubscription<List<HomeInventoryCategory>>? _categoriesSubscription;
+  List<HomeInventoryCategory> _categories = const [];
+  List<HomeInventoryCategory> get homeCategories => _categories;
+  InventoryMetadataRepository? get _metadata =>
+      _repository is InventoryMetadataRepository ? _repository : null;
+  bool get canEditMetadata => _metadata?.supportsInventoryMetadata == true;
+
+  Future<bool> saveCategory({
+    HomeInventoryCategory? category,
+    required String name,
+    bool archived = false,
+  }) => _metadataMutation(
+    () => _metadata!.saveHomeCategory(
+      homeId: homeId,
+      categoryId: category?.id,
+      name: name,
+      archived: archived,
+      expectedRevision: category?.revision,
+    ),
+  );
+
+  Future<bool> editProduct({
+    required InventoryItem item,
+    required String name,
+    String? pack,
+    String? categoryId,
+    bool archived = false,
+  }) => _metadataMutation(() async {
+    if (item.homeId != homeId)
+      throw StateError('Product belongs to another home.');
+    await _metadata!.updateHomeProduct(
+      homeId: homeId,
+      productId: item.id,
+      privateName: name,
+      originalPackText: pack,
+      homeCategoryId: categoryId,
+      archived: archived,
+    );
+  });
+
+  Future<bool> _metadataMutation(Future<void> Function() action) async {
+    if (!canEditMetadata) return false;
+    try {
+      await action();
+      return true;
+    } catch (_) {
+      _setProductCreationError(
+        'The change could not be saved. Refresh and try again.',
+      );
+      return false;
+    }
+  }
 
   InventoryViewState get state => _state;
   bool get canCreatePrivateProduct =>
@@ -83,6 +135,13 @@ final class InventoryController extends ChangeNotifier {
   void start() {
     if (_started) return;
     _started = true;
+    _categoriesSubscription = _metadata?.watchHomeCategories(homeId).listen((
+      rows,
+    ) {
+      _categories = List.unmodifiable(rows);
+      notifyListeners();
+    }, onError: (Object _) => _setSafeError('Categories could not be loaded.'));
+
     _itemsSubscription = _repository.watchItems(homeId: homeId).listen((items) {
       if (items.any((item) => item.homeId != homeId)) {
         _setSafeError('Inventory access was rejected.');
@@ -177,6 +236,7 @@ final class InventoryController extends ChangeNotifier {
   Future<bool> createPrivateProduct({
     required String privateName,
     String? originalPackText,
+    String? homeCategoryId,
   }) async {
     final repository = _productCreationRepository;
     if (repository == null || !repository.supportsPrivateHomeProductCreation) {
@@ -203,6 +263,7 @@ final class InventoryController extends ChangeNotifier {
           homeId: homeId,
           privateName: privateName,
           originalPackText: originalPackText,
+          homeCategoryId: homeCategoryId,
         ),
       );
       _setState(
@@ -471,6 +532,7 @@ final class InventoryController extends ChangeNotifier {
 
   @override
   void dispose() {
+    unawaited(_categoriesSubscription?.cancel());
     unawaited(_itemsSubscription?.cancel());
     unawaited(_sessionSubscription?.cancel());
     super.dispose();

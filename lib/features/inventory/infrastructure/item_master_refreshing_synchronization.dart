@@ -59,12 +59,12 @@ final class ItemMasterRefreshingSynchronization implements AppSynchronization {
           status: SyncRunStatus.authorizationFailure,
           safeMessage: 'Access to this home changed. Synchronization stopped.',
         ),
-        HomeItemMasterSourceFailure.unavailable => outcome,
+        HomeItemMasterSourceFailure.unavailable => _staleCatalog(outcome),
       };
     } on FormatException {
-      return outcome;
+      return _staleCatalog(outcome);
     } on Exception {
-      return outcome;
+      return _staleCatalog(outcome);
     }
 
     // Keep storage failures visible. Reporting a successful refresh after a
@@ -78,6 +78,14 @@ final class ItemMasterRefreshingSynchronization implements AppSynchronization {
     _requireBoundHome(homeId);
     return _delegate.watchSummary(homeId: homeId);
   }
+
+  SyncRunOutcome _staleCatalog(SyncRunOutcome outcome) => SyncRunOutcome(
+    status: SyncRunStatus.retryableFailure,
+    acknowledgedCount: outcome.acknowledgedCount,
+    pulledChangeCount: outcome.pulledChangeCount,
+    safeMessage:
+        'Home changes synchronized, but the catalog could not be refreshed. The last verified catalog is shown; retry synchronization.',
+  );
 
   void _requireBoundHome(String homeId) {
     if (homeId != _homeId) {

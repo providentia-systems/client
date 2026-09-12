@@ -257,6 +257,8 @@ final class StockPhotoCountController extends ChangeNotifier {
   bool get canCreatePrivateProduct => _inventory.canCreatePrivateProduct;
   bool get canAddCatalogProduct => _inventory.canAddCatalogProduct;
 
+  List<HomeInventoryCategory> get homeCategories => _inventory.homeCategories;
+
   List<InventoryItem> get homeProducts =>
       searchItems().where((item) => item.isHomeProduct).toList(growable: false);
 

@@ -78,7 +78,9 @@ void main() {
       },
       homeId: _homeId,
     );
-    expect((await malformed.synchronize(_homeId)).completed, isTrue);
+    final outcome = await malformed.synchronize(_homeId);
+    expect(outcome.status, SyncRunStatus.retryableFailure);
+    expect(outcome.safeMessage, contains('catalog could not be refreshed'));
     expect(replacements, 0);
   });
 

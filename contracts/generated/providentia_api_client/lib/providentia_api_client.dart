@@ -1,6 +1,6 @@
 // GENERATED FILE - DO NOT EDIT.
 // Source: contracts/providentia-v1.json
-// Contract SHA-256: 7b1f1be5d9efd311254e9840c4595e08575e8c97d35da766dab0d291c165bcae
+// Contract SHA-256: 62612d00deaf16ba92ec29d836aa940c16e2370b9925676fe241a1d958941304
 // ignore_for_file: use_null_aware_elements
 
 library;

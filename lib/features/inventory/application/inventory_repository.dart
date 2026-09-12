@@ -32,3 +32,24 @@ abstract interface class InventoryProductCreationRepository
     CatalogHomeProductDraft draft,
   );
 }
+
+/// Metadata edits share the same atomic projection/outbox boundary as stock.
+abstract interface class InventoryMetadataRepository {
+  bool get supportsInventoryMetadata;
+  Stream<List<HomeInventoryCategory>> watchHomeCategories(String homeId);
+  Future<void> saveHomeCategory({
+    required String homeId,
+    String? categoryId,
+    required String name,
+    required bool archived,
+    int? expectedRevision,
+  });
+  Future<void> updateHomeProduct({
+    required String homeId,
+    required String productId,
+    required String privateName,
+    String? originalPackText,
+    String? homeCategoryId,
+    required bool archived,
+  });
+}
