@@ -10,6 +10,58 @@ import 'package:providentia_api_client/providentia_api_client.dart';
 
 void main() {
   test(
+    'resolved recipients are verified against one settings and profile snapshot',
+    () async {
+      for (final profileRevision in [3, 4]) {
+        final repository = GeneratedServerAiRepository(
+          _client((request) async {
+            return switch (request.url.path.split('/').last) {
+              'settings' => _json({
+                ..._settings(),
+                'transmissionPlan': {
+                  'settingsRevision': 4,
+                  'policyRevision': 2,
+                  'extractionProfiles': [
+                    {
+                      'profileId': 'profile-1',
+                      'revision': 3,
+                      'provider': 'openai',
+                      'model': 'gpt-5-mini',
+                      'endpoint': null,
+                    },
+                  ],
+                  'validationProfile': null,
+                  'sha256': 'a' * 64,
+                },
+              }),
+              'profiles' => _json({
+                'items': [_profile(id: 'profile-1', revision: profileRevision)],
+              }),
+              'policy' => _json(_policy(extractionIds: ['profile-1'])),
+              _ => throw StateError('Unexpected request'),
+            };
+          }),
+        );
+        if (profileRevision == 3) {
+          final workspace = await repository.loadWorkspace(homeId: 'home-1');
+          expect(
+            workspace.settings.transmissionPlan?.primary.profileId,
+            'profile-1',
+          );
+          expect(workspace.settings.transmissionPlan?.recipientDescriptions, [
+            'Primary: openai · gpt-5-mini',
+          ]);
+        } else {
+          await expectLater(
+            repository.loadWorkspace(homeId: 'home-1'),
+            throwsA(isA<AiServerException>()),
+          );
+        }
+      }
+    },
+  );
+
+  test(
     'loads revision-bound settings, profiles, and policy for one home',
     () async {
       final repository = GeneratedServerAiRepository(

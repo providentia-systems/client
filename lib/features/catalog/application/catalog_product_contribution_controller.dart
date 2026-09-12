@@ -14,6 +14,8 @@ enum CatalogProductContributionStatus {
   forbidden,
   conflict,
   offline,
+  sourcePending,
+  sourceUnavailable,
   failure,
 }
 
@@ -26,6 +28,7 @@ final class CatalogProductContributionController extends ChangeNotifier {
   factory CatalogProductContributionController({
     required CatalogSharingConsentRepository consentRepository,
     required CatalogProposalService proposalService,
+    required CatalogProductSourcePreparation sourcePreparation,
     required String homeId,
     required String locale,
     required bool canContribute,
@@ -35,6 +38,7 @@ final class CatalogProductContributionController extends ChangeNotifier {
   }) => CatalogProductContributionController._(
     consentRepository,
     proposalService,
+    sourcePreparation,
     homeId,
     locale,
     canContribute,
@@ -49,6 +53,7 @@ final class CatalogProductContributionController extends ChangeNotifier {
   CatalogProductContributionController._(
     this._consentRepository,
     this._proposalService,
+    this._sourcePreparation,
     this.homeId,
     this.locale,
     this.canContribute,
@@ -58,6 +63,7 @@ final class CatalogProductContributionController extends ChangeNotifier {
 
   final CatalogSharingConsentRepository _consentRepository;
   final CatalogProposalService _proposalService;
+  final CatalogProductSourcePreparation _sourcePreparation;
   final String homeId;
   final String locale;
   final bool canContribute;
@@ -167,7 +173,13 @@ final class CatalogProductContributionController extends ChangeNotifier {
     }
     final generation = ++_generation;
     _setStatus(CatalogProductContributionStatus.submitting);
+    var requestStarted = false;
     try {
+      await _sourcePreparation.prepare(
+        homeId: homeId,
+        homeProductId: product.homeProductId,
+      );
+      if (!_isCurrent(generation)) return;
       var intent = _pendingIntent;
       intent ??= await _submissionIntents.obtain(
         CatalogSubmissionIntentKey.forPayload(
@@ -180,6 +192,7 @@ final class CatalogProductContributionController extends ChangeNotifier {
       );
       if (!_isCurrent(generation)) return;
       _pendingIntent = intent;
+      requestStarted = true;
       final link = await _proposalService.submit(
         submissionId: intent.submissionId,
         product: product,
@@ -215,6 +228,14 @@ final class CatalogProductContributionController extends ChangeNotifier {
       _fail(generation, CatalogProductContributionStatus.conflict);
     } on CatalogContributionUnavailableException {
       _fail(generation, CatalogProductContributionStatus.offline);
+    } on CatalogContributionSourcePendingException {
+      _fail(generation, CatalogProductContributionStatus.sourcePending);
+    } on CatalogContributionSourceUnavailableException {
+      if (!_isCurrent(generation)) return;
+      // A local source check cannot resolve an earlier ambiguous submission.
+      // Only the server's terminal response can retire that exact intent.
+      if (requestStarted) await _retirePendingIntent();
+      _fail(generation, CatalogProductContributionStatus.sourceUnavailable);
     } on CatalogContributionValidationException {
       await _retirePendingIntent();
       _fail(generation, CatalogProductContributionStatus.failure);
@@ -235,11 +256,15 @@ final class CatalogProductContributionController extends ChangeNotifier {
   }
 
   void clearSelection() {
+    _generation += 1;
     _product = null;
     _proposal = null;
     _submission = null;
     _pendingIntent = null;
     _explicitlyConsented = false;
+    if (_status == CatalogProductContributionStatus.submitting) {
+      _status = CatalogProductContributionStatus.ready;
+    }
     _notify();
   }
 

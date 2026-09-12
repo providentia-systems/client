@@ -2,9 +2,12 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:providentia/core/security/uuid_v4.dart';
+import 'package:providentia/features/inventory/application/home_location_repository.dart';
 import 'package:providentia/features/inventory/application/inventory_repository.dart';
+import 'package:providentia/features/inventory/application/stock_preference_repository.dart';
 import 'package:providentia/features/inventory/domain/inventory_models.dart';
 import 'package:providentia/features/inventory/domain/inventory_services.dart';
+import 'package:providentia/features/inventory/domain/stock_preference.dart';
 
 final class InventoryViewState {
   const InventoryViewState({
@@ -32,6 +35,7 @@ final class InventoryController extends ChangeNotifier {
   factory InventoryController({
     required InventoryRepository repository,
     required String homeId,
+    bool mayManageStockPreferences = false,
     InventoryItemSearch search = const InventoryItemSearch(),
     DateTime Function()? clock,
     String Function()? idGenerator,
@@ -41,6 +45,7 @@ final class InventoryController extends ChangeNotifier {
     search,
     clock ?? DateTime.now,
     idGenerator ?? UuidV4Generator().call,
+    mayManageStockPreferences,
   );
 
   InventoryController._(
@@ -49,9 +54,36 @@ final class InventoryController extends ChangeNotifier {
     this._search,
     this._clock,
     this._idGenerator,
+    this.mayManageStockPreferences,
   ) : _repository = repository,
       _productCreationRepository =
           repository is InventoryProductCreationRepository ? repository : null;
+
+  final bool mayManageStockPreferences;
+  StockPreferenceRepository? get _stockPreferences =>
+      _repository is StockPreferenceRepository
+      ? _repository as StockPreferenceRepository
+      : null;
+  bool get canManageStockPreferences =>
+      mayManageStockPreferences &&
+      _stockPreferences?.supportsStockPreferences == true;
+
+  Future<StockPreference> loadStockPreference(InventoryItem item) {
+    if (!canManageStockPreferences || item.homeId != homeId) {
+      throw StateError('Stock preference access is unavailable.');
+    }
+    return _stockPreferences!.loadStockPreference(
+      homeId: homeId,
+      productId: item.id,
+    );
+  }
+
+  Future<void> saveStockPreference(StockPreference preference) {
+    if (!canManageStockPreferences || preference.homeId != homeId) {
+      throw StateError('Stock preference access is unavailable.');
+    }
+    return _stockPreferences!.saveStockPreference(preference);
+  }
 
   final InventoryRepository _repository;
   final InventoryProductCreationRepository? _productCreationRepository;
@@ -123,6 +155,39 @@ final class InventoryController extends ChangeNotifier {
     }
   }
 
+  StreamSubscription<List<HomeLocation>>? _locationsSubscription;
+  List<HomeLocation> _locations = const [];
+  List<HomeLocation> get locations => _locations;
+  HomeLocationRepository? get _locationsRepository =>
+      _repository is HomeLocationRepository
+      ? _repository as HomeLocationRepository
+      : null;
+  bool get canEditLocations =>
+      _locationsRepository?.supportsHomeLocations == true;
+
+  Future<bool> saveLocation({
+    String? id,
+    required String name,
+    required String kind,
+    required bool archived,
+    int? expectedRevision,
+  }) async {
+    if (!canEditLocations) return false;
+    try {
+      await _locationsRepository!.saveHomeLocation(
+        homeId: homeId,
+        locationId: id,
+        name: name,
+        kind: kind,
+        archived: archived,
+        expectedRevision: expectedRevision,
+      );
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   InventoryViewState get state => _state;
   bool get canCreatePrivateProduct =>
       _productCreationRepository?.supportsPrivateHomeProductCreation == true;
@@ -142,6 +207,18 @@ final class InventoryController extends ChangeNotifier {
   void start() {
     if (_started) return;
     _started = true;
+    _locationsSubscription = _locationsRepository
+        ?.watchHomeLocations(homeId)
+        .listen(
+          (rows) {
+            _locations = List.unmodifiable(rows);
+            notifyListeners();
+          },
+          onError: (Object _) {
+            _locations = const [];
+            _setSafeError('Locations could not be loaded.');
+          },
+        );
     _archivedSubscription = _metadata?.watchArchivedHomeProducts(homeId).listen(
       (items) {
         if (items.any((item) => item.homeId != homeId)) {
@@ -398,7 +475,9 @@ final class InventoryController extends ChangeNotifier {
     if (session == null) {
       throw StateError('Start a count session before recording quantities.');
     }
-    final lineId = _idGenerator();
+    final lineId =
+        session.lines.where((line) => line.itemId == item.id).firstOrNull?.id ??
+        _idGenerator();
     return saveSession(
       session.recordLine(
         StockCountLine(
@@ -481,6 +560,18 @@ final class InventoryController extends ChangeNotifier {
     );
   }
 
+  Future<void> removeCountForItem(InventoryItem item) async {
+    final session = _state.activeSession;
+    if (session == null || item.homeId != homeId) {
+      throw StateError('An open count in the active home is required.');
+    }
+    final line = session.lines
+        .where((line) => line.itemId == item.id)
+        .firstOrNull;
+    if (line == null) throw StateError('The count line is unavailable.');
+    await saveSession(session.removeLine(line.id));
+  }
+
   Future<void> closeCount() {
     final session = _state.activeSession;
     if (session == null) {
@@ -551,6 +642,7 @@ final class InventoryController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _locationsSubscription?.cancel();
     unawaited(_archivedSubscription?.cancel());
     unawaited(_categoriesSubscription?.cancel());
     unawaited(_itemsSubscription?.cancel());

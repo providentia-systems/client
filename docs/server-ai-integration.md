@@ -1,7 +1,7 @@
 # Server AI integration
 
 Status: production-composed for testing against API `2.0.0`, SHA-256
-`62612d00deaf16ba92ec29d836aa940c16e2370b9925676fe241a1d958941304`.
+`40a8477521baa6c41cf2c5d872068f5ae1bf255a8d0bbccc97a05688d705ad57`.
 This is not live-provider or production-acceptance evidence.
 
 ## Delivered user paths
@@ -11,6 +11,15 @@ orchestration policy; provisions write-only provider credentials; prepares
 privacy-bounded media; binds consent to the provider revision, privacy route,
 purpose, and every ordered prepared-media digest; and records explicit review
 decisions for typed proposals.
+
+Before transmission, the backend resolves the requesting person's actual provider
+plan, including any preferred private profile, fallback profiles and validator.
+The Client displays those recipients, models and configured endpoints. The
+selected primary profile and opaque plan hash accompany the extraction request.
+The backend checks settings, policy and recipient revisions against that same
+execution snapshot before calling any provider. A changed plan requires a new
+review and explicit consent; selecting a radio button does not change the active
+policy. Ordinary profile management remains separate from media transmission.
 
 Receipt intake supports one to eight ordered photo pages or a locally
 rasterized PDF of up to eight pages. Raw PDF bytes are bounded, validated,
@@ -40,13 +49,18 @@ lines. Count close remains explicit and applies only reviewed variance;
 cancellation is terminal and creates no movement.
 
 AI output alone never creates a receipt, product, price, shopping line, count
-line, balance, or stock movement.
+line, balance, or stock movement. Reviewed stock candidates may create a private
+product through the ordinary durable inventory command after the user confirms
+its name, pack text and chosen home category. The current extraction schemas do
+not generate categories. Home categories synchronize as private records and are
+visible in the authorized Admin household inspector. Public catalog publication
+still requires a separate explicit, allowlisted contribution and moderation.
 
 ## Routes and provider boundaries
 
 The server AI workspace uses `GeneratedServerAiRepository` and
 `Api17AiGateway` (the historical class name remains, but the enforced contract
-pin is API `2.0.0`). Cloud media goes through the authenticated server proxy.
+pin is API `2.1.0`). Cloud media goes through the authenticated server proxy.
 OpenAI credentials remain server-owned and write-only.
 
 The production stock-photo workflow uses an active, verified direct-local

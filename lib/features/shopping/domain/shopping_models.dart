@@ -24,6 +24,8 @@ final class ShoppingListLine {
     )
     this.productPackId,
     this.checked = false,
+    this.archived = false,
+    this.revision = 0,
     this.explanation,
   }) {
     _requireText(id, 'id');
@@ -65,13 +67,20 @@ final class ShoppingListLine {
   )
   final String? productPackId;
   final bool checked;
+  final bool archived;
+  final int revision;
   final String? explanation;
 
-  ShoppingListLine copyWith({double? quantity, bool? checked}) {
+  ShoppingListLine copyWith({
+    String? name,
+    double? quantity,
+    bool? checked,
+    bool? archived,
+  }) {
     return ShoppingListLine(
       id: id,
       homeId: homeId,
-      name: name,
+      name: name ?? this.name,
       quantity: quantity ?? this.quantity,
       origin: origin,
       createdAt: createdAt,
@@ -80,6 +89,8 @@ final class ShoppingListLine {
       selectedPackId: selectedPackId,
       productPackId: productPackId,
       checked: checked ?? this.checked,
+      archived: archived ?? this.archived,
+      revision: revision,
       explanation: explanation,
     );
   }
@@ -91,6 +102,8 @@ final class ShoppingList {
     required this.homeId,
     required this.name,
     required this.createdAt,
+    this.archived = false,
+    this.revision = 0,
     List<ShoppingListLine> lines = const <ShoppingListLine>[],
   }) : lines = List<ShoppingListLine>.unmodifiable(lines) {
     _requireText(id, 'id');
@@ -106,9 +119,15 @@ final class ShoppingList {
   final String name;
   final DateTime createdAt;
   final List<ShoppingListLine> lines;
+  final bool archived;
+  final int revision;
 
-  int get completedCount => lines.where((line) => line.checked).length;
-  double get progress => lines.isEmpty ? 0 : completedCount / lines.length;
+  List<ShoppingListLine> get activeLines =>
+      lines.where((line) => !line.archived).toList(growable: false);
+
+  int get completedCount => activeLines.where((line) => line.checked).length;
+  double get progress =>
+      activeLines.isEmpty ? 0 : completedCount / activeLines.length;
 
   ShoppingList add(ShoppingListLine line) {
     if (line.homeId != homeId) {
@@ -150,12 +169,28 @@ final class ShoppingList {
     );
   }
 
+  ShoppingList copyWith({
+    String? name,
+    bool? archived,
+    List<ShoppingListLine>? lines,
+  }) => ShoppingList(
+    id: id,
+    homeId: homeId,
+    name: name ?? this.name,
+    createdAt: createdAt,
+    archived: archived ?? this.archived,
+    revision: revision,
+    lines: lines ?? this.lines,
+  );
+
   ShoppingList _copy(List<ShoppingListLine> next) => ShoppingList(
     id: id,
     homeId: homeId,
     name: name,
     createdAt: createdAt,
     lines: next,
+    archived: archived,
+    revision: revision,
   );
 }
 

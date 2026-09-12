@@ -15,6 +15,8 @@ import 'package:providentia/features/inventory/domain/inventory_models.dart';
 import 'package:providentia/features/inventory/presentation/inventory_controller.dart';
 import 'package:providentia/features/inventory/presentation/stock_photo_count_panel.dart';
 
+import '../ai_integration/test_fixtures.dart' show serverTransmissionPlan;
+
 void main() {
   testWidgets(
     'camera, gallery, and files are explicit stock acquisition paths',
@@ -655,6 +657,7 @@ final class _Harness {
             mediaReader: preparer,
             gateway: gateway,
             reviewCandidate: reviewer.reviewCandidate,
+            transmissionPlan: serverTransmissionPlan(_profile),
             pickAssets: () async => _assets,
             loadProvider: () async {
               if (loadRouteError case final error?) throw error;

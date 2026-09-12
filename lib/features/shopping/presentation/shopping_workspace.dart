@@ -13,6 +13,7 @@ class ShoppingWorkspace extends StatefulWidget {
 }
 
 class _ShoppingWorkspaceState extends State<ShoppingWorkspace> {
+  bool _showRemoved = false;
   final TextEditingController _draft = TextEditingController();
   final TextEditingController _quantityDraft = TextEditingController(text: '1');
 
@@ -45,40 +46,91 @@ class _ShoppingWorkspaceState extends State<ShoppingWorkspace> {
               style: Theme.of(context).textTheme.headlineLarge,
             ),
             const SizedBox(height: 12),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: <Widget>[
-                Expanded(
-                  child: TextField(
-                    key: const Key('manual-list-input'),
-                    controller: _draft,
-                    decoration: const InputDecoration(
-                      labelText: 'Manual shopping item',
-                    ),
-                    onSubmitted: (_) => _add(),
+            if (widget.controller.canManageLists) ...<Widget>[
+              if (widget.controller.lists.isNotEmpty)
+                DropdownButtonFormField<String>(
+                  key: ValueKey('selected-shopping-list-${list?.id}'),
+                  initialValue:
+                      widget.controller.lists.any(
+                        (entry) => entry.id == list?.id,
+                      )
+                      ? list?.id
+                      : null,
+                  decoration: const InputDecoration(
+                    labelText: 'Your shopping lists',
                   ),
+                  items: widget.controller.lists
+                      .map(
+                        (entry) => DropdownMenuItem(
+                          value: entry.id,
+                          child: Text(
+                            '${entry.name}${entry.archived ? ' (removed)' : ''}',
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (id) {
+                    if (id != null) widget.controller.selectList(id);
+                  },
                 ),
-                const SizedBox(width: 8),
-                SizedBox(
-                  width: 92,
-                  child: TextField(
-                    key: const Key('manual-list-quantity'),
-                    controller: _quantityDraft,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    decoration: const InputDecoration(labelText: 'Quantity'),
-                    onSubmitted: (_) => _add(),
+              Wrap(
+                spacing: 8,
+                children: <Widget>[
+                  TextButton.icon(
+                    onPressed: () => _editListName(create: true),
+                    icon: const Icon(Icons.add),
+                    label: const Text('New list'),
                   ),
-                ),
-                IconButton(
-                  key: const Key('manual-list-add'),
-                  tooltip: 'Add to shopping list',
-                  onPressed: _add,
-                  icon: const Icon(Icons.add),
-                ),
-              ],
-            ),
+                  if (list != null) ...<Widget>[
+                    TextButton(
+                      onPressed: () => _editListName(create: false),
+                      child: const Text('Rename list'),
+                    ),
+                    TextButton(
+                      onPressed: () => _archiveList(list),
+                      child: Text(
+                        list.archived ? 'Restore list' : 'Remove list',
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ],
+            if (list?.archived != true)
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: <Widget>[
+                  Expanded(
+                    child: TextField(
+                      key: const Key('manual-list-input'),
+                      controller: _draft,
+                      decoration: const InputDecoration(
+                        labelText: 'Manual shopping item',
+                      ),
+                      onSubmitted: (_) => _add(),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 92,
+                    child: TextField(
+                      key: const Key('manual-list-quantity'),
+                      controller: _quantityDraft,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(labelText: 'Quantity'),
+                      onSubmitted: (_) => _add(),
+                    ),
+                  ),
+                  IconButton(
+                    key: const Key('manual-list-add'),
+                    tooltip: 'Add to shopping list',
+                    onPressed: _add,
+                    icon: const Icon(Icons.add),
+                  ),
+                ],
+              ),
             if (state.safeError != null) Text(state.safeError!),
             if (widget
                 .controller
@@ -99,8 +151,8 @@ class _ShoppingWorkspaceState extends State<ShoppingWorkspace> {
                     leading: Icon(Icons.offline_pin_outlined),
                     title: Text('Last verified offline suggestions'),
                     subtitle: Text(
-                      'Live explanations require a connection. Feedback is '
-                      'unavailable pending retry-safe support.',
+                      'Live explanations require a connection. Decisions '
+                      'are saved on this device and synchronized when online.',
                     ),
                   ),
                 ),
@@ -158,15 +210,36 @@ class _ShoppingWorkspaceState extends State<ShoppingWorkspace> {
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Text(
-                  '${list.completedCount}/${list.lines.length} complete',
+                  '${list.completedCount}/${list.activeLines.length} complete',
                 ),
               ),
-              for (final line in list.lines)
+              if (list.lines.any((line) => line.archived))
+                SwitchListTile(
+                  title: const Text('Show removed items'),
+                  value: _showRemoved,
+                  onChanged: (value) => setState(() => _showRemoved = value),
+                ),
+              for (final line in list.lines.where(
+                (line) => !line.archived || _showRemoved,
+              ))
                 _ShoppingLineTile(
                   line: line,
-                  onToggle: () => widget.controller.toggle(line.id),
+                  onToggle: list.archived || line.archived
+                      ? null
+                      : () => widget.controller.toggle(line.id),
+                  onEdit: widget.controller.canManageLists && !list.archived
+                      ? () => _editLine(line)
+                      : null,
+                  onArchive: widget.controller.canManageLists && !list.archived
+                      ? () => _archiveLine(line)
+                      : null,
                   canEditQuantity:
-                      widget.controller.capabilities.canEditExistingQuantities,
+                      widget
+                          .controller
+                          .capabilities
+                          .canEditExistingQuantities &&
+                      !list.archived &&
+                      !line.archived,
                   canRecordFeedback: widget
                       .controller
                       .capabilities
@@ -180,6 +253,147 @@ class _ShoppingWorkspaceState extends State<ShoppingWorkspace> {
         );
       },
     );
+  }
+
+  Future<void> _editListName({required bool create}) async {
+    final currentList = widget.controller.state.list;
+    var name = create ? '' : currentList!.name;
+    final value = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(create ? 'New shopping list' : 'Rename shopping list'),
+        content: TextFormField(
+          initialValue: name,
+          autofocus: true,
+          maxLength: 120,
+          decoration: const InputDecoration(labelText: 'List name'),
+          onChanged: (value) => name = value,
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (name.trim().isNotEmpty) Navigator.pop(context, name.trim());
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (value == null) return;
+    if (create) {
+      await widget.controller.createList(value);
+    } else {
+      await widget.controller.updateList(
+        name: value,
+        expectedList: currentList,
+      );
+    }
+  }
+
+  Future<bool> _confirmRemoval(String title, String message) async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(title),
+          content: Text(message),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Remove'),
+            ),
+          ],
+        ),
+      ) ??
+      false;
+
+  Future<void> _archiveList(ShoppingList list) async {
+    if (!list.archived &&
+        !await _confirmRemoval(
+          'Remove this list?',
+          'Its items and history will be kept. You can restore the list later.',
+        )) {
+      return;
+    }
+    await widget.controller.updateList(
+      archived: !list.archived,
+      expectedList: list,
+    );
+  }
+
+  Future<void> _archiveLine(ShoppingListLine line) async {
+    if (!line.archived &&
+        !await _confirmRemoval(
+          'Remove this item?',
+          'The item will be hidden. Show removed items to restore it later.',
+        )) {
+      return;
+    }
+    await widget.controller.editLine(line, archived: !line.archived);
+  }
+
+  Future<void> _editLine(ShoppingListLine line) async {
+    var name = line.name;
+    var quantity = _formatQuantity(line.quantity);
+    final result = await showDialog<(String, double)>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit shopping item'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            TextFormField(
+              initialValue: name,
+              maxLength: 191,
+              decoration: const InputDecoration(labelText: 'Description'),
+              onChanged: (value) => name = value,
+            ),
+            TextFormField(
+              initialValue: quantity,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              decoration: const InputDecoration(
+                labelText: 'Quantity greater than zero',
+              ),
+              onChanged: (value) => quantity = value,
+            ),
+          ],
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final parsed = double.tryParse(quantity);
+              if (name.trim().isNotEmpty &&
+                  parsed != null &&
+                  parsed.isFinite &&
+                  parsed > 0) {
+                Navigator.pop(context, (name.trim(), parsed));
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (result != null) {
+      await widget.controller.editLine(
+        line,
+        name: result.$1,
+        quantity: result.$2,
+      );
+    }
   }
 
   Future<void> _add() async {
@@ -491,6 +705,8 @@ class _ShoppingLineTile extends StatelessWidget {
   const _ShoppingLineTile({
     required this.line,
     required this.onToggle,
+    this.onEdit,
+    this.onArchive,
     required this.canEditQuantity,
     required this.canRecordFeedback,
     required this.onEditQuantity,
@@ -499,7 +715,9 @@ class _ShoppingLineTile extends StatelessWidget {
   });
 
   final ShoppingListLine line;
-  final VoidCallback onToggle;
+  final VoidCallback? onToggle;
+  final VoidCallback? onEdit;
+  final VoidCallback? onArchive;
   final bool canEditQuantity;
   final bool canRecordFeedback;
   final VoidCallback onEditQuantity;
@@ -523,7 +741,10 @@ class _ShoppingLineTile extends StatelessWidget {
           children: <Widget>[
             Row(
               children: <Widget>[
-                Checkbox(value: line.checked, onChanged: (_) => onToggle()),
+                Checkbox(
+                  value: line.checked,
+                  onChanged: onToggle == null ? null : (_) => onToggle!(),
+                ),
                 Expanded(
                   child: Text(
                     line.name,
@@ -545,6 +766,20 @@ class _ShoppingLineTile extends StatelessWidget {
               child: Row(
                 children: <Widget>[
                   Text('Quantity: ${_formatQuantity(line.quantity)}'),
+                  if (onEdit != null && !line.archived)
+                    IconButton(
+                      tooltip: 'Edit item',
+                      onPressed: onEdit,
+                      icon: const Icon(Icons.edit_note),
+                    ),
+                  if (onArchive != null)
+                    IconButton(
+                      tooltip: line.archived ? 'Restore item' : 'Remove item',
+                      onPressed: onArchive,
+                      icon: Icon(
+                        line.archived ? Icons.restore : Icons.delete_outline,
+                      ),
+                    ),
                   if (canEditQuantity) ...<Widget>[
                     const SizedBox(width: 4),
                     IconButton(

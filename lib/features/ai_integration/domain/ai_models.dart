@@ -1,5 +1,7 @@
 import 'dart:collection';
 
+import 'package:providentia/features/ai_integration/domain/ai_transmission_plan.dart';
+
 enum AiProviderKind { openAi, anthropic, gemini, xAi, openAiCompatible, ollama }
 
 enum AiTransport { serverProxy, directNative }
@@ -235,6 +237,7 @@ final class AiConsent {
     required List<String> orderedMediaHashes,
     required this.disclosureVersion,
     required this.confirmedAt,
+    this.transmissionPlanHash,
   }) : orderedMediaHashes = UnmodifiableListView<String>(
          List<String>.of(orderedMediaHashes),
        );
@@ -246,6 +249,7 @@ final class AiConsent {
   final List<String> orderedMediaHashes;
   final String disclosureVersion;
   final DateTime confirmedAt;
+  final String? transmissionPlanHash;
 }
 
 final class AiExtractionRequest {
@@ -260,6 +264,7 @@ final class AiExtractionRequest {
     required this.promptVersion,
     required this.timeout,
     this.targetId,
+    this.transmissionPlan,
     this.maxOutputTokens = 4096,
     this.storeProviderResponse = false,
   });
@@ -277,6 +282,7 @@ final class AiExtractionRequest {
   /// Optional ordinary domain resource bound to this extraction. Stock-photo
   /// workflows bind this to the already-open count session.
   final String? targetId;
+  final AiTransmissionPlan? transmissionPlan;
   final int maxOutputTokens;
   final bool storeProviderResponse;
 }

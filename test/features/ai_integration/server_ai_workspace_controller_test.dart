@@ -60,6 +60,30 @@ void main() {
   });
 
   test(
+    'a radio-selected provider outside the active plan cannot prepare media',
+    () async {
+      final alternate = _secondServerProvider();
+      final repository = _ServerRepository(
+        _workspace(profiles: [serverProvider(), alternate]),
+      );
+      final media = FakeMediaPreparation(preparedBatch());
+      final gateway = FakeGateway(route: AiGatewayRoute.serverProxyCloud);
+      final controller = _controller(
+        repository: repository,
+        media: media,
+        gateway: gateway,
+      );
+      addTearDown(controller.dispose);
+      await controller.load();
+      await controller.prepareOne(provider: alternate, asset: _asset());
+      expect(controller.status, ServerAiWorkspaceStatus.failed);
+      expect(controller.safeMessage, contains('active primary provider'));
+      expect(media.prepareCalls, 0);
+      expect(gateway.requests, isEmpty);
+    },
+  );
+
+  test(
     'one sanitized image requires explicit consent and reaches review only',
     () async {
       final repository = _ServerRepository(_workspace());
@@ -101,6 +125,7 @@ void main() {
 
       expect(gateway.requests, hasLength(1));
       expect(gateway.requests.single.homeId, 'home-1');
+      expect(gateway.requests.single.transmissionPlan?.sha256, 'a' * 64);
       expect(gateway.requests.single.media.media, hasLength(1));
       expect(gateway.requests.single.storeProviderResponse, isFalse);
       expect(controller.status, ServerAiWorkspaceStatus.reviewRequired);
@@ -1739,49 +1764,52 @@ void main() {
       await tester.pumpAndSettle();
     });
 
-    testWidgets('profile selection and dialog cancellation preserve intent', (
-      tester,
-    ) async {
-      final repository = _ServerRepository(
-        _workspace(
-          profiles: <AiProviderProfile>[
-            serverProvider(),
-            _secondServerProvider(),
-          ],
-        ),
-      );
-      final controller = _controller(repository: repository);
-      addTearDown(controller.dispose);
-      await controller.load();
-      await _pumpPage(tester, controller);
+    testWidgets(
+      'profile selection cannot override consent and cancellation preserves settings',
+      (tester) async {
+        final repository = _ServerRepository(
+          _workspace(
+            profiles: <AiProviderProfile>[
+              serverProvider(),
+              _secondServerProvider(),
+            ],
+          ),
+        );
+        final controller = _controller(repository: repository);
+        addTearDown(controller.dispose);
+        await controller.load();
+        await _pumpPage(tester, controller);
 
-      await _scrollTo(tester, const Key('ai-profile-provider-2'));
-      await tester.tap(find.byKey(const Key('ai-profile-provider-2')));
-      await tester.pump();
-      await _scrollTo(tester, const Key('ai-pick-receipt'));
-      await tester.tap(find.byKey(const Key('ai-pick-receipt')));
-      await tester.pumpAndSettle();
-      expect(controller.selectedProvider?.id, 'provider-2');
-      await controller.clearExtraction();
-      await tester.pump();
+        await _scrollTo(tester, const Key('ai-profile-provider-2'));
+        await tester.tap(find.byKey(const Key('ai-profile-provider-2')));
+        await tester.pump();
+        await _scrollTo(tester, const Key('ai-pick-receipt'));
+        await tester.tap(find.byKey(const Key('ai-pick-receipt')));
+        await tester.pumpAndSettle();
+        expect(controller.selectedProvider, isNull);
+        expect(controller.status, ServerAiWorkspaceStatus.failed);
+        expect(controller.safeMessage, contains('active primary provider'));
+        await controller.clearExtraction();
+        await tester.pump();
 
-      await _scrollTo(tester, const Key('ai-replace-credential'));
-      await tester.tap(find.byKey(const Key('ai-replace-credential')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
-      await tester.pumpAndSettle();
-      expect(repository.saveProfileCalls, 0);
+        await _scrollTo(tester, const Key('ai-replace-credential'));
+        await tester.tap(find.byKey(const Key('ai-replace-credential')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+        await tester.pumpAndSettle();
+        expect(repository.saveProfileCalls, 0);
 
-      await tester.tap(find.byKey(const Key('ai-add-profile')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byType(DropdownButtonFormField<String>));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Anthropic').last);
-      await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
-      await tester.pumpAndSettle();
-      expect(repository.saveProfileCalls, 0);
-    });
+        await tester.tap(find.byKey(const Key('ai-add-profile')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byType(DropdownButtonFormField<String>));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Anthropic').last);
+        await tester.pumpAndSettle();
+        await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+        await tester.pumpAndSettle();
+        expect(repository.saveProfileCalls, 0);
+      },
+    );
 
     testWidgets('an empty extraction review remains explicit and inert', (
       tester,
@@ -2534,6 +2562,9 @@ AiServerWorkspace _workspace({
     homeId: homeId,
     settings: AiServerSettings(
       homeId: homeId,
+      transmissionPlan: scopedProfiles.isEmpty
+          ? null
+          : serverTransmissionPlan(scopedProfiles.first),
       mode: AiServerMode.serverProxy,
       provider: 'openai',
       model: profile.model,

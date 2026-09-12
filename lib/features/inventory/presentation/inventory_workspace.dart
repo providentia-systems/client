@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:providentia/core/presentation/place_management_dialog.dart';
+import 'package:providentia/features/inventory/application/home_location_repository.dart';
 import 'package:providentia/features/inventory/application/stock_photo_count_controller.dart';
 import 'package:providentia/features/inventory/domain/inventory_models.dart';
 import 'package:providentia/features/inventory/presentation/inventory_controller.dart';
@@ -84,6 +86,43 @@ class _InventoryWorkspaceState extends State<InventoryWorkspace> {
                         ),
                     ],
                   ),
+                  if (widget.controller.canEditLocations)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: () => showDialog<void>(
+                          context: context,
+                          builder: (_) => PlaceManagementDialog(
+                            title: 'Home locations',
+                            singular: 'location',
+                            detailLabel: 'Kind',
+                            listenable: widget.controller,
+                            detailOptions: HomeLocation.kinds,
+                            maxNameLength: 120,
+                            entries: () => widget.controller.locations
+                                .map(
+                                  (place) => PlaceDetails(
+                                    id: place.id,
+                                    name: place.name,
+                                    detail: place.kind,
+                                    archived: place.archived,
+                                    revision: place.revision,
+                                  ),
+                                )
+                                .toList(),
+                            save: (place) => widget.controller.saveLocation(
+                              id: place.id,
+                              name: place.name,
+                              kind: place.detail,
+                              archived: place.archived,
+                              expectedRevision: place.revision,
+                            ),
+                          ),
+                        ),
+                        icon: const Icon(Icons.shelves),
+                        label: const Text('Manage locations'),
+                      ),
+                    ),
                   if (widget.contributionPageBuilder != null)
                     Align(
                       alignment: Alignment.centerLeft,
@@ -311,13 +350,41 @@ class _CountSessionBar extends StatelessWidget {
 
   final InventoryController controller;
 
+  Future<void> _startCount(BuildContext context) async {
+    final locations = controller.locations
+        .where((place) => !place.archived)
+        .toList();
+    if (locations.isEmpty) {
+      await controller.startCount();
+      return;
+    }
+    final locationId = await showDialog<String>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('Count location'),
+        children: [
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, 'primary'),
+            child: const Text('No location label'),
+          ),
+          for (final place in locations)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(context, place.id),
+              child: Text(place.name),
+            ),
+        ],
+      ),
+    );
+    if (locationId != null) await controller.startCount(locationId: locationId);
+  }
+
   @override
   Widget build(BuildContext context) {
     final active = controller.state.activeSession;
     if (active == null) {
       return FilledButton.icon(
         key: const Key('start-stock-count'),
-        onPressed: controller.startCount,
+        onPressed: () => _startCount(context),
         icon: const Icon(Icons.fact_check_outlined),
         label: const Text('Start manual stock count'),
       );
@@ -382,10 +449,24 @@ class _InventoryRow extends StatelessWidget {
             : null,
         subtitle: Text(_metadata),
         trailing: belongsToHome
-            ? Text(
-                item.currentQuantity == null
-                    ? 'Not counted'
-                    : '${item.currentQuantity!.toStringAsFixed(_decimals(item.currentQuantity!))} ${item.unit}',
+            ? Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    item.currentQuantity == null
+                        ? 'Not counted'
+                        : '${item.currentQuantity!.toStringAsFixed(_decimals(item.currentQuantity!))} ${item.unit}',
+                  ),
+                  if (countSessionActive &&
+                      controller.state.activeSession!.lines.any(
+                        (line) => line.itemId == item.id,
+                      ))
+                    IconButton(
+                      tooltip: 'Remove from this count',
+                      icon: const Icon(Icons.undo),
+                      onPressed: () => _removeCount(context),
+                    ),
+                ],
               )
             : OutlinedButton(
                 key: Key('inventory-add-catalog-${item.packId ?? item.id}'),
@@ -406,6 +487,29 @@ class _InventoryRow extends StatelessWidget {
     item.category,
     if (item.aliases.isNotEmpty) 'Aliases: ${item.aliases.join(', ')}',
   ].join(' · ');
+
+  Future<void> _removeCount(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Remove from this count?'),
+        content: Text(
+          '${item.canonicalName} will be left out when this count is applied. Existing stock is kept.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) await controller.removeCountForItem(item);
+  }
 
   Future<void> _editQuantity(BuildContext context) async {
     final result = await showDialog<(double, String)>(

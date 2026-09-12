@@ -191,7 +191,7 @@ function validateContract(document) {
       operationIds.add(operation.operationId);
     }
   }
-  if (operationIds.size !== 210) {
+  if (operationIds.size !== 235) {
     throw new Error(`Expected the API 2.0 surface, found ${operationIds.size} operations.`);
   }
 

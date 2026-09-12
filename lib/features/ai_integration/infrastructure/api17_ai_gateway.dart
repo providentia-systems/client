@@ -12,7 +12,7 @@ abstract interface class PreparedMediaByteReader {
   Future<Uint8List> read(PreparedAiMedia media);
 }
 
-/// Server-proxy AI adapter for the bounded API 1.18 multi-image contract.
+/// Server-proxy AI adapter for the pinned multi-image and recipient-consent contract.
 final class Api17AiGateway implements AiProviderGateway {
   factory Api17AiGateway({
     required ProvidentiaApiClient client,
@@ -171,6 +171,18 @@ final class Api17AiGateway implements AiProviderGateway {
         'Select between one and eight prepared images.',
       );
     }
+    final plan = request.transmissionPlan;
+    if (plan == null ||
+        plan.primary.profileId != request.provider.id ||
+        plan.primary.revision != request.provider.revision ||
+        plan.primary.provider != request.provider.providerWireId ||
+        plan.primary.model != request.provider.model ||
+        plan.primary.endpoint != request.provider.endpoint?.toString()) {
+      throw const _Api17AiBoundaryException(
+        'transmission_plan_required',
+        'Refresh the AI plan and confirm its selected provider and recipients.',
+      );
+    }
     final preparedBytes = <Uint8List>[];
     Uint8List? aggregateBytes;
     try {
@@ -214,6 +226,8 @@ final class Api17AiGateway implements AiProviderGateway {
       final formFields = <String, String>{
         'kind': request.kind == AiExtractionKind.receipt ? 'receipt' : 'stock',
         'transmissionConsent': 'true',
+        'transmissionPlanHash': plan.sha256,
+        'selectedProfileId': request.provider.id,
       };
       final targetId = request.targetId?.trim();
       if (targetId != null && targetId.isNotEmpty) {

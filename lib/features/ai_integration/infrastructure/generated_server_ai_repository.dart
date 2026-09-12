@@ -1,10 +1,11 @@
 import 'package:http/http.dart' as http;
 import 'package:providentia/features/ai_integration/application/server_ai_repository.dart';
 import 'package:providentia/features/ai_integration/domain/ai_models.dart';
+import 'package:providentia/features/ai_integration/domain/ai_transmission_plan.dart';
 import 'package:providentia/features/ai_integration/domain/server_ai_models.dart';
 import 'package:providentia_api_client/providentia_api_client.dart';
 
-/// Closed, current-contract (API 1.19) boundary for household AI management
+/// Closed, current-contract boundary for household AI management
 /// and mandatory review. Raw response maps and credential material never
 /// leave this adapter.
 final class GeneratedServerAiRepository implements ServerAiRepository {
@@ -44,6 +45,32 @@ final class GeneratedServerAiRepository implements ServerAiRepository {
           (policy.validationProfileId != null &&
               !profileIds.contains(policy.validationProfileId))) {
         throw const FormatException('AI policy references an unknown profile.');
+      }
+      final plan = settings.transmissionPlan;
+      if (plan != null) {
+        if (plan.settingsRevision != settings.revision ||
+            plan.policyRevision != policy.revision) {
+          throw const FormatException(
+            'AI transmission plan changed during refresh.',
+          );
+        }
+        for (final recipient in [
+          ...plan.extractionProfiles,
+          if (plan.validationProfile != null) plan.validationProfile!,
+        ]) {
+          final profile = profiles
+              .where((profile) => profile.id == recipient.profileId)
+              .firstOrNull;
+          if (profile == null ||
+              profile.revision != recipient.revision ||
+              profile.providerWireId != recipient.provider ||
+              profile.model != recipient.model ||
+              profile.endpoint?.toString() != recipient.endpoint) {
+            throw const FormatException(
+              'AI transmission recipient changed during refresh.',
+            );
+          }
+        }
       }
       return AiServerWorkspace(
         homeId: homeId,
@@ -371,6 +398,11 @@ AiServerSettings _settings(Map<String, Object?> object, String homeId) {
     humanReviewRequired: true,
     serverPersistsUploadedMedia: false,
     mediaHandling: mediaHandling,
+    transmissionPlan: object['transmissionPlan'] == null
+        ? null
+        : AiTransmissionPlan.fromJson(
+            _object(object['transmissionPlan'], 'AI transmission plan'),
+          ),
   );
 }
 

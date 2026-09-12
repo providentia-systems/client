@@ -36,6 +36,15 @@ abstract interface class OnlineShoppingSuggestionRunner {
   Future<void> regenerate({required String homeId});
 }
 
+/// Durable decision boundary. A successful queue acknowledges local persistence;
+/// the synchronized server feedback remains authoritative across devices.
+abstract interface class ShoppingSuggestionFeedbackQueue {
+  Future<OnlineSuggestionFeedbackReceipt> queueFeedback(
+    OnlineSuggestionFeedback feedback,
+  );
+  Future<Set<String>> decidedSuggestionIds({required String homeId});
+}
+
 abstract interface class OnlineShoppingSuggestionRepository {
   Future<ShoppingSuggestionFeed> list({required String homeId});
 
@@ -102,12 +111,19 @@ final class CachedOnlineShoppingSuggestionRepository
   factory CachedOnlineShoppingSuggestionRepository({
     required OnlineShoppingSuggestionRepository remote,
     required ShoppingSuggestionCache cache,
-  }) => CachedOnlineShoppingSuggestionRepository._(remote, cache);
+    ShoppingSuggestionFeedbackQueue? feedbackQueue,
+  }) =>
+      CachedOnlineShoppingSuggestionRepository._(remote, cache, feedbackQueue);
 
-  const CachedOnlineShoppingSuggestionRepository._(this._remote, this._cache);
+  const CachedOnlineShoppingSuggestionRepository._(
+    this._remote,
+    this._cache,
+    this._feedbackQueue,
+  );
 
   final OnlineShoppingSuggestionRepository _remote;
   final ShoppingSuggestionCache _cache;
+  final ShoppingSuggestionFeedbackQueue? _feedbackQueue;
 
   @override
   Future<void> regenerate({required String homeId}) async {
@@ -140,7 +156,7 @@ final class CachedOnlineShoppingSuggestionRepository
       } catch (_) {
         // A local cache failure must not hide a freshly verified live feed.
       }
-      return feed;
+      return _applyDecisions(feed, homeId);
     } on OnlineSuggestionException catch (error) {
       if (error.kind == OnlineSuggestionFailureKind.authenticationRequired ||
           error.kind == OnlineSuggestionFailureKind.authorizationDenied ||
@@ -150,10 +166,13 @@ final class CachedOnlineShoppingSuggestionRepository
       }
       final cached = await _cache.read(homeId: homeId);
       if (cached == null || cached.homeId != homeId) rethrow;
-      return ShoppingSuggestionFeed(
-        suggestions: cached.suggestions,
-        fromVerifiedCache: true,
-        verifiedAt: cached.verifiedAt,
+      return _applyDecisions(
+        ShoppingSuggestionFeed(
+          suggestions: cached.suggestions,
+          fromVerifiedCache: true,
+          verifiedAt: cached.verifiedAt,
+        ),
+        homeId,
       );
     }
   }
@@ -178,12 +197,30 @@ final class CachedOnlineShoppingSuggestionRepository
   Future<OnlineSuggestionFeedbackReceipt> recordFeedback(
     OnlineSuggestionFeedback feedback,
   ) async {
+    final queue = _feedbackQueue;
+    if (queue != null) return queue.queueFeedback(feedback);
     try {
       return await _remote.recordFeedback(feedback);
     } on OnlineSuggestionException catch (error) {
       await _clearForAccessFailure(feedback.homeId, error);
       rethrow;
     }
+  }
+
+  Future<ShoppingSuggestionFeed> _applyDecisions(
+    ShoppingSuggestionFeed feed,
+    String homeId,
+  ) async {
+    final queue = _feedbackQueue;
+    if (queue == null) return feed;
+    final decided = await queue.decidedSuggestionIds(homeId: homeId);
+    return ShoppingSuggestionFeed(
+      suggestions: feed.suggestions
+          .where((row) => !decided.contains(row.id))
+          .toList(growable: false),
+      fromVerifiedCache: feed.fromVerifiedCache,
+      verifiedAt: feed.verifiedAt,
+    );
   }
 
   Future<void> _clearForAccessFailure(

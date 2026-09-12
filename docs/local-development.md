@@ -16,14 +16,16 @@ backend CORS list:
 
 ```bash
 CORS_ALLOWED_ORIGINS='http://127.0.0.1:3000,http://localhost:3000,http://127.0.0.1:8081,http://localhost:8081' \
-  bash scripts/setup-prebuilt.sh
-```
-
-```bash
-CORS_ALLOWED_ORIGINS='http://127.0.0.1:3000,http://localhost:3000,http://127.0.0.1:8081,http://localhost:8081' \
   bash scripts/setup-development.sh \
     --handover /absolute/path/Pantry_Stock_Project_Handover_2026-07-29.zip
 ```
+
+For an already published matching backend, substitute
+`scripts/setup-prebuilt.sh --version TAG`. A feature-branch checkout does not
+make the default prebuilt `edge` image match that branch; pull-request image
+checks do not publish a release. Use the source setup above for unpublished
+review changes. Preserve existing data when updating; do not use `--reset-data`
+as an upgrade step.
 
 Supplying the complete list explicitly makes the local handoff independent of
 a stale generated environment or previously created container. If an
@@ -45,8 +47,9 @@ Open Mailpit at `http://127.0.0.1:8025`. An accepted API request without a
 delivered message is not a successful onboarding test.
 
 Before requesting a code, confirm that the running backend contract contains
-`requestEmailCode` and `verifyEmailCode`. Use the coordinated API 2.0.0 branch;
-old prebuilt images do not expose the new authentication contract.
+`requestEmailCode` and `verifyEmailCode`. Compare the running image revision and
+API artifact with the Client's pinned API 2.1.0 lock. Health alone does not prove
+the image has the category, product or synchronization operations in this branch.
 
 ## 2. Prepare the client
 
@@ -336,7 +339,7 @@ provider keys, mailbox passwords or private household data.
 
 Email-code onboarding, session/device management, current-user bootstrap,
 multiple homes, invitations, home governance, and editable home settings are
-composed against API `2.0.0`. Household
+composed against API `2.1.0`. Household
 inventory, purchase, and shopping-list screens still include local Drift
 projections; those screens alone are not proof of cross-device convergence for
 every backend resource. Catalog consent and homeowner contributions, household

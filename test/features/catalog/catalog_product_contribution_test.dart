@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -19,6 +21,7 @@ void main() {
       final controller = CatalogProductContributionController(
         consentRepository: repository,
         proposalService: CatalogProposalService(repository),
+        sourcePreparation: _SourcePreparation(),
         homeId: _homeId,
         locale: 'en-NA',
         canContribute: true,
@@ -73,6 +76,7 @@ void main() {
       final controller = CatalogProductContributionController(
         consentRepository: repository,
         proposalService: CatalogProposalService(repository),
+        sourcePreparation: _SourcePreparation(),
         homeId: _homeId,
         locale: 'en-NA',
         canContribute: true,
@@ -98,6 +102,7 @@ void main() {
     final controller = CatalogProductContributionController(
       consentRepository: repository,
       proposalService: CatalogProposalService(repository),
+      sourcePreparation: _SourcePreparation(),
       homeId: _homeId,
       locale: 'en-NA',
       canContribute: false,
@@ -115,6 +120,7 @@ void main() {
     final controller = CatalogProductContributionController(
       consentRepository: repository,
       proposalService: CatalogProposalService(repository),
+      sourcePreparation: _SourcePreparation(),
       homeId: _homeId,
       locale: 'en-NA',
       canContribute: true,
@@ -156,6 +162,7 @@ void main() {
       final controller = CatalogProductContributionController(
         consentRepository: repository,
         proposalService: CatalogProposalService(repository),
+        sourcePreparation: _SourcePreparation(),
         homeId: _homeId,
         locale: 'en-NA',
         canContribute: true,
@@ -180,6 +187,7 @@ void main() {
       final controller = CatalogProductContributionController(
         consentRepository: repository,
         proposalService: CatalogProposalService(repository),
+        sourcePreparation: _SourcePreparation(),
         homeId: _homeId,
         locale: 'en-NA',
         canContribute: true,
@@ -208,6 +216,7 @@ void main() {
     final controller = CatalogProductContributionController(
       consentRepository: repository,
       proposalService: CatalogProposalService(repository),
+      sourcePreparation: _SourcePreparation(),
       homeId: _homeId,
       locale: 'en-NA',
       canContribute: true,
@@ -247,6 +256,7 @@ void main() {
       final first = CatalogProductContributionController(
         consentRepository: repository,
         proposalService: CatalogProposalService(repository),
+        sourcePreparation: _SourcePreparation(),
         homeId: _homeId,
         locale: 'en-NA',
         canContribute: true,
@@ -265,6 +275,7 @@ void main() {
       final restored = CatalogProductContributionController(
         consentRepository: repository,
         proposalService: CatalogProposalService(repository),
+        sourcePreparation: _SourcePreparation(),
         homeId: _homeId,
         locale: 'en-NA',
         canContribute: true,
@@ -287,6 +298,189 @@ void main() {
     },
   );
 
+  test(
+    'submission waits for source acknowledgement after explicit consent',
+    () async {
+      final acknowledged = Completer<void>();
+      final source = _SourcePreparation(action: () => acknowledged.future);
+      final repository = _ContributionRepository();
+      final controller = CatalogProductContributionController(
+        consentRepository: repository,
+        proposalService: CatalogProposalService(repository),
+        sourcePreparation: source,
+        homeId: _homeId,
+        locale: 'en-NA',
+        canContribute: true,
+      );
+      addTearDown(controller.dispose);
+      await controller.loadConsent();
+      controller.selectProduct(privateProductIdentityPreview(_inventoryItem()));
+      await controller.submit();
+      expect(source.calls, 0);
+      controller.setExplicitConsent(true);
+      final submission = controller.submit();
+      expect(controller.status, CatalogProductContributionStatus.submitting);
+      expect(repository.attemptedSubmissionIds, isEmpty);
+      acknowledged.complete();
+      await submission;
+      expect(source.calls, 1);
+      expect(repository.submissions, hasLength(1));
+    },
+  );
+
+  for (final scenario
+      in <({Exception error, CatalogProductContributionStatus status})>[
+        (
+          error: const CatalogContributionSourcePendingException(),
+          status: CatalogProductContributionStatus.sourcePending,
+        ),
+        (
+          error: const CatalogContributionSourceUnavailableException(),
+          status: CatalogProductContributionStatus.sourceUnavailable,
+        ),
+      ]) {
+    test(
+      'source preparation ${scenario.status.name} does not publish',
+      () async {
+        final source = _SourcePreparation(
+          action: () async => throw scenario.error,
+        );
+        final repository = _ContributionRepository();
+        final controller = CatalogProductContributionController(
+          consentRepository: repository,
+          proposalService: CatalogProposalService(repository),
+          sourcePreparation: source,
+          homeId: _homeId,
+          locale: 'en-NA',
+          canContribute: true,
+        );
+        addTearDown(controller.dispose);
+        await controller.loadConsent();
+        controller.selectProduct(
+          privateProductIdentityPreview(_inventoryItem()),
+        );
+        controller.setExplicitConsent(true);
+        await controller.submit();
+        expect(controller.status, scenario.status);
+        expect(controller.explicitlyConsented, isFalse);
+        expect(controller.pendingSubmissionId, isNull);
+        expect(repository.attemptedSubmissionIds, isEmpty);
+      },
+    );
+  }
+
+  test(
+    'server source deletion is actionable after successful preparation',
+    () async {
+      final repository = _ContributionRepository(
+        submitFailure: const CatalogContributionSourceUnavailableException(),
+      );
+      final controller = CatalogProductContributionController(
+        consentRepository: repository,
+        proposalService: CatalogProposalService(repository),
+        sourcePreparation: _SourcePreparation(),
+        homeId: _homeId,
+        locale: 'en-NA',
+        canContribute: true,
+      );
+      addTearDown(controller.dispose);
+      await controller.loadConsent();
+      controller.selectProduct(privateProductIdentityPreview(_inventoryItem()));
+      controller.setExplicitConsent(true);
+      await controller.submit();
+      expect(
+        controller.status,
+        CatalogProductContributionStatus.sourceUnavailable,
+      );
+      expect(controller.pendingSubmissionId, isNull);
+      expect(repository.submissions, isEmpty);
+    },
+  );
+
+  for (final revoke in [false, true]) {
+    test(
+      'source wait cancels when ${revoke ? "authorization is revoked" : "selected product is removed"}',
+      () async {
+        final acknowledged = Completer<void>();
+        final repository = _ContributionRepository();
+        final controller = CatalogProductContributionController(
+          consentRepository: repository,
+          proposalService: CatalogProposalService(repository),
+          sourcePreparation: _SourcePreparation(
+            action: () => acknowledged.future,
+          ),
+          homeId: _homeId,
+          locale: 'en-NA',
+          canContribute: true,
+        );
+        addTearDown(controller.dispose);
+        await controller.loadConsent();
+        controller.selectProduct(
+          privateProductIdentityPreview(_inventoryItem()),
+        );
+        controller.setExplicitConsent(true);
+        final submission = controller.submit();
+        if (revoke) {
+          controller.clearSensitiveState();
+        } else {
+          controller.reconcileAvailableProductIds({});
+        }
+        acknowledged.complete();
+        await submission;
+        expect(repository.attemptedSubmissionIds, isEmpty);
+        expect(controller.product, isNull);
+        expect(
+          controller.status,
+          isNot(CatalogProductContributionStatus.submitting),
+        );
+      },
+    );
+  }
+
+  test('local source loss preserves an ambiguous submission UUID', () async {
+    var available = true;
+    final source = _SourcePreparation(
+      action: () async {
+        if (!available) {
+          throw const CatalogContributionSourceUnavailableException();
+        }
+      },
+    );
+    final repository = _ContributionRepository(
+      submitFailure: const CatalogContributionUnavailableException(),
+    );
+    final controller = CatalogProductContributionController(
+      consentRepository: repository,
+      proposalService: CatalogProposalService(repository),
+      sourcePreparation: source,
+      homeId: _homeId,
+      locale: 'en-NA',
+      canContribute: true,
+      submissionIdGenerator: () => _submissionId,
+    );
+    addTearDown(controller.dispose);
+    await controller.loadConsent();
+    controller.selectProduct(privateProductIdentityPreview(_inventoryItem()));
+    controller.setExplicitConsent(true);
+    await controller.submit();
+    expect(controller.pendingSubmissionId, _submissionId);
+    available = false;
+    await controller.loadConsent();
+    controller.setExplicitConsent(true);
+    await controller.submit();
+    expect(
+      controller.status,
+      CatalogProductContributionStatus.sourceUnavailable,
+    );
+    expect(controller.pendingSubmissionId, _submissionId);
+    available = true;
+    repository.submitFailure = null;
+    await controller.loadConsent();
+    controller.setExplicitConsent(true);
+    await controller.submit();
+    expect(repository.attemptedSubmissionIds, [_submissionId, _submissionId]);
+  });
+
   testWidgets(
     'production route requires checkbox and clears through registry',
     (tester) async {
@@ -307,6 +501,7 @@ void main() {
           home: ProductionCatalogProductContributionRoute(
             consentRepository: repository,
             proposalRepository: repository,
+            sourcePreparation: _SourcePreparation(),
             inventoryController: inventory,
             homeId: _homeId,
             locale: 'en-NA',
@@ -476,4 +671,22 @@ final class _InventoryRepository implements InventoryRepository {
     required ManualAdjustmentIntent intent,
     required StockMovement? movement,
   }) => throw UnimplementedError();
+}
+
+final class _SourcePreparation implements CatalogProductSourcePreparation {
+  _SourcePreparation({this.action});
+
+  final Future<void> Function()? action;
+  int calls = 0;
+
+  @override
+  Future<void> prepare({
+    required String homeId,
+    required String homeProductId,
+  }) async {
+    expect(homeId, _homeId);
+    expect(homeProductId, _productId);
+    calls++;
+    await action?.call();
+  }
 }

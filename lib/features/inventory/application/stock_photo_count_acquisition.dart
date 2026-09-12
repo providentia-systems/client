@@ -210,6 +210,7 @@ extension StockPhotoCountAcquisition on StockPhotoCountController {
       orderedMediaHashes: prepared.orderedHashes,
       disclosureVersion: AiPrivacyPolicy.disclosureVersion,
       confirmedAt: _clock().toUtc(),
+      transmissionPlanHash: route.transmissionPlan?.sha256,
     );
     try {
       _policy.authorizeExtraction(
@@ -297,6 +298,7 @@ extension StockPhotoCountAcquisition on StockPhotoCountController {
           promptVersion: 'stock-photo-extraction-v1',
           timeout: const Duration(seconds: 45),
           targetId: session.id,
+          transmissionPlan: route.transmissionPlan,
         ),
       );
       if (!_current(epoch)) return;

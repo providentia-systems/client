@@ -78,6 +78,12 @@ final class ShoppingController extends ChangeNotifier {
   final ShoppingInteractionCapabilities capabilities;
   final Future<void> Function()? _onAuthorizationDenied;
   StreamSubscription<ShoppingList>? _subscription;
+  StreamSubscription<List<ShoppingList>>? _listsSubscription;
+  List<ShoppingList> _lists = const <ShoppingList>[];
+  String? _selectedListId;
+
+  List<ShoppingList> get lists => _lists;
+  bool get canManageLists => _repository is ShoppingListLifecycleRepository;
   final Set<String> _suggestionActionsInFlight = <String>{};
   final Set<String> _hiddenSuggestionIds = <String>{};
   var _suggestionRequestGeneration = 0;
@@ -90,12 +96,41 @@ final class ShoppingController extends ChangeNotifier {
 
   void start() {
     if (_subscription != null) return;
+    final repository = _repository;
+    if (repository is ShoppingListLifecycleRepository) {
+      _listsSubscription = (repository as ShoppingListLifecycleRepository)
+          .watchLists(homeId: homeId)
+          .listen(
+            (lists) {
+              if (lists.any((list) => list.homeId != homeId)) {
+                _setError('Shopping-list access was rejected.');
+                return;
+              }
+              _lists = List<ShoppingList>.unmodifiable(lists);
+              if (lists.isNotEmpty) {
+                final selected = lists
+                    .where((list) => list.id == _selectedListId)
+                    .firstOrNull;
+                final current =
+                    selected ??
+                    lists.where((list) => !list.archived).firstOrNull ??
+                    lists.first;
+                _selectedListId = current.id;
+                _state = _copyState(list: current, loading: false);
+              }
+              notifyListeners();
+            },
+            onError: (Object _) =>
+                _setError('Shopping lists could not be loaded.'),
+          );
+    }
     _subscription = _repository.watchActiveList(homeId: homeId).listen(
       (list) {
         if (list.homeId != homeId) {
           _setError('Shopping-list access was rejected.');
           return;
         }
+        if (_selectedListId != null) return;
         // The list stream and online-suggestion refresh complete independently.
         // A late list emission must not erase an authorization or validation
         // error produced by the suggestion boundary.
@@ -107,6 +142,92 @@ final class ShoppingController extends ChangeNotifier {
     );
     if (_suggestionRepository != null) {
       unawaited(refreshSuggestions());
+    }
+  }
+
+  void selectList(String id) {
+    final list = _lists
+        .where((list) => list.id == id && list.homeId == homeId)
+        .firstOrNull;
+    if (list == null) return;
+    _selectedListId = id;
+    _state = _copyState(list: list, loading: false, clearSafeError: true);
+    notifyListeners();
+  }
+
+  Future<bool> createList(String name) async {
+    final trimmed = name.trim();
+    if (!canManageLists || trimmed.isEmpty || trimmed.length > 120) {
+      return false;
+    }
+    final list = ShoppingList(
+      id: _idGenerator(),
+      homeId: homeId,
+      name: trimmed,
+      createdAt: _clock().toUtc(),
+    );
+    try {
+      await _repository.saveList(list);
+      _selectedListId = list.id;
+      _state = _copyState(list: list, loading: false, clearSafeError: true);
+      notifyListeners();
+      return true;
+    } catch (_) {
+      _setError('The shopping list could not be created.');
+      return false;
+    }
+  }
+
+  Future<bool> updateList({
+    String? name,
+    bool? archived,
+    ShoppingList? expectedList,
+  }) async {
+    try {
+      await _repository.saveList(
+        (expectedList ?? _requireList()).copyWith(
+          name: name?.trim(),
+          archived: archived,
+        ),
+      );
+      return true;
+    } catch (_) {
+      _setError('The list could not be saved. Reload it and try again.');
+      return false;
+    }
+  }
+
+  Future<bool> editLine(
+    ShoppingListLine line, {
+    String? name,
+    double? quantity,
+    bool? archived,
+  }) async {
+    final list = _requireList();
+    if (list.archived ||
+        line.homeId != homeId ||
+        !list.lines.any((entry) => entry.id == line.id)) {
+      return false;
+    }
+    final edited = line.copyWith(
+      name: name?.trim(),
+      quantity: quantity,
+      archived: archived,
+    );
+    try {
+      await _repository.saveList(
+        list.copyWith(
+          lines: list.lines
+              .map((entry) => entry.id == line.id ? edited : entry)
+              .toList(),
+        ),
+      );
+      return true;
+    } catch (_) {
+      _setError(
+        'The shopping item could not be saved. Reload it and try again.',
+      );
+      return false;
     }
   }
 
@@ -272,7 +393,8 @@ final class ShoppingController extends ChangeNotifier {
       _hideSuggestion(suggestion.id);
       final suggestionRepository = _suggestionRepository;
       if (suggestionRepository != null &&
-          capabilities.canRecordSuggestionFeedback) {
+          capabilities.canRecordSuggestionFeedback &&
+          !capabilities.recordsSuggestionAcceptanceWithList) {
         try {
           await suggestionRepository.recordFeedback(
             OnlineSuggestionFeedback(
@@ -417,7 +539,8 @@ final class ShoppingController extends ChangeNotifier {
     }
     try {
       if (line.origin == ShoppingLineOrigin.suggestion &&
-          capabilities.canRecordSuggestionFeedback) {
+          capabilities.canRecordSuggestionFeedback &&
+          !capabilities.recordsSuggestionAcceptanceWithList) {
         if (line.suggestionId != null && _suggestionRepository != null) {
           await _suggestionRepository.recordFeedback(
             OnlineSuggestionFeedback(
@@ -577,7 +700,9 @@ final class ShoppingController extends ChangeNotifier {
       explanation.inputWatermark == suggestion.inputWatermark;
 
   void _hideSuggestion(String suggestionId) {
-    _hiddenSuggestionIds.add(suggestionId);
+    if (!capabilities.recordsSuggestionAcceptanceWithList) {
+      _hiddenSuggestionIds.add(suggestionId);
+    }
     final explanations = <String, OnlineShoppingSuggestionExplanation>{
       ..._state.explanations,
     }..remove(suggestionId);
@@ -702,6 +827,7 @@ final class ShoppingController extends ChangeNotifier {
     _disposed = true;
     _suggestionRequestGeneration++;
     unawaited(_subscription?.cancel());
+    unawaited(_listsSubscription?.cancel());
     super.dispose();
   }
 }

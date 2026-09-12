@@ -277,6 +277,15 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
       _setFailure('Refresh the provider and choose media for the active home.');
       return;
     }
+    final plan = _workspace?.settings.transmissionPlan;
+    if (plan == null ||
+        plan.primary.profileId != provider.id ||
+        plan.primary.revision != provider.revision) {
+      _setFailure(
+        'Choose the active primary provider, refresh its plan, and review every recipient before sending.',
+      );
+      return;
+    }
     if ((purpose == AiExtractionKind.receipt &&
             (assets.isEmpty || assets.length > 8)) ||
         (purpose == AiExtractionKind.stockPhoto && assets.length != 1)) {
@@ -362,6 +371,7 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
       orderedMediaHashes: prepared.orderedHashes,
       disclosureVersion: AiPrivacyPolicy.disclosureVersion,
       confirmedAt: _clock().toUtc(),
+      transmissionPlanHash: _workspace?.settings.transmissionPlan?.sha256,
     );
     _safeMessage = null;
     _notify();
@@ -383,7 +393,10 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
         prepared == null ||
         consent == null ||
         current == null ||
-        current.revision != provider.revision) {
+        current.revision != provider.revision ||
+        consent.transmissionPlanHash == null ||
+        consent.transmissionPlanHash !=
+            _workspace?.settings.transmissionPlan?.sha256) {
       _setFailure('Review the provider and image, then confirm transmission.');
       return;
     }
@@ -427,6 +440,7 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
             ? 'receipt-extraction-v1'
             : 'stock-photo-extraction-v1',
         timeout: const Duration(seconds: 45),
+        transmissionPlan: _workspace?.settings.transmissionPlan,
       );
       if (prepared.purpose == AiExtractionKind.receipt) {
         final result = await _gateway.extractReceipt(request);

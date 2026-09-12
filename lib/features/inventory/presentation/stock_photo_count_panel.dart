@@ -113,6 +113,10 @@ final class StockPhotoCountPanel extends StatelessWidget {
                 : 'Provider: ${provider.displayName} · ${provider.model}',
             key: const Key('stock-photo-provider-disclosure'),
           ),
+          for (final recipient
+              in controller.transmissionPlan?.recipientDescriptions ??
+                  const <String>[])
+            Text(recipient),
           const SizedBox(height: 4),
           Text(
             state.privacyMode == AiPrivacyMode.strictLocal

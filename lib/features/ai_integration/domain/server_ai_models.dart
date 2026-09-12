@@ -1,6 +1,7 @@
 import 'dart:collection';
 
 import 'package:providentia/features/ai_integration/domain/ai_models.dart';
+import 'package:providentia/features/ai_integration/domain/ai_transmission_plan.dart';
 
 enum AiServerMode { manualOnly, serverProxy, localDirect }
 
@@ -158,6 +159,7 @@ final class AiServerSettings {
     required this.humanReviewRequired,
     required this.serverPersistsUploadedMedia,
     required this.mediaHandling,
+    this.transmissionPlan,
   }) : availableProviders = UnmodifiableListView<AiAvailableServerProvider>(
          List<AiAvailableServerProvider>.of(availableProviders),
        ) {
@@ -177,6 +179,7 @@ final class AiServerSettings {
   @Deprecated('Use mediaHandling.directExtractionUpload.')
   final bool serverPersistsUploadedMedia;
   final AiMediaHandling mediaHandling;
+  final AiTransmissionPlan? transmissionPlan;
 
   bool supportsProvider(String providerId) =>
       availableProviders.any((provider) => provider.id == providerId);

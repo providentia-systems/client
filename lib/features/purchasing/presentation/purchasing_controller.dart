@@ -3,7 +3,9 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:providentia/features/inventory/application/inventory_repository.dart';
 import 'package:providentia/features/inventory/domain/inventory_models.dart';
+import 'package:providentia/features/purchasing/application/purchase_draft_maintenance_repository.dart';
 import 'package:providentia/features/purchasing/application/purchase_repository.dart';
+import 'package:providentia/features/purchasing/application/purchase_store_repository.dart';
 import 'package:providentia/features/purchasing/domain/purchase_models.dart';
 import 'package:providentia/features/purchasing/domain/purchase_services.dart';
 
@@ -79,6 +81,39 @@ final class PurchasingController extends ChangeNotifier {
   final Map<String, String> _createdHomeProductIds = <String, String>{};
   PurchasingState _state = const PurchasingState();
 
+  StreamSubscription<List<PurchaseStore>>? _storesSubscription;
+  List<PurchaseStore> _stores = const [];
+  List<PurchaseStore> get stores => _stores;
+  PurchaseStoreRepository? get _storesRepository =>
+      _repository is PurchaseStoreRepository
+      ? _repository as PurchaseStoreRepository
+      : null;
+  bool get canEditStores =>
+      _mayWrite && _storesRepository?.supportsPurchaseStores == true;
+
+  Future<bool> saveStore({
+    String? id,
+    required String name,
+    required String location,
+    required bool archived,
+    int? expectedRevision,
+  }) async {
+    if (!canEditStores) return false;
+    try {
+      await _storesRepository!.savePurchaseStore(
+        homeId: homeId,
+        storeId: id,
+        name: name,
+        location: location,
+        archived: archived,
+        expectedRevision: expectedRevision,
+      );
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   PurchasingState get state => _state;
   List<PurchaseGroup> get recentGroups =>
       _grouper.groupRecent(homeId: homeId, lines: _state.lines);
@@ -100,6 +135,18 @@ final class PurchasingController extends ChangeNotifier {
 
   void start() {
     if (_subscription != null) return;
+    _storesSubscription = _storesRepository
+        ?.watchPurchaseStores(homeId)
+        .listen(
+          (rows) {
+            _stores = List.unmodifiable(rows);
+            notifyListeners();
+          },
+          onError: (Object _) {
+            _stores = const [];
+            _setCaptureError('Stores could not be loaded.');
+          },
+        );
     _subscription = _repository
         .watchPurchaseLines(homeId: homeId)
         .listen(
@@ -233,6 +280,102 @@ final class PurchasingController extends ChangeNotifier {
       safeError: _state.safeError,
     );
     notifyListeners();
+  }
+
+  PurchaseDraftMaintenanceRepository? get _draftMaintenance =>
+      _repository is PurchaseDraftMaintenanceRepository
+      ? _repository as PurchaseDraftMaintenanceRepository
+      : null;
+  bool get canMaintainDraft => captureEnabled && _draftMaintenance != null;
+
+  Future<bool> updateDraft({
+    required PurchaseReceiptCapture original,
+    required DateTime purchaseDate,
+    required String currency,
+    String? storeId,
+    Money? total,
+    String notes = '',
+  }) {
+    if (!canMaintainDraft) {
+      return _rejectCapture('Receipt editing is unavailable.');
+    }
+    return _runCaptureMutation(
+      () => _draftMaintenance!.updateReceiptDraft(
+        receiptId: original.id,
+        expectedRevision: original.revision,
+        draft: PurchaseReceiptDraftRequest(
+          homeId: homeId,
+          purchaseDate: purchaseDate,
+          currency: currency,
+          storeId: storeId,
+          total: total,
+          notes: notes,
+        ),
+      ),
+      queuedNotice:
+          'Receipt changes are saved locally and queued for synchronization.',
+    );
+  }
+
+  Future<bool> updateLine({
+    required PurchaseReceiptLineCapture original,
+    required String rawDescription,
+    required double quantity,
+    String? originalPackText,
+    Money? unitPrice,
+    Money? lineTotal,
+  }) {
+    if (!canMaintainDraft) {
+      return _rejectCapture('Receipt editing is unavailable.');
+    }
+    return _runCaptureMutation(
+      () => _draftMaintenance!.updateReceiptDraftLine(
+        lineId: original.id,
+        expectedRevision: original.revision,
+        line: PurchaseReceiptLineRequest(
+          homeId: homeId,
+          receiptId: original.receiptId,
+          rawDescription: rawDescription,
+          quantity: quantity,
+          originalPackText: originalPackText,
+          unitPrice: unitPrice,
+          lineTotal: lineTotal,
+        ),
+      ),
+      queuedNotice:
+          'Line changes are saved locally. Review the edited line before committing.',
+    );
+  }
+
+  Future<bool> removeLine(PurchaseReceiptLineCapture original) {
+    if (!canMaintainDraft) {
+      return _rejectCapture('Receipt editing is unavailable.');
+    }
+    return _runCaptureMutation(
+      () => _draftMaintenance!.removeReceiptDraftLine(
+        homeId: homeId,
+        receiptId: original.receiptId,
+        lineId: original.id,
+        expectedRevision: original.revision,
+      ),
+      queuedNotice:
+          'Line removal is saved locally and queued for synchronization.',
+    );
+  }
+
+  Future<bool> cancelDraft(PurchaseReceiptCapture original) {
+    if (!canMaintainDraft) {
+      return _rejectCapture('Receipt editing is unavailable.');
+    }
+    return _runCaptureMutation(
+      () => _draftMaintenance!.cancelReceiptDraft(
+        homeId: homeId,
+        receiptId: original.id,
+        expectedRevision: original.revision,
+      ),
+      queuedNotice:
+          'Draft cancellation is saved locally and queued for synchronization.',
+    );
   }
 
   Future<bool> createDraft({
@@ -663,6 +806,7 @@ final class PurchasingController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _storesSubscription?.cancel();
     unawaited(_subscription?.cancel());
     unawaited(_captureSubscription?.cancel());
     unawaited(_candidateSubscription?.cancel());

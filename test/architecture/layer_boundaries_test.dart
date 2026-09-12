@@ -101,6 +101,7 @@ void main() {
       'lib/app/production_bootstrap_app.dart',
       'lib/core/networking/api_client_factory.dart',
       'lib/core/networking/generated_api_connectivity_probe.dart',
+      'lib/core/networking/generated_stock_preference_reader.dart',
       'lib/core/synchronization/generated_sync_gateway.dart',
       'lib/features/ai_integration/infrastructure/api17_ai_gateway.dart',
       'lib/features/ai_integration/infrastructure/api17_server_credential_provisioning.dart',
