@@ -12,3 +12,8 @@ abstract interface class ShoppingRepository {
 
   Future<void> recordFeedback(SuggestionFeedback feedback);
 }
+
+/// List discovery includes archived lists so removal can be reversed.
+abstract interface class ShoppingListLifecycleRepository {
+  Stream<List<ShoppingList>> watchLists({required String homeId});
+}

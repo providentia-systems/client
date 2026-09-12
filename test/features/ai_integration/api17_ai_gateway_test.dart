@@ -7,9 +7,12 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:providentia/features/ai_integration/application/ai_ports.dart';
 import 'package:providentia/features/ai_integration/domain/ai_models.dart';
+import 'package:providentia/features/ai_integration/domain/ai_transmission_plan.dart';
 import 'package:providentia/features/ai_integration/infrastructure/api17_ai_gateway.dart';
 import 'package:providentia/features/ai_integration/infrastructure/api17_server_credential_provisioning.dart';
 import 'package:providentia_api_client/providentia_api_client.dart';
+
+import 'test_fixtures.dart' show serverTransmissionPlan;
 
 void main() {
   test(
@@ -35,6 +38,47 @@ void main() {
         )).state,
         AiGatewayReadinessState.missingCapability,
       );
+    },
+  );
+
+  test(
+    'missing or mismatched recipient consent fails before any upload',
+    () async {
+      var calls = 0;
+      final gateway = Api17AiGateway(
+        client: _client((_) async {
+          calls++;
+          throw StateError('Unreviewed media must not leave the client.');
+        }),
+        mediaReader: _MediaReader(_bytes),
+      );
+      final mismatched = AiTransmissionPlan(
+        settingsRevision: 1,
+        policyRevision: 1,
+        extractionProfiles: const [
+          AiTransmissionRecipient(
+            profileId: 'different-profile',
+            revision: 1,
+            provider: 'anthropic',
+            model: 'different-model',
+            endpoint: null,
+          ),
+        ],
+        validationProfile: null,
+        sha256: 'b' * 64,
+      );
+      for (final request in [
+        _request(AiExtractionKind.receipt, omitTransmissionPlan: true),
+        _request(AiExtractionKind.receipt, transmissionPlan: mismatched),
+      ]) {
+        final result = await gateway.extractReceipt(request);
+        expect(result, isA<AiExtractionFailure<ReceiptProposal>>());
+        expect(
+          (result as AiExtractionFailure<ReceiptProposal>).code,
+          'transmission_plan_required',
+        );
+      }
+      expect(calls, 0);
     },
   );
 
@@ -1011,6 +1055,8 @@ AiExtractionRequest _request(
   AiPrivacyMode privacyMode = AiPrivacyMode.serverProxyCloud,
   List<PreparedAiMedia>? media,
   String? targetId,
+  bool omitTransmissionPlan = false,
+  AiTransmissionPlan? transmissionPlan,
 }) => AiExtractionRequest(
   runId: 'run-1',
   homeId: 'home-1',
@@ -1027,6 +1073,9 @@ AiExtractionRequest _request(
   promptVersion: 'prompt-v1',
   timeout: const Duration(seconds: 30),
   targetId: targetId,
+  transmissionPlan: omitTransmissionPlan
+      ? null
+      : transmissionPlan ?? serverTransmissionPlan(profile ?? _profile()),
 );
 
 PreparedAiMedia _media({String mimeType = 'image/jpeg'}) => PreparedAiMedia(

@@ -396,6 +396,9 @@ final class _ServerAiWorkspacePageState extends State<ServerAiWorkspacePage> {
       final selected = workspace.profile(_selectedProfileId!);
       if (selected != null) return selected;
     }
+    final primaryId = workspace.settings.transmissionPlan?.primary.profileId;
+    final primary = primaryId == null ? null : workspace.profile(primaryId);
+    if (primary != null) return primary;
     for (final profile in workspace.profiles) {
       if (profile.enabled &&
           profile.credentialConfigured &&
@@ -1233,6 +1236,13 @@ final class _ConsentCardState extends State<_ConsentCard> {
               'Provider: ${provider.displayName} (${provider.model})\n'
               '$pageCount prepared image${pageCount == 1 ? '' : 's'} in the displayed order',
             ),
+            for (final recipient
+                in controller
+                    .workspace!
+                    .settings
+                    .transmissionPlan!
+                    .recipientDescriptions)
+              Text(recipient),
             const SizedBox(height: 4),
             for (var index = 0; index < prepared.media.length; index++)
               Text(

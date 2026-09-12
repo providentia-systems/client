@@ -24,6 +24,7 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
   static const Map<String, String> _protocolTwoProjectionByCommand =
       <String, String>{
         'inventory.location.create': 'inventory-location',
+        'inventory.location.update': 'inventory-location',
         'inventory.home-product.create': 'inventory-home-product',
         'inventory.home-product.update': 'inventory-home-product',
         'inventory.home-category.create': 'inventory-home-category',
@@ -31,15 +32,25 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
         'inventory.adjustment.create': 'inventory-balance',
         'inventory.count-session.create': 'inventory-count-session',
         'inventory.count-line.upsert': 'inventory-count-line',
+        'inventory.count-line.remove': 'inventory-count-line',
         'inventory.count-session.close': 'inventory-count-session',
         'inventory.count-session.cancel': 'inventory-count-session',
         'purchasing.store.create': 'purchasing-store',
+        'purchasing.store.update': 'purchasing-store',
+        'purchasing.receipt.update': 'purchasing-receipt',
+        'purchasing.receipt.cancel': 'purchasing-receipt',
+        'purchasing.receipt-line.update': 'purchasing-receipt-line',
+        'purchasing.receipt-line.remove': 'purchasing-receipt-line',
         'purchasing.receipt.create': 'purchasing-receipt',
         'purchasing.receipt-line.create': 'purchasing-receipt-line',
         'purchasing.receipt-line.approve': 'purchasing-receipt-line',
         'purchasing.receipt-line.unresolve': 'purchasing-receipt-line',
         'purchasing.receipt.commit': 'purchasing-receipt',
+        'shopping.preference.put': 'shopping-stock-preference',
         'shopping.list.create': 'shopping-list',
+        'shopping.suggestion-feedback.create': 'shopping-suggestion-feedback',
+        'shopping.list.update': 'shopping-list',
+        'shopping.list-line.update': 'shopping-list-line',
         'shopping.list-line.create': 'shopping-list-line',
         'shopping.list-line.checked': 'shopping-list-line',
       };
@@ -590,18 +601,28 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
           .toSet();
       for (final operation in protocolTwoIntent) {
         final payload = _decodePayload(operation.payload);
+        if (operation.operationType == 'shopping.list-line.create' &&
+            payload['suggestionId'] != null) {
+          intentKeys.add(
+            'shopping-suggestion-feedback\u0000${operation.entityId}',
+          );
+        }
         final auxiliary = switch (operation.operationType) {
           'inventory.count-line.upsert' => (
             entityType: 'inventory-count-session',
             entityId: payload['sessionId'],
           ),
+          'purchasing.receipt-line.update' ||
+          'purchasing.receipt-line.remove' ||
           'purchasing.receipt-line.create' ||
           'purchasing.receipt-line.approve' ||
           'purchasing.receipt-line.unresolve' => (
             entityType: 'purchasing-receipt',
             entityId: payload['receiptId'],
           ),
-          'shopping.list-line.create' => (
+          'shopping.list-line.create' ||
+          'shopping.list-line.checked' ||
+          'shopping.list-line.update' => (
             entityType: 'shopping-list',
             entityId: payload['listId'],
           ),

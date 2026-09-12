@@ -134,7 +134,7 @@ void main() {
     });
 
     test('publishes only the API 2.1.0 homeowner operation registry', () {
-      expect(ProvidentiaApiClient.operations, hasLength(159));
+      expect(ProvidentiaApiClient.operations, hasLength(167));
       expect(
         ProvidentiaApiClient.operations['createAiExtraction'],
         isA<ApiOperation>()

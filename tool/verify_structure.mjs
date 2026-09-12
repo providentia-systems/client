@@ -304,6 +304,7 @@ assert(
 
 const dependencyViolations = [];
 const generatedClientAdapters = new Set([
+  'lib/core/networking/generated_stock_preference_reader.dart',
   'lib/app/production_bootstrap_app.dart',
   'lib/core/networking/api_client_factory.dart',
   'lib/core/networking/generated_api_connectivity_probe.dart',
@@ -435,9 +436,9 @@ assert(
   generatedManifest.clientProfile === 'homeowner' &&
     generatedManifest.contractVersion === '2.1.0' &&
     generatedManifest.contractSha256 ===
-      '62612d00deaf16ba92ec29d836aa940c16e2370b9925676fe241a1d958941304' &&
-    generatedManifest.canonicalOperationCount === 210 &&
-    generatedManifest.generatedOperationCount === 159,
+      '40a8477521baa6c41cf2c5d872068f5ae1bf255a8d0bbccc97a05688d705ad57' &&
+    generatedManifest.canonicalOperationCount === 235 &&
+    generatedManifest.generatedOperationCount === 167,
   'Generated client manifest must distinguish the canonical and homeowner surfaces.',
 );
 try {

@@ -7,12 +7,14 @@ import 'package:providentia/app/household_features.dart';
 import 'package:providentia/app/providentia_app.dart';
 import 'package:providentia/core/config/runtime_configuration.dart';
 import 'package:providentia/core/database/app_database.dart';
+import 'package:providentia/core/database/drift_catalog_product_source_preparation.dart';
 import 'package:providentia/core/database/drift_household_repository.dart';
 import 'package:providentia/core/database/drift_local_sync_repository.dart';
 import 'package:providentia/core/design_system/providentia_theme.dart';
 import 'package:providentia/core/networking/api_client_factory.dart';
 import 'package:providentia/core/networking/credentialed_http_client.dart';
 import 'package:providentia/core/networking/generated_api_connectivity_probe.dart';
+import 'package:providentia/core/networking/generated_stock_preference_reader.dart';
 import 'package:providentia/core/networking/session_http_client.dart';
 import 'package:providentia/core/security/device_identity_store.dart';
 import 'package:providentia/core/security/platform_pending_email_code_store.dart';
@@ -86,6 +88,7 @@ import 'package:providentia/features/identity/presentation/email_code_sign_in_pa
 import 'package:providentia/features/identity/presentation/identity_controller.dart';
 import 'package:providentia/features/inventory/application/stock_camera_capture_session.dart';
 import 'package:providentia/features/inventory/application/stock_photo_count_controller.dart';
+import 'package:providentia/features/inventory/application/stock_preference_repository.dart';
 import 'package:providentia/features/inventory/infrastructure/generated_home_item_master_source.dart';
 import 'package:providentia/features/inventory/infrastructure/item_master_refreshing_synchronization.dart';
 import 'package:providentia/features/inventory/presentation/inventory_controller.dart';
@@ -608,6 +611,7 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
   late final HouseholdFeatures _features;
   late final SyncConflictController _syncConflicts;
   late final PrivacySafeSyncMetrics _syncMetrics;
+  late final CatalogProductSourcePreparation _catalogProductSource;
   late final ProductionResumeSyncGate _resumeSyncGate;
   late final Future<void> _ready;
   StrictLocalHomeAiComposition? _strictLocalAi;
@@ -622,6 +626,7 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
       database: widget.database,
       deviceId: widget.deviceId,
       onMutationCommitted: () => _app.refresh(),
+      stockPreferenceReader: GeneratedStockPreferenceReader(widget.api),
     );
     _household = household;
     _syncMetrics = PrivacySafeSyncMetrics(
@@ -646,6 +651,11 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
     synchronization = RevocationGuardedSynchronization(
       delegate: synchronization,
       gate: widget.syncRevocationGate,
+      homeId: widget.home.id,
+    );
+    _catalogProductSource = DriftCatalogProductSourcePreparation(
+      database: widget.database,
+      synchronization: synchronization,
       homeId: widget.home.id,
     );
     _app = AppController(
@@ -673,6 +683,11 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
     final inventory = InventoryController(
       repository: household,
       homeId: widget.home.id,
+      mayManageStockPreferences: widget
+          .homesController
+          .snapshot
+          .effectivePermissions
+          .contains('shopping.manage'),
     );
     final permissions = widget.homesController.snapshot.effectivePermissions;
     final aiCapabilities = AiHomeCapabilities.fromPermissions(
@@ -715,16 +730,18 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
             workspace.settings.mode != AiServerMode.serverProxy) {
           throw const AiServerException(AiServerFailureKind.validation);
         }
-        for (final profileId in workspace.policy.extractionProfileIds) {
-          final profile = workspace.profile(profileId);
-          if (profile != null && profile.enabled) {
-            return StockPhotoAiRoute(
-              profile: profile,
-              gateway: serverGateway,
-              privacyMode: AiPrivacyMode.serverProxyCloud,
-              reviewCandidate: aiRepository.reviewCandidate,
-            );
-          }
+        final plan = workspace.settings.transmissionPlan;
+        final profile = plan == null
+            ? null
+            : workspace.profile(plan.primary.profileId ?? '');
+        if (profile != null && profile.enabled) {
+          return StockPhotoAiRoute(
+            profile: profile,
+            gateway: serverGateway,
+            privacyMode: AiPrivacyMode.serverProxyCloud,
+            reviewCandidate: aiRepository.reviewCandidate,
+            transmissionPlan: plan,
+          );
         }
         throw const AiServerException(AiServerFailureKind.validation);
       }
@@ -855,8 +872,10 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
         suggestionRepository: CachedOnlineShoppingSuggestionRepository(
           remote: GeneratedOnlineShoppingSuggestionRepository(widget.api),
           cache: DriftShoppingSuggestionCache(widget.database),
+          feedbackQueue: household,
         ),
-        capabilities: ShoppingInteractionCapabilities.onlineEvidenceSuggestions,
+        capabilities:
+            ShoppingInteractionCapabilities.durableEvidenceSuggestions,
         onAuthorizationDenied: _handleHomeAuthorizationLost,
       ),
       stockPhotoCount: stockPhotoCount,
@@ -931,6 +950,7 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
       return ProductionCatalogProductContributionRoute(
         consentRepository: repository,
         proposalRepository: repository,
+        sourcePreparation: _catalogProductSource,
         inventoryController: _features.inventory,
         homeId: widget.home.id,
         locale: widget.home.locale,
@@ -1238,6 +1258,7 @@ final class ProductionCatalogProductContributionRoute extends StatefulWidget {
   const ProductionCatalogProductContributionRoute({
     required this.consentRepository,
     required this.proposalRepository,
+    required this.sourcePreparation,
     required this.inventoryController,
     required this.homeId,
     required this.locale,
@@ -1248,6 +1269,7 @@ final class ProductionCatalogProductContributionRoute extends StatefulWidget {
 
   final CatalogSharingConsentRepository consentRepository;
   final CatalogProposalRepository proposalRepository;
+  final CatalogProductSourcePreparation sourcePreparation;
   final InventoryController inventoryController;
   final String homeId;
   final String locale;
@@ -1270,6 +1292,7 @@ final class _ProductionCatalogProductContributionRouteState
     _controller = CatalogProductContributionController(
       consentRepository: widget.consentRepository,
       proposalService: CatalogProposalService(widget.proposalRepository),
+      sourcePreparation: widget.sourcePreparation,
       homeId: widget.homeId,
       locale: widget.locale,
       canContribute: true,
@@ -2088,6 +2111,7 @@ DriftHouseholdRepository createProductionHouseholdRepository({
   required Future<void> Function() onMutationCommitted,
   DateTime Function()? clock,
   String Function()? idGenerator,
+  StockPreferenceReader? stockPreferenceReader,
 }) {
   return DriftHouseholdRepository(
     database,
@@ -2095,6 +2119,7 @@ DriftHouseholdRepository createProductionHouseholdRepository({
     clock: clock,
     idGenerator: idGenerator,
     onMutationCommitted: onMutationCommitted,
+    stockPreferenceReader: stockPreferenceReader,
   );
 }
 

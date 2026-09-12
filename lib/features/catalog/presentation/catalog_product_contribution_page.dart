@@ -106,6 +106,28 @@ final class _CatalogProductContributionPageState
         actionLabel: 'Try again',
         onAction: controller.loadConsent,
       ),
+      CatalogProductContributionStatus.sourcePending => _ContributionState(
+        icon: Icons.sync_problem_outlined,
+        title: 'Sync this product before sharing',
+        detail:
+            'This product still has unconfirmed changes. Reconnect and finish '
+            'synchronization, or return to Home to review blocked changes. '
+            'Then review and submit the product again.',
+        actionLabel: 'Review and retry',
+        onAction: controller.loadConsent,
+      ),
+      CatalogProductContributionStatus.sourceUnavailable => _ContributionState(
+        icon: Icons.inventory_2_outlined,
+        title: 'Product is no longer available',
+        detail:
+            'Refresh inventory and choose an active product from this home '
+            'before submitting a contribution.',
+        actionLabel: 'Choose another product',
+        onAction: () async {
+          controller.clearSelection();
+          await controller.loadConsent();
+        },
+      ),
       CatalogProductContributionStatus.submitted => _Submitted(
         onAnother: controller.contributeAnother,
       ),
@@ -155,6 +177,18 @@ final class _ContributionForm extends StatelessWidget {
           key: const Key('catalog-contribution-server-consent'),
         ),
         const SizedBox(height: 16),
+        if (controller.status ==
+            CatalogProductContributionStatus.submitting) ...[
+          const LinearProgressIndicator(
+            semanticsLabel:
+                'Synchronizing the product and submitting its reviewed fields',
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Confirming this product is synchronized before submitting its reviewed fields.',
+          ),
+          const SizedBox(height: 16),
+        ],
         if (inventoryLoading)
           const LinearProgressIndicator(
             semanticsLabel: 'Loading inventory products',

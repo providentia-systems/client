@@ -1,4 +1,10 @@
 # Inventory integration roadmap — P0 through P3
+> **Historical planning and checkpoint record.** The phase-specific authentication,
+> administration, deployment and deferred-feature statements below are retained
+> for traceability and do not define the current application. Use
+> [product lifecycle integration](product-lifecycle-integration.md),
+> [current product/access decisions](unification-decision-record.md) and
+> [local development](local-development.md) for the supported runtime.
 
 This roadmap is the shared implementation contract for
 `providentia-systems/backend` and `providentia-systems/client`. The P0–P3
@@ -174,7 +180,7 @@ remains required.
 
 - Backend API: `2.0.0`
 - Client lock SHA-256:
-  `62612d00deaf16ba92ec29d836aa940c16e2370b9925676fe241a1d958941304`
+  `40a8477521baa6c41cf2c5d872068f5ae1bf255a8d0bbccc97a05688d705ad57`
 - Contract additions: public, bounded catalog contributions from API 1.12;
   revision-bound, movement-free stock-count cancellation and precise direct
   extraction versus encrypted private-media disclosure, and a typed paged

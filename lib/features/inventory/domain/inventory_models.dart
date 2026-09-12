@@ -360,6 +360,14 @@ final class StockCountSession {
     return _copy(lines: next);
   }
 
+  StockCountSession removeLine(String lineId) {
+    _requireOpen();
+    if (!lines.any((line) => line.id == lineId)) {
+      throw StateError('The count line is unavailable.');
+    }
+    return _copy(lines: lines.where((line) => line.id != lineId).toList());
+  }
+
   StockCountSession markDuplicateReviewed(String lineId) {
     _requireOpen();
     return _copy(

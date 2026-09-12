@@ -3095,6 +3095,15 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "name": "includeArchived",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
           }
         ],
         "responses": {
@@ -3156,7 +3165,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Location"
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
                 }
               }
             }
@@ -4060,6 +4079,128 @@
             "$ref": "#/components/responses/Problem"
           }
         }
+      },
+      "put": {
+        "operationId": "updateDraftReceipt",
+        "tags": [
+          "Purchasing"
+        ],
+        "description": "Replace editable draft receipt metadata. Source identity is retained. Revision conflicts fail without changing the receipt.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "name": "receiptId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateDraftReceiptRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Revisioned draft change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftReceiptMutationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "cancelDraftReceipt",
+        "tags": [
+          "Purchasing"
+        ],
+        "description": "Cancel an uncommitted draft. Retain its home-private rows for synchronization; committed receipts cannot be cancelled.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "name": "receiptId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftReceiptRevisionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Revisioned draft change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftReceiptMutationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
       }
     },
     "/api/v1/homes/{homeId}/stores": {
@@ -4089,7 +4230,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
                 }
               }
             }
@@ -4101,6 +4252,62 @@
             "$ref": "#/components/responses/Problem"
           },
           "409": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "get": {
+        "operationId": "listStores",
+        "tags": [
+          "Purchasing"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "name": "includeArchived",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Home stores",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Store"
+                      }
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
             "$ref": "#/components/responses/Problem"
           }
         }
@@ -4424,7 +4631,8 @@
           "409": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "description": "Lists the household shopping lists including archived lists, so removal can be reversed. Lines retain identity and history when archived."
       },
       "post": {
         "operationId": "createShoppingList",
@@ -5183,7 +5391,8 @@
                 "required": [
                   "kind",
                   "transmissionConsent",
-                  "image"
+                  "image",
+                  "transmissionPlanHash"
                 ],
                 "properties": {
                   "kind": {
@@ -5219,6 +5428,19 @@
                       "type": "string",
                       "format": "binary"
                     }
+                  },
+                  "transmissionPlanHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$",
+                    "description": "Hash from the exact transmission plan explicitly reviewed by the user."
+                  },
+                  "selectedProfileId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "pattern": "^[A-Za-z0-9-]{1,36}$",
+                    "description": "The reviewed primary resolved profile. Omit only for a legacy settings-only plan."
                   }
                 },
                 "allOf": [
@@ -8224,6 +8446,75 @@
             }
           }
         }
+      },
+      "delete": {
+        "operationId": "deleteAccessGroup",
+        "summary": "Remove an unused custom access group",
+        "tags": [
+          "Platform"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "groupId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnusedConfigurationRemovalRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Configuration removed; audit retained.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "removed"
+                  ],
+                  "properties": {
+                    "removed": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
       }
     },
     "/api/v1/admin/access/{scope}/{subjectId}": {
@@ -8886,6 +9177,75 @@
                 "$ref": "#/components/schemas/PrivacyPolicyRequest"
               }
             }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteDraftPrivacyPolicy",
+        "summary": "Remove an unused unpublished privacy policy draft",
+        "tags": [
+          "Platform"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "policyId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnusedConfigurationRemovalRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Configuration removed; audit retained.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "removed"
+                  ],
+                  "properties": {
+                    "removed": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
           }
         }
       }
@@ -10082,6 +10442,16 @@
               "minimum": 0,
               "default": 0
             }
+          },
+          {
+            "name": "productId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Restrict identities to this product and its related category, unit, pack, variant, alias, and barcode records. Identity-rule filtering returns 422."
           }
         ],
         "responses": {
@@ -10196,6 +10566,1274 @@
           },
           "422": {
             "description": "Invalid request"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/homes/{homeId}/products": {
+      "post": {
+        "operationId": "createOperatorHomeProduct",
+        "tags": [
+          "Administration"
+        ],
+        "summary": "Create household product with operator audit",
+        "description": "Requires homes.manage; owner membership is not required. Archive and restore use status changes with expectedRevision. Referenced identity, category, stock, receipt and quota constraints remain enforced by the inventory domain. Global catalog identity requires the separate catalog curation permission.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HomeId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOperatorHomeProductRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Household record saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedHomeProduct"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/homes/{homeId}/products/{homeProductId}": {
+      "patch": {
+        "operationId": "updateOperatorHomeProduct",
+        "tags": [
+          "Administration"
+        ],
+        "summary": "Update household product with operator audit",
+        "description": "Requires homes.manage; owner membership is not required. Archive and restore use status changes with expectedRevision. Referenced identity, category, stock, receipt and quota constraints remain enforced by the inventory domain. Global catalog identity requires the separate catalog curation permission.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "name": "homeProductId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateOperatorHomeProductRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Household record saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HomeProductMutationResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/homes/{homeId}/categories": {
+      "post": {
+        "operationId": "createOperatorHomeCategory",
+        "tags": [
+          "Administration"
+        ],
+        "summary": "Create household category with operator audit",
+        "description": "Requires homes.manage; owner membership is not required. Archive and restore use status changes with expectedRevision. Referenced identity, category, stock, receipt and quota constraints remain enforced by the inventory domain. Global catalog identity requires the separate catalog curation permission.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HomeId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOperatorHomeCategoryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Household record saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HomeCategory"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/homes/{homeId}/categories/{categoryId}": {
+      "patch": {
+        "operationId": "updateOperatorHomeCategory",
+        "tags": [
+          "Administration"
+        ],
+        "summary": "Update household category with operator audit",
+        "description": "Requires homes.manage; owner membership is not required. Archive and restore use status changes with expectedRevision. Referenced identity, category, stock, receipt and quota constraints remain enforced by the inventory domain. Global catalog identity requires the separate catalog curation permission.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "name": "categoryId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateOperatorHomeCategoryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Household record saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HomeCategory"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/homes/{homeId}/locations/{locationId}": {
+      "patch": {
+        "operationId": "updateHomeLocation",
+        "summary": "Rename, archive, or restore a home location",
+        "description": "Revision-bound metadata changes preserve history. Archive is refused while an open count uses the location.",
+        "tags": [
+          "Inventory"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "name": "locationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateHomeLocationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Household metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Location"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/homes/{homeId}/stores/{storeId}": {
+      "patch": {
+        "operationId": "updateStore",
+        "summary": "Rename, archive, or restore a home store",
+        "description": "Revision-bound metadata changes preserve receipt and price history. Archive is refused while a draft receipt uses the store.",
+        "tags": [
+          "Purchasing"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "name": "storeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateStoreRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Household metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Store"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/homes/{homeId}/stock-preferences/{homeProductId}": {
+      "get": {
+        "operationId": "getOperatorStockPreference",
+        "tags": [
+          "Administration"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "name": "homeProductId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Home replenishment policy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorStockPreference"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "description": "Dedicated operator access independent of home membership or public contribution. Requires homes.read to inspect or homes.manage to save. Mutations require a reason and commit audit, revision history, and the home change feed atomically."
+      },
+      "put": {
+        "operationId": "putOperatorStockPreference",
+        "tags": [
+          "Administration"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "name": "homeProductId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revision-checked home replenishment policy updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevisionResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "minimumQuantity": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "pattern": "^(?:0|[1-9]\\d{0,8})(?:\\.\\d{1,8})?$"
+                  },
+                  "alwaysKeep": {
+                    "type": "boolean"
+                  },
+                  "neverSuggest": {
+                    "type": "boolean"
+                  },
+                  "preferredPackId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "uuid"
+                  },
+                  "leadTimeDays": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 365
+                  },
+                  "targetCoverageDays": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 1,
+                    "maximum": 365
+                  },
+                  "snoozeUntil": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date"
+                  },
+                  "expectedRevision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  }
+                },
+                "required": [
+                  "minimumQuantity",
+                  "alwaysKeep",
+                  "neverSuggest",
+                  "preferredPackId",
+                  "leadTimeDays",
+                  "targetCoverageDays",
+                  "snoozeUntil",
+                  "expectedRevision",
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        "description": "Dedicated operator access independent of home membership or public contribution. Requires homes.read to inspect or homes.manage to save. Mutations require a reason and commit audit, revision history, and the home change feed atomically."
+      }
+    },
+    "/api/v1/admin/homes/{homeId}/locations": {
+      "post": {
+        "operationId": "createOperatorHomeLocation",
+        "tags": [
+          "Administration"
+        ],
+        "summary": "Create household location with operator audit",
+        "description": "Requires homes.manage independently of household membership and public sharing. The ordinary domain rules, revision checks, household isolation and archive guards apply. Before and after records and audit reason are saved atomically with the change feed.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HomeId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOperatorHomeLocationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Household record saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Location"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/homes/{homeId}/locations/{locationId}": {
+      "patch": {
+        "operationId": "updateOperatorHomeLocation",
+        "tags": [
+          "Administration"
+        ],
+        "summary": "Update household location with operator audit",
+        "description": "Requires homes.manage independently of household membership and public sharing. The ordinary domain rules, revision checks, household isolation and archive guards apply. Before and after records and audit reason are saved atomically with the change feed.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "name": "locationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateOperatorHomeLocationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Household record saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Location"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/homes/{homeId}/stores": {
+      "post": {
+        "operationId": "createOperatorHomeStore",
+        "tags": [
+          "Administration"
+        ],
+        "summary": "Create household store with operator audit",
+        "description": "Requires homes.manage independently of household membership and public sharing. The ordinary domain rules, revision checks, household isolation and archive guards apply. Before and after records and audit reason are saved atomically with the change feed.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HomeId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOperatorHomeStoreRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Household record saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Store"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/homes/{homeId}/stores/{storeId}": {
+      "patch": {
+        "operationId": "updateOperatorHomeStore",
+        "tags": [
+          "Administration"
+        ],
+        "summary": "Update household store with operator audit",
+        "description": "Requires homes.manage independently of household membership and public sharing. The ordinary domain rules, revision checks, household isolation and archive guards apply. Before and after records and audit reason are saved atomically with the change feed.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "name": "storeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateOperatorHomeStoreRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Household record saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Store"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/homes/{homeId}/shopping-lists": {
+      "post": {
+        "operationId": "createOperatorShoppingList",
+        "tags": [
+          "Administration"
+        ],
+        "summary": "Create operator ShoppingList",
+        "description": "Requires homes.manage independently of household membership and public sharing. The ordinary shopping rules and recommendation provenance remain authoritative. The record, parent-list revision, change feed and audit before/after are committed atomically. Archive preserves history and supports restoration; conflicts require reload.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HomeId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOperatorShoppingListRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Shopping record saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShoppingList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/homes/{homeId}/shopping-lists/{listId}": {
+      "patch": {
+        "operationId": "updateOperatorShoppingList",
+        "tags": [
+          "Administration"
+        ],
+        "summary": "Update operator ShoppingList",
+        "description": "Requires homes.manage independently of household membership and public sharing. The ordinary shopping rules and recommendation provenance remain authoritative. The record, parent-list revision, change feed and audit before/after are committed atomically. Archive preserves history and supports restoration; conflicts require reload.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "name": "listId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateOperatorShoppingListRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Shopping record saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShoppingList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/homes/{homeId}/shopping-lists/{listId}/lines": {
+      "post": {
+        "operationId": "createOperatorShoppingLine",
+        "tags": [
+          "Administration"
+        ],
+        "summary": "Create operator ShoppingLine",
+        "description": "Requires homes.manage independently of household membership and public sharing. The ordinary shopping rules and recommendation provenance remain authoritative. The record, parent-list revision, change feed and audit before/after are committed atomically. Archive preserves history and supports restoration; conflicts require reload.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "name": "listId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOperatorShoppingLineRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Shopping record saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShoppingListLine"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/homes/{homeId}/shopping-lists/{listId}/lines/{lineId}": {
+      "patch": {
+        "operationId": "updateOperatorShoppingLine",
+        "tags": [
+          "Administration"
+        ],
+        "summary": "Update operator ShoppingLine",
+        "description": "Requires homes.manage independently of household membership and public sharing. The ordinary shopping rules and recommendation provenance remain authoritative. The record, parent-list revision, change feed and audit before/after are committed atomically. Archive preserves history and supports restoration; conflicts require reload.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "name": "listId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "lineId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateOperatorShoppingLineRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Shopping record saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShoppingListLine"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/homes/{homeId}/shopping-lists/{listId}/lines/{lineId}/checked": {
+      "put": {
+        "operationId": "checkOperatorShoppingLine",
+        "tags": [
+          "Administration"
+        ],
+        "summary": "Check operator ShoppingLine",
+        "description": "Requires homes.manage independently of household membership and public sharing. The ordinary shopping rules and recommendation provenance remain authoritative. The record, parent-list revision, change feed and audit before/after are committed atomically. Archive preserves history and supports restoration; conflicts require reload.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "name": "listId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "lineId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckOperatorShoppingLineRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Shopping record saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShoppingListLine"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/homes/{homeId}/stock-count-sessions/{sessionId}/lines/{lineId}/remove": {
+      "post": {
+        "operationId": "removeStockCountLine",
+        "summary": "Remove an erroneous line from an open count",
+        "description": "Revision-bound. Retains the line with removed status and increments the session revision. Removed lines create no stock movement when the count closes. Recounting the product restores the same line identity with its current revision. Closed and cancelled sessions cannot be changed.",
+        "tags": [
+          "Inventory"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "lineId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoveStockCountLineRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Count line removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockCountLineRemoval"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/homes/{homeId}/receipts/{receiptId}/lines/{lineId}": {
+      "put": {
+        "operationId": "updateDraftReceiptLine",
+        "tags": [
+          "Purchasing"
+        ],
+        "description": "Replace editable draft line values and reset approval to unreviewed. Prior match decisions remain superseded history.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "name": "receiptId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "lineId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateDraftReceiptLineRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Revisioned draft change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftReceiptMutationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "removeDraftReceiptLine",
+        "tags": [
+          "Purchasing"
+        ],
+        "description": "Mark a draft line removed and clear its product match. Retain the row for synchronization and omit it from commit, counts and totals.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "name": "receiptId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "lineId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftReceiptRevisionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Revisioned draft change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftReceiptMutationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
           }
         }
       }
@@ -12934,7 +14572,18 @@
               "purchasing.receipt.commit",
               "shopping.list.create",
               "shopping.list-line.create",
-              "shopping.list-line.checked"
+              "shopping.list-line.checked",
+              "shopping.list.update",
+              "shopping.list-line.update",
+              "inventory.location.update",
+              "purchasing.store.update",
+              "shopping.preference.put",
+              "shopping.suggestion-feedback.create",
+              "inventory.count-line.remove",
+              "purchasing.receipt.update",
+              "purchasing.receipt.cancel",
+              "purchasing.receipt-line.update",
+              "purchasing.receipt-line.remove"
             ]
           },
           "entityId": {
@@ -13353,6 +15002,273 @@
                 }
               }
             }
+          },
+          {
+            "if": {
+              "properties": {
+                "commandType": {
+                  "const": "shopping.list.update"
+                }
+              },
+              "required": [
+                "commandType"
+              ]
+            },
+            "then": {
+              "required": [
+                "baseRevision"
+              ],
+              "properties": {
+                "payload": {
+                  "$ref": "#/components/schemas/SyncShoppingListUpdatePayload"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "commandType": {
+                  "const": "shopping.list-line.update"
+                }
+              },
+              "required": [
+                "commandType"
+              ]
+            },
+            "then": {
+              "required": [
+                "baseRevision"
+              ],
+              "properties": {
+                "payload": {
+                  "$ref": "#/components/schemas/SyncShoppingListLineUpdatePayload"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "commandType": {
+                  "const": "inventory.location.update"
+                }
+              },
+              "required": [
+                "commandType"
+              ]
+            },
+            "then": {
+              "required": [
+                "baseRevision"
+              ],
+              "properties": {
+                "payload": {
+                  "$ref": "#/components/schemas/SyncInventoryLocationUpdatePayload"
+                },
+                "baseRevision": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "commandType": {
+                  "const": "purchasing.store.update"
+                }
+              },
+              "required": [
+                "commandType"
+              ]
+            },
+            "then": {
+              "required": [
+                "baseRevision"
+              ],
+              "properties": {
+                "payload": {
+                  "$ref": "#/components/schemas/SyncStoreUpdatePayload"
+                },
+                "baseRevision": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "commandType": {
+                  "const": "shopping.preference.put"
+                }
+              },
+              "required": [
+                "commandType"
+              ]
+            },
+            "then": {
+              "required": [
+                "baseRevision"
+              ],
+              "properties": {
+                "payload": {
+                  "$ref": "#/components/schemas/SyncStockPreferencePutPayload"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "commandType": {
+                  "const": "shopping.suggestion-feedback.create"
+                }
+              },
+              "required": [
+                "commandType"
+              ]
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "#/components/schemas/SyncShoppingSuggestionFeedbackCreatePayload"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "commandType": {
+                  "const": "inventory.count-line.remove"
+                }
+              },
+              "required": [
+                "commandType"
+              ]
+            },
+            "then": {
+              "required": [
+                "baseRevision"
+              ],
+              "properties": {
+                "baseRevision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "payload": {
+                  "$ref": "#/components/schemas/SyncCountLineRemovePayload"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "commandType": {
+                  "const": "purchasing.receipt.update"
+                }
+              },
+              "required": [
+                "commandType"
+              ]
+            },
+            "then": {
+              "required": [
+                "baseRevision"
+              ],
+              "properties": {
+                "baseRevision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "payload": {
+                  "$ref": "#/components/schemas/SyncReceiptUpdatePayload"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "commandType": {
+                  "const": "purchasing.receipt.cancel"
+                }
+              },
+              "required": [
+                "commandType"
+              ]
+            },
+            "then": {
+              "required": [
+                "baseRevision"
+              ],
+              "properties": {
+                "baseRevision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "payload": {
+                  "$ref": "#/components/schemas/SyncEmptyPayload"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "commandType": {
+                  "const": "purchasing.receipt-line.update"
+                }
+              },
+              "required": [
+                "commandType"
+              ]
+            },
+            "then": {
+              "required": [
+                "baseRevision"
+              ],
+              "properties": {
+                "baseRevision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "payload": {
+                  "$ref": "#/components/schemas/SyncReceiptLineUpdatePayload"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "commandType": {
+                  "const": "purchasing.receipt-line.remove"
+                }
+              },
+              "required": [
+                "commandType"
+              ]
+            },
+            "then": {
+              "required": [
+                "baseRevision"
+              ],
+              "properties": {
+                "baseRevision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "payload": {
+                  "$ref": "#/components/schemas/SyncReceiptLineRemovePayload"
+                }
+              }
+            }
           }
         ]
       },
@@ -13722,6 +15638,14 @@
           },
           "quantity": {
             "type": "string"
+          },
+          "suggestionId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Optional current recommendation for this home product. The server derives provenance and records acceptance in the same transaction as a successful addition."
           }
         }
       },
@@ -14041,37 +15965,47 @@
       },
       "Location": {
         "type": "object",
-        "required": [
-          "id",
-          "homeId",
-          "name",
-          "kind",
-          "status",
-          "revision"
-        ],
+        "additionalProperties": true,
         "properties": {
           "id": {
             "type": "string",
             "format": "uuid"
           },
-          "homeId": {
-            "type": "string",
-            "format": "uuid"
-          },
           "name": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
           },
           "kind": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "pantry",
+              "shelf",
+              "fridge",
+              "freezer",
+              "household",
+              "other"
+            ]
           },
           "status": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
           },
           "revision": {
             "type": "integer",
             "minimum": 1
           }
-        }
+        },
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "status",
+          "revision"
+        ]
       },
       "HomeProduct": {
         "type": "object",
@@ -14511,7 +16445,13 @@
             "type": "string"
           },
           "status": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "confirmed",
+              "outstanding",
+              "removed"
+            ],
+            "description": "Removed rows remain in synchronization history but are excluded from active count results and reconciliation."
           },
           "revision": {
             "type": "integer",
@@ -14648,7 +16588,8 @@
               "unreviewed",
               "approved",
               "unresolved",
-              "approved-catalog"
+              "approved-catalog",
+              "removed"
             ]
           },
           "revision": {
@@ -14788,6 +16729,29 @@
           "revision": {
             "type": "integer",
             "minimum": 1
+          },
+          "archivedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Removal timestamp; the line is retained for restoration and history."
+          },
+          "suggestionId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Server-verified recommendation provenance retained across devices."
+          },
+          "selectedPackId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Server-verified recommendation provenance retained across devices."
           }
         }
       },
@@ -14939,7 +16903,7 @@
               "null"
             ],
             "format": "uuid",
-            "description": "Home-private category. It is valid only for a product created with privateName."
+            "description": "Optional category within this household for either a private or catalog-backed home product. It does not change the global catalog category or identity."
           }
         }
       },
@@ -15352,6 +17316,16 @@
           },
           "credentialEncryptionAvailable": {
             "type": "boolean"
+          },
+          "transmissionPlan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AiTransmissionPlan"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -15979,7 +17953,8 @@
         "required": [
           "kind",
           "transmissionConsent",
-          "assetIds"
+          "assetIds",
+          "transmissionPlanHash"
         ],
         "properties": {
           "kind": {
@@ -16012,6 +17987,19 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          "transmissionPlanHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "description": "Hash from the exact transmission plan explicitly reviewed by the user."
+          },
+          "selectedProfileId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9-]{1,36}$",
+            "description": "The reviewed primary resolved profile. Omit only for a legacy settings-only plan."
           }
         },
         "allOf": [
@@ -20498,6 +22486,1461 @@
             "type": "integer",
             "minimum": 0,
             "description": "Zero creates a new identity with a client-generated UUID; edits and archive/restore require the current revision."
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      },
+      "SyncShoppingListUpdatePayload": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "status"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "archived"
+            ]
+          }
+        }
+      },
+      "SyncShoppingListLineUpdatePayload": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "listId",
+          "description",
+          "quantity",
+          "archived"
+        ],
+        "properties": {
+          "listId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 191
+          },
+          "quantity": {
+            "type": "string"
+          },
+          "archived": {
+            "type": "boolean"
+          }
+        }
+      },
+      "CreateOperatorHomeProductRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "productId"
+            ],
+            "properties": {
+              "productId": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          },
+          {
+            "required": [
+              "packId"
+            ],
+            "properties": {
+              "packId": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          },
+          {
+            "required": [
+              "privateName"
+            ],
+            "properties": {
+              "privateName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 191
+              }
+            }
+          }
+        ],
+        "properties": {
+          "productId": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "packId": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "privateName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 191
+          },
+          "originalPackText": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 191
+          },
+          "homeCategoryId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Optional category within this household for either a private or catalog-backed home product. It does not change the global catalog category or identity."
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "const": 0
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "reason",
+          "expectedRevision",
+          "id"
+        ],
+        "description": "Requires homes.manage. The audit reason, prior record, and result are persisted atomically with the household mutation and change feed. Household ownership and public contribution consent are independent of operator access."
+      },
+      "UpdateOperatorHomeProductRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedRevision",
+          "reason"
+        ],
+        "anyOf": [
+          {
+            "required": [
+              "privateName"
+            ]
+          },
+          {
+            "required": [
+              "originalPackText"
+            ]
+          },
+          {
+            "required": [
+              "homeCategoryId"
+            ]
+          },
+          {
+            "required": [
+              "status"
+            ]
+          }
+        ],
+        "properties": {
+          "privateName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 191
+          },
+          "originalPackText": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 191
+          },
+          "homeCategoryId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "status": {
+            "$ref": "#/components/schemas/HomeCategoryStatus"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        },
+        "description": "Requires homes.manage. The audit reason, prior record, and result are persisted atomically with the household mutation and change feed. Household ownership and public contribution consent are independent of operator access."
+      },
+      "CreateOperatorHomeCategoryRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "reason",
+          "expectedRevision",
+          "id"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 191
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "const": 0
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "description": "Requires homes.manage. The audit reason, prior record, and result are persisted atomically with the household mutation and change feed. Household ownership and public contribution consent are independent of operator access."
+      },
+      "UpdateOperatorHomeCategoryRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedRevision",
+          "reason"
+        ],
+        "anyOf": [
+          {
+            "required": [
+              "name"
+            ]
+          },
+          {
+            "required": [
+              "status"
+            ]
+          }
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 191
+          },
+          "status": {
+            "$ref": "#/components/schemas/HomeCategoryStatus"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        },
+        "description": "Requires homes.manage. The audit reason, prior record, and result are persisted atomically with the household mutation and change feed. Household ownership and public contribution consent are independent of operator access."
+      },
+      "AiTransmissionRecipient": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "profileId",
+          "revision",
+          "provider",
+          "model",
+          "endpoint"
+        ],
+        "properties": {
+          "profileId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9-]{1,36}$"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "provider": {
+            "type": "string",
+            "minLength": 1
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1
+          },
+          "endpoint": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          }
+        }
+      },
+      "AiTransmissionPlan": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "settingsRevision",
+          "policyRevision",
+          "extractionProfiles",
+          "validationProfile",
+          "sha256"
+        ],
+        "properties": {
+          "settingsRevision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "policyRevision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "extractionProfiles": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "items": {
+              "$ref": "#/components/schemas/AiTransmissionRecipient"
+            }
+          },
+          "validationProfile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AiTransmissionRecipient"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "description": "Opaque hash binding the exact resolved recipients, their revisions, the settings and policy revisions, and the authenticated household/person."
+          }
+        }
+      },
+      "UpdateHomeLocationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "pantry",
+              "shelf",
+              "fridge",
+              "freezer",
+              "household",
+              "other"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "expectedRevision"
+        ],
+        "anyOf": [
+          {
+            "required": [
+              "name"
+            ]
+          },
+          {
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "required": [
+              "status"
+            ]
+          }
+        ]
+      },
+      "SyncInventoryLocationUpdatePayload": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "pantry",
+              "shelf",
+              "fridge",
+              "freezer",
+              "household",
+              "other"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          }
+        },
+        "required": [],
+        "minProperties": 1
+      },
+      "Store": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 191
+          },
+          "location": {
+            "type": "string",
+            "maxLength": 191
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "location",
+          "status",
+          "revision"
+        ]
+      },
+      "UpdateStoreRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 191
+          },
+          "location": {
+            "type": "string",
+            "maxLength": 191
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "expectedRevision"
+        ],
+        "anyOf": [
+          {
+            "required": [
+              "name"
+            ]
+          },
+          {
+            "required": [
+              "location"
+            ]
+          },
+          {
+            "required": [
+              "status"
+            ]
+          }
+        ]
+      },
+      "SyncStoreUpdatePayload": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 191
+          },
+          "location": {
+            "type": "string",
+            "maxLength": 191
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          }
+        },
+        "required": [],
+        "minProperties": 1
+      },
+      "OperatorStockPreference": {
+        "type": "object",
+        "required": [
+          "homeProductId",
+          "minimumQuantity",
+          "alwaysKeep",
+          "neverSuggest",
+          "preferredPackId",
+          "leadTimeDays",
+          "targetCoverageDays",
+          "snoozeUntil",
+          "revision",
+          "packOptions"
+        ],
+        "properties": {
+          "homeProductId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "minimumQuantity": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixedDecimal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "alwaysKeep": {
+            "type": "boolean"
+          },
+          "neverSuggest": {
+            "type": "boolean"
+          },
+          "preferredPackId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "leadTimeDays": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "targetCoverageDays": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1
+          },
+          "snoozeUntil": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "packOptions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "label"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "label": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "SyncStockPreferencePutPayload": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "minimumQuantity": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^(?:0|[1-9]\\d{0,8})(?:\\.\\d{1,8})?$"
+          },
+          "alwaysKeep": {
+            "type": "boolean"
+          },
+          "neverSuggest": {
+            "type": "boolean"
+          },
+          "preferredPackId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "leadTimeDays": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 365
+          },
+          "targetCoverageDays": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 365
+          },
+          "snoozeUntil": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          }
+        },
+        "required": [
+          "minimumQuantity",
+          "alwaysKeep",
+          "neverSuggest",
+          "preferredPackId",
+          "leadTimeDays",
+          "targetCoverageDays",
+          "snoozeUntil"
+        ]
+      },
+      "CreateOperatorHomeLocationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedRevision",
+          "reason",
+          "id",
+          "name",
+          "kind"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "pantry",
+              "shelf",
+              "fridge",
+              "freezer",
+              "household",
+              "other"
+            ]
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "const": 0
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "UpdateOperatorHomeLocationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedRevision",
+          "reason"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "pantry",
+              "shelf",
+              "fridge",
+              "freezer",
+              "household",
+              "other"
+            ]
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          }
+        },
+        "anyOf": [
+          {
+            "required": [
+              "name"
+            ]
+          },
+          {
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "required": [
+              "status"
+            ]
+          }
+        ]
+      },
+      "CreateOperatorHomeStoreRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedRevision",
+          "reason",
+          "id",
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 191
+          },
+          "location": {
+            "type": "string",
+            "maxLength": 191
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "const": 0
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "UpdateOperatorHomeStoreRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedRevision",
+          "reason"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 191
+          },
+          "location": {
+            "type": "string",
+            "maxLength": 191
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          }
+        },
+        "anyOf": [
+          {
+            "required": [
+              "name"
+            ]
+          },
+          {
+            "required": [
+              "location"
+            ]
+          },
+          {
+            "required": [
+              "status"
+            ]
+          }
+        ]
+      },
+      "SyncShoppingSuggestionFeedbackCreatePayload": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "suggestionId",
+          "decision",
+          "resultQuantity",
+          "reason"
+        ],
+        "properties": {
+          "suggestionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "edited",
+              "dismissed",
+              "snoozed"
+            ]
+          },
+          "resultQuantity": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 191
+          }
+        }
+      },
+      "CreateOperatorShoppingListRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "reason",
+          "expectedRevision",
+          "id"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "manual",
+              "mixed",
+              "suggested"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "const": 0
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "UpdateOperatorShoppingListRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "reason",
+          "expectedRevision"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "archived"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "anyOf": [
+          {
+            "required": [
+              "name"
+            ]
+          },
+          {
+            "required": [
+              "status"
+            ]
+          }
+        ]
+      },
+      "CreateOperatorShoppingLineRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "description",
+          "quantityToBuy",
+          "expectedListRevision",
+          "reason",
+          "expectedRevision",
+          "id"
+        ],
+        "properties": {
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 191
+          },
+          "quantityToBuy": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,8})?$",
+            "description": "Exact decimal; must be greater than zero."
+          },
+          "homeProductId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "expectedListRevision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "const": 0
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "UpdateOperatorShoppingLineRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "reason",
+          "expectedRevision"
+        ],
+        "properties": {
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 191
+          },
+          "quantityToBuy": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,8})?$",
+            "description": "Exact decimal; must be greater than zero."
+          },
+          "archived": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "anyOf": [
+          {
+            "required": [
+              "description"
+            ]
+          },
+          {
+            "required": [
+              "quantityToBuy"
+            ]
+          },
+          {
+            "required": [
+              "archived"
+            ]
+          }
+        ]
+      },
+      "CheckOperatorShoppingLineRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "checked",
+          "reason",
+          "expectedRevision"
+        ],
+        "properties": {
+          "checked": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "RemoveStockCountLineRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedRevision"
+        ],
+        "properties": {
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "StockCountLineRemoval": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "sessionId",
+          "status",
+          "revision"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sessionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "const": "removed"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 2
+          }
+        }
+      },
+      "SyncCountLineRemovePayload": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sessionId"
+        ],
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "UpdateDraftReceiptRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "storeId",
+          "purchaseDate",
+          "currency",
+          "totalAmount",
+          "notes",
+          "expectedRevision"
+        ],
+        "properties": {
+          "storeId": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "purchaseDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "currency": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 3
+          },
+          "totalAmount": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "notes": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "UpdateDraftReceiptLineRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "rawDescription",
+          "quantity",
+          "originalPackText",
+          "unitPrice",
+          "lineTotal",
+          "expectedRevision"
+        ],
+        "properties": {
+          "rawDescription": {
+            "type": "string",
+            "minLength": 1
+          },
+          "quantity": {
+            "type": "string",
+            "pattern": "^-?(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,8})?$"
+          },
+          "originalPackText": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unitPrice": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lineTotal": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "DraftReceiptRevisionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedRevision"
+        ],
+        "properties": {
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "DraftReceiptMutationResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "revision"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "SyncReceiptUpdatePayload": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "storeId",
+          "purchaseDate",
+          "currency",
+          "totalAmount",
+          "notes"
+        ],
+        "properties": {
+          "storeId": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "purchaseDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "currency": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 3
+          },
+          "totalAmount": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "notes": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        }
+      },
+      "SyncReceiptLineUpdatePayload": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "receiptId",
+          "rawDescription",
+          "quantity",
+          "originalPackText",
+          "unitPrice",
+          "lineTotal"
+        ],
+        "properties": {
+          "receiptId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "rawDescription": {
+            "type": "string",
+            "minLength": 1
+          },
+          "quantity": {
+            "type": "string",
+            "pattern": "^-?(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,8})?$"
+          },
+          "originalPackText": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unitPrice": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lineTotal": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "SyncReceiptLineRemovePayload": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "receiptId"
+        ],
+        "properties": {
+          "receiptId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "UnusedConfigurationRemovalRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedRevision",
+          "reason"
+        ],
+        "properties": {
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1
           },
           "reason": {
             "type": "string",

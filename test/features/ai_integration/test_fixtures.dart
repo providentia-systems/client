@@ -1,5 +1,6 @@
 import 'package:providentia/features/ai_integration/application/ai_ports.dart';
 import 'package:providentia/features/ai_integration/domain/ai_models.dart';
+import 'package:providentia/features/ai_integration/domain/ai_transmission_plan.dart';
 
 AiProviderProfile serverProvider({
   int revision = 1,
@@ -266,6 +267,7 @@ final class FakeMediaPreparation implements AiMediaPreparationPort {
 
   final PreparedMediaBatch batch;
   int discardCalls = 0;
+  int prepareCalls = 0;
 
   @override
   Future<void> discard(PreparedMediaBatch batch) async {
@@ -277,7 +279,10 @@ final class FakeMediaPreparation implements AiMediaPreparationPort {
     required String homeId,
     required AiExtractionKind purpose,
     required List<AiMediaAsset> assets,
-  }) async => batch;
+  }) async {
+    prepareCalls++;
+    return batch;
+  }
 }
 
 final class FakeProviderRepository implements AiProviderRepository {
@@ -506,3 +511,20 @@ final class FakeIdentifiers implements AiIdentifierFactory {
     return 'run-$_next';
   }
 }
+
+AiTransmissionPlan serverTransmissionPlan(AiProviderProfile profile) =>
+    AiTransmissionPlan(
+      settingsRevision: 1,
+      policyRevision: 1,
+      extractionProfiles: <AiTransmissionRecipient>[
+        AiTransmissionRecipient(
+          profileId: profile.id,
+          revision: profile.revision,
+          provider: profile.providerWireId,
+          model: profile.model,
+          endpoint: profile.endpoint?.toString(),
+        ),
+      ],
+      validationProfile: null,
+      sha256: 'a' * 64,
+    );

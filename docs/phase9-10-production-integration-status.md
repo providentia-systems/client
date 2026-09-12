@@ -1,4 +1,10 @@
 # Phase 9–10 production integration status
+> **Historical planning and checkpoint record.** The phase-specific authentication,
+> administration, deployment and deferred-feature statements below are retained
+> for traceability and do not define the current application. Use
+> [product lifecycle integration](product-lifecycle-integration.md),
+> [current product/access decisions](unification-decision-record.md) and
+> [local development](local-development.md) for the supported runtime.
 
 > Historical checkpoint (2026-08-11, API 1.13.2). Current release status is
 > defined by `README.md`, `docs/contracts.md`, and exact-head workflow results.

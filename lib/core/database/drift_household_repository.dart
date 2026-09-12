@@ -6,11 +6,18 @@ import 'package:providentia/core/database/app_database.dart';
 import 'package:providentia/core/database/client_local_record_types.dart';
 import 'package:providentia/core/security/uuid_v4.dart';
 import 'package:providentia/core/synchronization/sync_models.dart';
+import 'package:providentia/features/inventory/application/home_location_repository.dart';
 import 'package:providentia/features/inventory/application/inventory_repository.dart';
+import 'package:providentia/features/inventory/application/stock_preference_repository.dart';
 import 'package:providentia/features/inventory/domain/inventory_models.dart';
+import 'package:providentia/features/inventory/domain/stock_preference.dart';
+import 'package:providentia/features/purchasing/application/purchase_draft_maintenance_repository.dart';
 import 'package:providentia/features/purchasing/application/purchase_repository.dart';
+import 'package:providentia/features/purchasing/application/purchase_store_repository.dart';
 import 'package:providentia/features/purchasing/domain/purchase_models.dart';
+import 'package:providentia/features/shopping/application/online_shopping_suggestion_repository.dart';
 import 'package:providentia/features/shopping/application/shopping_repository.dart';
+import 'package:providentia/features/shopping/domain/online_shopping_suggestion_models.dart';
 import 'package:providentia/features/shopping/domain/shopping_models.dart';
 
 final class BaselineImportReport {
@@ -48,14 +55,21 @@ final class DriftHouseholdRepository
     implements
         InventoryProductCreationRepository,
         InventoryMetadataRepository,
+        HomeLocationRepository,
+        PurchaseStoreRepository,
+        StockPreferenceRepository,
         PurchaseCaptureRepository,
-        ShoppingRepository {
+        PurchaseDraftMaintenanceRepository,
+        ShoppingRepository,
+        ShoppingListLifecycleRepository,
+        ShoppingSuggestionFeedbackQueue {
   factory DriftHouseholdRepository(
     AppDatabase database, {
     DateTime Function()? clock,
     String? deviceId,
     String Function()? idGenerator,
     Future<void> Function()? onMutationCommitted,
+    StockPreferenceReader? stockPreferenceReader,
   }) {
     if (deviceId != null && !isUuid(deviceId)) {
       throw ArgumentError.value(deviceId, 'deviceId', 'must be a UUID');
@@ -71,6 +85,7 @@ final class DriftHouseholdRepository
       deviceId,
       idGenerator ?? UuidV4Generator().call,
       onMutationCommitted,
+      stockPreferenceReader,
     );
   }
 
@@ -80,6 +95,7 @@ final class DriftHouseholdRepository
     this._deviceId,
     this._idGenerator,
     this._onMutationCommitted,
+    this._stockPreferenceReader,
   );
 
   static const String _inventoryItemType = 'phase5.inventory-item';
@@ -113,13 +129,18 @@ final class DriftHouseholdRepository
   static const String _serverCountSessionType = 'inventory-count-session';
   static const String _serverCountLineType = 'inventory-count-line';
   static const String _storeType = 'purchasing-store';
+  static const String _locationType = 'inventory-location';
   static const String _receiptType = 'purchasing-receipt';
   static const String _receiptLineType = 'purchasing-receipt-line';
   static const String _serverShoppingListType = 'shopping-list';
   static const String _serverShoppingLineType = 'shopping-list-line';
+  static const String _shoppingFeedbackType = 'shopping-suggestion-feedback';
   static const String _shoppingSuggestionLineLinkType =
       ClientLocalRecordTypes.shoppingSuggestionLineLink;
 
+  static const String _stockPreferenceType = 'shopping-stock-preference';
+
+  final StockPreferenceReader? _stockPreferenceReader;
   final AppDatabase _database;
   final DateTime Function() _clock;
   final String? _deviceId;
@@ -180,6 +201,345 @@ final class DriftHouseholdRepository
           );
         }).toList()..sort((a, b) => a.name.compareTo(b.name)),
       );
+
+  @override
+  bool get supportsStockPreferences => _synchronizesMutations;
+
+  @override
+  Future<StockPreference> loadStockPreference({
+    required String homeId,
+    required String productId,
+  }) async {
+    _requireHomeUuid(homeId);
+    _requireUuid(productId, 'home product');
+    final product = await _record(
+      homeId: homeId,
+      entityType: _homeProductType,
+      entityId: productId,
+    );
+    if (product == null ||
+        _validatedProjection(product, homeId)['status'] != 'active') {
+      throw StateError('The product is unavailable.');
+    }
+    StockPreference decode(LocalRecord row) => StockPreference.fromFields(
+      homeId: homeId,
+      homeProductId: productId,
+      revision: row.revision,
+      fields: _validatedProjection(row, homeId),
+    );
+    final cached = await _record(
+      homeId: homeId,
+      entityType: _stockPreferenceType,
+      entityId: productId,
+    );
+    if (await _hasPendingPreferenceCommand(
+      homeId,
+      productId,
+      'shopping.preference.put',
+    )) {
+      if (cached == null) {
+        throw StateError('The pending preference is unavailable.');
+      }
+      return decode(cached);
+    }
+    final newlyCreated = await _hasPendingPreferenceCommand(
+      homeId,
+      productId,
+      'inventory.home-product.create',
+    );
+    final StockPreference preference;
+    if (newlyCreated) {
+      preference = cached == null
+          ? StockPreference(
+              homeId: homeId,
+              homeProductId: productId,
+              revision: 0,
+            )
+          : decode(cached);
+    } else {
+      final reader = _stockPreferenceReader;
+      if (reader == null) {
+        if (cached != null) return decode(cached);
+        throw const StockPreferenceUnavailable();
+      }
+      try {
+        preference = await reader.read(homeId: homeId, productId: productId);
+      } on StockPreferenceUnavailable {
+        if (cached != null) return decode(cached);
+        rethrow;
+      }
+      if (preference.homeId != homeId ||
+          preference.homeProductId != productId) {
+        throw StateError('Stock preference access was rejected.');
+      }
+    }
+    return _database.transaction(() async {
+      final activeProduct = await _record(
+        homeId: homeId,
+        entityType: _homeProductType,
+        entityId: productId,
+      );
+      if (activeProduct == null ||
+          _validatedProjection(activeProduct, homeId)['status'] != 'active') {
+        throw StateError('Product access changed while loading preferences.');
+      }
+      final current = await _record(
+        homeId: homeId,
+        entityType: _stockPreferenceType,
+        entityId: productId,
+      );
+      if (current != null &&
+          (current.revision > preference.revision ||
+              await _hasPendingPreferenceCommand(
+                homeId,
+                productId,
+                'shopping.preference.put',
+              ))) {
+        return decode(current);
+      }
+      await _writeProjection(
+        homeId: homeId,
+        entityType: _stockPreferenceType,
+        entityId: productId,
+        revision: preference.revision,
+        representation: {'homeProductId': productId, ...preference.fields},
+        at: _clock(),
+      );
+      return preference;
+    });
+  }
+
+  @override
+  Future<void> saveStockPreference(StockPreference preference) async {
+    if (!supportsStockPreferences) {
+      throw StateError('Synchronization is required.');
+    }
+    final at = _clock().toUtc();
+    await _database.transaction(() async {
+      final product = await _record(
+        homeId: preference.homeId,
+        entityType: _homeProductType,
+        entityId: preference.homeProductId,
+      );
+      if (product == null ||
+          _validatedProjection(product, preference.homeId)['status'] !=
+              'active') {
+        throw StateError('The product is unavailable.');
+      }
+      final previous = await _record(
+        homeId: preference.homeId,
+        entityType: _stockPreferenceType,
+        entityId: preference.homeProductId,
+      );
+      if (previous == null || previous.revision != preference.revision) {
+        throw StateError('Stock preferences changed. Reload before saving.');
+      }
+      await _writeProjection(
+        homeId: preference.homeId,
+        entityType: _stockPreferenceType,
+        entityId: preference.homeProductId,
+        revision: preference.revision + 1,
+        representation: {
+          'homeProductId': preference.homeProductId,
+          ...preference.fields,
+        },
+        at: at,
+      );
+      await _insertGeneratedCommand(
+        homeId: preference.homeId,
+        entityType: _stockPreferenceType,
+        entityId: preference.homeProductId,
+        commandType: 'shopping.preference.put',
+        baseRevision: preference.revision,
+        payload: preference.fields,
+        at: at,
+      );
+    });
+    _triggerForegroundSync();
+  }
+
+  Future<bool> _hasPendingPreferenceCommand(
+    String homeId,
+    String productId,
+    String command,
+  ) async {
+    final query = _database.select(_database.clientOperations)
+      ..where(
+        (row) =>
+            row.homeId.equals(homeId) &
+            row.entityId.equals(productId) &
+            row.operationType.equals(command) &
+            row.state.isNotIn([
+              ClientOperationState.acknowledged.storageValue,
+              ClientOperationState.superseded.storageValue,
+            ]),
+      );
+    return (await query.get()).isNotEmpty;
+  }
+
+  @override
+  bool get supportsHomeLocations => _synchronizesMutations;
+
+  @override
+  bool get supportsPurchaseStores => _synchronizesMutations;
+
+  @override
+  Stream<List<HomeLocation>> watchHomeLocations(String homeId) =>
+      _watchRecordTypes(homeId: homeId, entityTypes: const {_locationType}).map(
+        (rows) => rows.map((row) {
+          final data = _validatedProjection(row, homeId);
+          return HomeLocation(
+            id: row.entityId,
+            name: _requiredString(data, 'name'),
+            kind: _requiredString(data, 'kind'),
+            revision: row.revision,
+            archived: data['status'] == 'archived',
+          );
+        }).toList()..sort((a, b) => a.name.compareTo(b.name)),
+      );
+
+  @override
+  Stream<List<PurchaseStore>> watchPurchaseStores(String homeId) =>
+      _watchRecordTypes(homeId: homeId, entityTypes: const {_storeType}).map(
+        (rows) => rows.map((row) {
+          final data = _validatedProjection(row, homeId);
+          return PurchaseStore(
+            id: row.entityId,
+            name: _requiredString(data, 'name'),
+            location: _optionalString(data['location']),
+            revision: row.revision,
+            archived: data['status'] == 'archived',
+          );
+        }).toList()..sort((a, b) => a.name.compareTo(b.name)),
+      );
+
+  @override
+  Future<void> saveHomeLocation({
+    required String homeId,
+    String? locationId,
+    required String name,
+    required String kind,
+    required bool archived,
+    int? expectedRevision,
+  }) {
+    if (!HomeLocation.kinds.contains(kind)) {
+      throw ArgumentError('Choose a supported location kind.');
+    }
+    return _saveHouseholdPlace(
+      homeId: homeId,
+      id: locationId,
+      name: name,
+      detail: kind,
+      isStore: false,
+      archived: archived,
+      expectedRevision: expectedRevision,
+    );
+  }
+
+  @override
+  Future<void> savePurchaseStore({
+    required String homeId,
+    String? storeId,
+    required String name,
+    required String location,
+    required bool archived,
+    int? expectedRevision,
+  }) => _saveHouseholdPlace(
+    homeId: homeId,
+    id: storeId,
+    name: name,
+    detail: location,
+    isStore: true,
+    archived: archived,
+    expectedRevision: expectedRevision,
+  );
+
+  Future<void> _saveHouseholdPlace({
+    required String homeId,
+    required String? id,
+    required String name,
+    required String detail,
+    required bool isStore,
+    required bool archived,
+    required int? expectedRevision,
+  }) async {
+    if (!_synchronizesMutations) {
+      throw StateError('Synchronization is required.');
+    }
+    _requireHomeUuid(homeId);
+    if (id != null) _requireUuid(id, 'household place');
+    final label = name.trim();
+    final location = detail.trim();
+    if (label.isEmpty ||
+        label.length > (isStore ? 191 : 120) ||
+        location.length > 191) {
+      throw ArgumentError('Enter a valid name and location.');
+    }
+    if (id == null && archived) {
+      throw ArgumentError('New places must be active.');
+    }
+    final type = isStore ? _storeType : _locationType;
+    final field = isStore ? 'location' : 'kind';
+    final prefix = isStore ? 'purchasing.store' : 'inventory.location';
+    final at = _clock().toUtc();
+    await _database.transaction(() async {
+      final entityId = id ?? _nextUuid('household place');
+      final previous = await _record(
+        homeId: homeId,
+        entityType: type,
+        entityId: entityId,
+      );
+      if (id != null &&
+          (previous == null || previous.revision != expectedRevision)) {
+        throw StateError('This place changed. Refresh and try again.');
+      }
+      if (archived) {
+        final references =
+            await (_database.select(_database.localRecords)..where(
+                  (row) =>
+                      row.homeId.equals(homeId) &
+                      row.entityType.equals(
+                        isStore ? _receiptType : _serverCountSessionType,
+                      ),
+                ))
+                .get();
+        for (final row in references) {
+          final data = _validatedProjection(row, homeId);
+          if (data[isStore ? 'storeId' : 'locationId'] == entityId &&
+              data['status'] == (isStore ? 'draft' : 'open')) {
+            throw StateError(
+              isStore
+                  ? 'Finish or discard the draft receipt before removing this store.'
+                  : 'Close the open stock count before removing this location.',
+            );
+          }
+        }
+      }
+      final payload = <String, Object?>{
+        'name': label,
+        field: location,
+        'status': archived ? 'archived' : 'active',
+      };
+      await _writeProjection(
+        homeId: homeId,
+        entityType: type,
+        entityId: entityId,
+        revision: (previous?.revision ?? 0) + 1,
+        representation: payload,
+        at: at,
+      );
+      await _insertGeneratedCommand(
+        homeId: homeId,
+        entityType: type,
+        entityId: entityId,
+        commandType: '$prefix.${previous == null ? 'create' : 'update'}',
+        baseRevision: previous?.revision,
+        payload: previous == null ? {'name': label, field: location} : payload,
+        at: at,
+      );
+    });
+    _triggerForegroundSync();
+  }
 
   @override
   Future<void> saveHomeCategory({
@@ -954,6 +1314,232 @@ final class DriftHouseholdRepository
   }
 
   @override
+  Future<PurchaseMutationResult> updateReceiptDraft({
+    required String receiptId,
+    required int expectedRevision,
+    required PurchaseReceiptDraftRequest draft,
+  }) => _changeReceiptDraft(
+    homeId: draft.homeId,
+    receiptId: receiptId,
+    expectedRevision: expectedRevision,
+    commandType: 'purchasing.receipt.update',
+    fields: {
+      'storeId': draft.storeId,
+      'purchaseDate': _dateOnly(draft.purchaseDate),
+      'currency': draft.currency.trim().toUpperCase(),
+      'totalAmount': draft.total == null ? null : _moneyDecimal(draft.total!),
+      'notes': draft.notes.trim(),
+    },
+  );
+
+  @override
+  Future<PurchaseMutationResult> cancelReceiptDraft({
+    required String homeId,
+    required String receiptId,
+    required int expectedRevision,
+  }) => _changeReceiptDraft(
+    homeId: homeId,
+    receiptId: receiptId,
+    expectedRevision: expectedRevision,
+    commandType: 'purchasing.receipt.cancel',
+    fields: const {'status': 'cancelled'},
+  );
+
+  Future<PurchaseMutationResult> _changeReceiptDraft({
+    required String homeId,
+    required String receiptId,
+    required int expectedRevision,
+    required String commandType,
+    required Map<String, Object?> fields,
+  }) async {
+    _requireSynchronizedPurchasing();
+    _requireHomeUuid(homeId);
+    _requireUuid(receiptId, 'purchase receipt');
+    final at = _clock().toUtc();
+    final result = await _database.transaction<PurchaseMutationResult>(
+      () async {
+        final receipt = await _requiredDraftReceipt(
+          homeId: homeId,
+          receiptId: receiptId,
+        );
+        if (receipt.revision != expectedRevision) {
+          throw const PurchaseCaptureException(
+            'This draft changed. Reopen it before saving.',
+          );
+        }
+        final storeId = fields['storeId'];
+        if (storeId is String) {
+          _requireUuid(storeId, 'purchase store');
+          final store = await _record(
+            homeId: homeId,
+            entityType: _storeType,
+            entityId: storeId,
+          );
+          if (store == null ||
+              _optionalString(
+                    _validatedProjection(store, homeId)['status'],
+                    fallback: 'active',
+                  ) !=
+                  'active') {
+            throw const PurchaseCaptureException(
+              'Choose an active store from this home.',
+            );
+          }
+        }
+        final payload = _validatedProjection(receipt, homeId);
+        await _writeProjection(
+          homeId: homeId,
+          entityType: _receiptType,
+          entityId: receiptId,
+          revision: receipt.revision + 1,
+          representation: {..._withoutProjectionMetadata(payload), ...fields},
+          at: at,
+        );
+        await _insertGeneratedCommand(
+          homeId: homeId,
+          entityType: _receiptType,
+          entityId: receiptId,
+          commandType: commandType,
+          baseRevision: expectedRevision,
+          payload: commandType == 'purchasing.receipt.cancel'
+              ? const {}
+              : fields,
+          at: at,
+        );
+        return PurchaseMutationResult(
+          entityId: receiptId,
+          revision: receipt.revision + 1,
+          disposition: PurchaseMutationDisposition.queued,
+        );
+      },
+    );
+    _triggerForegroundSync();
+    return result;
+  }
+
+  @override
+  Future<PurchaseMutationResult> updateReceiptDraftLine({
+    required String lineId,
+    required int expectedRevision,
+    required PurchaseReceiptLineRequest line,
+  }) => _changeReceiptDraftLine(
+    homeId: line.homeId,
+    receiptId: line.receiptId,
+    lineId: lineId,
+    expectedRevision: expectedRevision,
+    request: line,
+  );
+
+  @override
+  Future<PurchaseMutationResult> removeReceiptDraftLine({
+    required String homeId,
+    required String receiptId,
+    required String lineId,
+    required int expectedRevision,
+  }) => _changeReceiptDraftLine(
+    homeId: homeId,
+    receiptId: receiptId,
+    lineId: lineId,
+    expectedRevision: expectedRevision,
+  );
+
+  Future<PurchaseMutationResult> _changeReceiptDraftLine({
+    required String homeId,
+    required String receiptId,
+    required String lineId,
+    required int expectedRevision,
+    PurchaseReceiptLineRequest? request,
+  }) async {
+    _requireSynchronizedPurchasing();
+    _requireHomeUuid(homeId);
+    _requireUuid(receiptId, 'purchase receipt');
+    _requireUuid(lineId, 'purchase receipt line');
+    final at = _clock().toUtc();
+    final result = await _database.transaction<PurchaseMutationResult>(
+      () async {
+        final receipt = await _requiredDraftReceipt(
+          homeId: homeId,
+          receiptId: receiptId,
+        );
+        final row = await _record(
+          homeId: homeId,
+          entityType: _receiptLineType,
+          entityId: lineId,
+        );
+        if (row == null || row.revision != expectedRevision) {
+          throw const PurchaseCaptureException(
+            'This receipt line changed. Reopen it before saving.',
+          );
+        }
+        final payload = _validatedProjection(row, homeId);
+        if (payload['receiptId'] != receiptId ||
+            payload['approvalStatus'] == 'removed') {
+          throw const PurchaseCaptureException(
+            'This receipt line is unavailable.',
+          );
+        }
+        final receiptPayload = _validatedProjection(receipt, homeId);
+        final fields = <String, Object?>{};
+        if (request != null) {
+          final currency = _requiredString(receiptPayload, 'currency');
+          _requireRequestMoneyCurrency(request.unitPrice, currency);
+          _requireRequestMoneyCurrency(request.lineTotal, currency);
+          fields.addAll({
+            'rawDescription': request.rawDescription.trim(),
+            'quantity': _decimal(request.quantity),
+            'originalPackText': _trimToNull(request.originalPackText),
+            'unitPrice': request.unitPrice == null
+                ? null
+                : _moneyDecimal(request.unitPrice!),
+            'lineTotal': request.lineTotal == null
+                ? null
+                : _moneyDecimal(request.lineTotal!),
+          });
+        }
+        await _writeProjection(
+          homeId: homeId,
+          entityType: _receiptLineType,
+          entityId: lineId,
+          revision: row.revision + 1,
+          representation: {
+            ..._withoutProjectionMetadata(payload),
+            ...fields,
+            'homeProductId': null,
+            'approvalStatus': request == null ? 'removed' : 'unreviewed',
+          },
+          at: at,
+        );
+        await _writeProjection(
+          homeId: homeId,
+          entityType: _receiptType,
+          entityId: receiptId,
+          revision: receipt.revision + 1,
+          representation: _withoutProjectionMetadata(receiptPayload),
+          at: at,
+        );
+        await _insertGeneratedCommand(
+          homeId: homeId,
+          entityType: _receiptLineType,
+          entityId: lineId,
+          commandType: request == null
+              ? 'purchasing.receipt-line.remove'
+              : 'purchasing.receipt-line.update',
+          baseRevision: expectedRevision,
+          payload: {'receiptId': receiptId, ...fields},
+          at: at,
+        );
+        return PurchaseMutationResult(
+          entityId: lineId,
+          revision: row.revision + 1,
+          disposition: PurchaseMutationDisposition.queued,
+        );
+      },
+    );
+    _triggerForegroundSync();
+    return result;
+  }
+
+  @override
   Future<PurchaseMutationResult> approveReceiptLine({
     required String homeId,
     required String receiptId,
@@ -1199,6 +1785,10 @@ final class DriftHouseholdRepository
         homeId: homeId,
         receiptId: receiptId,
       );
+      lines.removeWhere(
+        (_, line) =>
+            _validatedProjection(line, homeId)['approvalStatus'] == 'removed',
+      );
       if (lines.isEmpty) {
         throw const PurchaseCaptureException(
           'Add and approve at least one receipt line before commit.',
@@ -1268,7 +1858,16 @@ final class DriftHouseholdRepository
   }
 
   @override
-  Stream<ShoppingList> watchActiveList({required String homeId}) {
+  Stream<ShoppingList> watchActiveList({required String homeId}) =>
+      watchLists(homeId: homeId).map(
+        (lists) => lists.firstWhere(
+          (list) => !list.archived,
+          orElse: () => _emptyShoppingList(homeId),
+        ),
+      );
+
+  @override
+  Stream<List<ShoppingList>> watchLists({required String homeId}) {
     return _watchRecordTypes(
       homeId: homeId,
       entityTypes: const <String>{
@@ -1277,7 +1876,7 @@ final class DriftHouseholdRepository
         _serverShoppingLineType,
         _shoppingSuggestionLineLinkType,
       },
-    ).map((rows) => _projectActiveShoppingList(homeId, rows));
+    ).map((rows) => _projectShoppingLists(homeId, rows));
   }
 
   @override
@@ -1293,6 +1892,81 @@ final class DriftHouseholdRepository
         payload: _encodeShoppingList(list),
       ),
     );
+  }
+
+  @override
+  Future<OnlineSuggestionFeedbackReceipt> queueFeedback(
+    OnlineSuggestionFeedback feedback,
+  ) async {
+    if (!_synchronizesMutations) {
+      throw StateError('A device synchronization session is required.');
+    }
+    _requireHomeUuid(feedback.homeId);
+    _requireUuid(feedback.suggestionId, 'shopping suggestion');
+    final id = _nextUuid('suggestion feedback');
+    final at = _clock().toUtc();
+    final payload = <String, Object?>{
+      'suggestionId': feedback.suggestionId,
+      'decision': feedback.decision.name,
+      'resultQuantity': feedback.resultQuantity?.value,
+      'reason': feedback.reason,
+    };
+    await _database.transaction(() async {
+      await _writeProjection(
+        homeId: feedback.homeId,
+        entityType: _shoppingFeedbackType,
+        entityId: id,
+        revision: 1,
+        representation: payload,
+        at: at,
+      );
+      await _insertGeneratedCommand(
+        homeId: feedback.homeId,
+        entityType: _shoppingFeedbackType,
+        entityId: id,
+        commandType: 'shopping.suggestion-feedback.create',
+        baseRevision: null,
+        payload: payload,
+        at: at,
+      );
+    });
+    _triggerForegroundSync();
+    return OnlineSuggestionFeedbackReceipt(id: id);
+  }
+
+  @override
+  Future<Set<String>> decidedSuggestionIds({required String homeId}) async {
+    _requireHomeUuid(homeId);
+    final rejected =
+        await (_database.select(_database.clientOperations)..where(
+              (row) =>
+                  row.homeId.equals(homeId) &
+                  row.entityType.equals(_shoppingFeedbackType) &
+                  row.state.isIn(<String>[
+                    ClientOperationState.blockedConflict.storageValue,
+                    ClientOperationState.blockedValidation.storageValue,
+                    ClientOperationState.blockedAuthorization.storageValue,
+                  ]),
+            ))
+            .get();
+    final rejectedIds = rejected.map((row) => row.entityId).toSet();
+    final rows =
+        await (_database.select(_database.localRecords)..where(
+              (row) =>
+                  row.homeId.equals(homeId) &
+                  row.entityType.equals(_shoppingFeedbackType) &
+                  row.isTombstone.equals(false),
+            ))
+            .get();
+    return rows
+        .where((row) => !rejectedIds.contains(row.entityId))
+        .map(
+          (row) => _requiredString(
+            _validatedProjection(row, homeId),
+            'suggestionId',
+          ),
+        )
+        .toSet();
   }
 
   @override
@@ -1329,8 +2003,8 @@ final class DriftHouseholdRepository
               (row) =>
                   row.homeId.equals(homeId) & row.entityType.equals(listType),
             ))
-            .getSingleOrNull();
-    if (existing != null) return;
+            .get();
+    if (existing.isNotEmpty) return;
 
     final listId = _synchronizesMutations
         ? _nextUuid('shopping list')
@@ -1542,6 +2216,7 @@ final class DriftHouseholdRepository
         );
       }
       final statusName = _requiredString(payload, 'status');
+      if (statusName == 'removed') continue;
       final status = switch (statusName) {
         'confirmed' => CountLineStatus.confirmed,
         'outstanding' => CountLineStatus.outstanding,
@@ -1621,7 +2296,7 @@ final class DriftHouseholdRepository
       if (status == 'draft' ||
           (status == 'committed' && row.synchronizedAt == null)) {
         activeReceipts.add(row);
-      } else if (status != 'committed') {
+      } else if (status != 'committed' && status != 'cancelled') {
         throw FormatException('Unsupported receipt status "$status".');
       }
     }
@@ -1642,6 +2317,7 @@ final class DriftHouseholdRepository
         continue;
       }
       final approvalName = _requiredString(linePayload, 'approvalStatus');
+      if (approvalName == 'removed') continue;
       final approvalStatus = switch (approvalName) {
         'unreviewed' => PurchaseLineApprovalStatus.unreviewed,
         'approved' => PurchaseLineApprovalStatus.approved,
@@ -1800,7 +2476,11 @@ final class DriftHouseholdRepository
         );
       }
       final receiptStatus = _requiredString(receipt, 'status');
-      if (receiptStatus == 'draft') continue;
+      if (receiptStatus == 'draft' ||
+          receiptStatus == 'cancelled' ||
+          payload['approvalStatus'] == 'removed') {
+        continue;
+      }
       if (receiptStatus != 'committed') {
         throw FormatException(
           'Unsupported purchase-history receipt status "$receiptStatus".',
@@ -1846,7 +2526,7 @@ final class DriftHouseholdRepository
     return projected;
   }
 
-  ShoppingList _projectActiveShoppingList(
+  List<ShoppingList> _projectShoppingLists(
     String homeId,
     List<LocalRecord> rows,
   ) {
@@ -1872,10 +2552,6 @@ final class DriftHouseholdRepository
     final serverLists =
         rows
             .where((row) => row.entityType == _serverShoppingListType)
-            .where((row) {
-              final payload = _validatedProjection(row, homeId);
-              return _requiredString(payload, 'status') == 'open';
-            })
             .toList(growable: false)
           ..sort((left, right) => right.updatedAt.compareTo(left.updatedAt));
     for (final row in serverLists) {
@@ -1908,13 +2584,17 @@ final class DriftHouseholdRepository
             createdAt:
                 _optionalDateTime(linePayload['_clientCreatedAt']) ??
                 lineRow.updatedAt.toUtc(),
-            suggestionId: link == null
-                ? null
-                : _requiredString(link, 'suggestionId'),
+            suggestionId:
+                _nullableString(linePayload['suggestionId']) ??
+                (link == null ? null : _requiredString(link, 'suggestionId')),
             homeProductId: _nullableString(linePayload['homeProductId']),
-            selectedPackId: link == null
-                ? null
-                : _nullableString(link['selectedPackId']),
+            archived:
+                linePayload['archived'] == true ||
+                linePayload['archivedAt'] != null,
+            revision: lineRow.revision,
+            selectedPackId:
+                _nullableString(linePayload['selectedPackId']) ??
+                (link == null ? null : _nullableString(link['selectedPackId'])),
             checked:
                 linePayload['checked'] == true ||
                 _nullableString(linePayload['checkedAt']) != null,
@@ -1927,23 +2607,28 @@ final class DriftHouseholdRepository
           ),
         );
       }
-      return ShoppingList(
-        id: row.entityId,
-        homeId: homeId,
-        name: _requiredString(payload, 'name'),
-        createdAt:
-            _optionalDateTime(payload['_clientCreatedAt']) ??
-            row.updatedAt.toUtc(),
-        lines: lines,
+      legacyLists.add(
+        ShoppingList(
+          id: row.entityId,
+          homeId: homeId,
+          name: _requiredString(payload, 'name'),
+          createdAt:
+              _optionalDateTime(payload['_clientCreatedAt']) ??
+              row.updatedAt.toUtc(),
+          lines: lines,
+          archived: _requiredString(payload, 'status') != 'open',
+          revision: row.revision,
+        ),
       );
     }
 
-    if (legacyLists.isNotEmpty) {
-      legacyLists.sort(
-        (left, right) => right.createdAt.compareTo(left.createdAt),
-      );
-      return legacyLists.first;
-    }
+    legacyLists.sort(
+      (left, right) => right.createdAt.compareTo(left.createdAt),
+    );
+    return legacyLists;
+  }
+
+  ShoppingList _emptyShoppingList(String homeId) {
     final emptyId = _synchronizesMutations
         ? _emptyShoppingListIds.putIfAbsent(
             homeId,
@@ -2046,6 +2731,22 @@ final class DriftHouseholdRepository
             'A synchronized count must be opened before lines are recorded.',
           );
         }
+        if (isUuid(session.locationId)) {
+          final location = await _record(
+            homeId: session.homeId,
+            entityType: _locationType,
+            entityId: session.locationId,
+          );
+          if (location == null ||
+              _validatedProjection(location, session.homeId)['status'] !=
+                  'active') {
+            throw StateError(
+              'The selected location is unavailable in this home.',
+            );
+          }
+        } else if (session.locationId != 'primary') {
+          throw ArgumentError('Choose a valid home location.');
+        }
         await _writeProjection(
           homeId: session.homeId,
           entityType: _serverCountSessionType,
@@ -2109,11 +2810,14 @@ final class DriftHouseholdRepository
       final incomingById = <String, StockCountLine>{
         for (final line in session.lines) line.id: line,
       };
-      if (persistedLines.keys.any((id) => !incomingById.containsKey(id))) {
-        throw UnsupportedError(
-          'Removing synchronized count lines is not supported.',
-        );
-      }
+      final removedLines = persistedLines.values
+          .where(
+            (row) =>
+                _validatedProjection(row, session.homeId)['status'] !=
+                    'removed' &&
+                !incomingById.containsKey(row.entityId),
+          )
+          .toList();
       final changedLines = session.lines
           .where((line) {
             final row = persistedLines[line.id];
@@ -2127,6 +2831,45 @@ final class DriftHouseholdRepository
                 _requiredString(payload, 'status') != line.status.name;
           })
           .toList(growable: false);
+
+      if (removedLines.isNotEmpty) {
+        if (session.status != CountSessionStatus.open ||
+            removedLines.length != 1 ||
+            changedLines.isNotEmpty) {
+          throw UnsupportedError(
+            'Remove one count line at a time before closing.',
+          );
+        }
+        final removed = removedLines.single;
+        final payload = _validatedProjection(removed, session.homeId);
+        await _writeProjection(
+          homeId: session.homeId,
+          entityType: _serverCountLineType,
+          entityId: removed.entityId,
+          revision: removed.revision + 1,
+          representation: {...payload, 'status': 'removed'},
+          at: at,
+        );
+        await _writeProjection(
+          homeId: session.homeId,
+          entityType: _serverCountSessionType,
+          entityId: session.id,
+          revision: existing.revision + 1,
+          representation: {...existingPayload, 'status': 'open'},
+          at: at,
+        );
+        await _insertGeneratedCommand(
+          homeId: session.homeId,
+          entityType: _serverCountLineType,
+          entityId: removed.entityId,
+          commandType: 'inventory.count-line.remove',
+          baseRevision: removed.revision,
+          payload: {'sessionId': session.id},
+          at: at,
+        );
+        changed = true;
+        return;
+      }
 
       if (session.status == CountSessionStatus.closed) {
         if (changedLines.isNotEmpty) {
@@ -2207,11 +2950,18 @@ final class DriftHouseholdRepository
       if (product == null) {
         throw StateError('The count line references another home or item.');
       }
-      final priorLine = persistedLines[line.id];
+      final priorLine =
+          persistedLines[line.id] ??
+          persistedLines.values.where((row) {
+            final data = _validatedProjection(row, session.homeId);
+            return data['status'] == 'removed' &&
+                data['homeProductId'] == line.itemId;
+          }).firstOrNull;
+      final lineId = priorLine?.entityId ?? line.id;
       await _writeProjection(
         homeId: session.homeId,
         entityType: _serverCountLineType,
-        entityId: line.id,
+        entityId: lineId,
         revision: (priorLine?.revision ?? 0) + 1,
         representation: _countLineRepresentation(session.id, line),
         at: at,
@@ -2227,7 +2977,7 @@ final class DriftHouseholdRepository
       await _insertGeneratedCommand(
         homeId: session.homeId,
         entityType: _serverCountLineType,
-        entityId: line.id,
+        entityId: lineId,
         commandType: 'inventory.count-line.upsert',
         // Count-line upsert concurrency is line-scoped: zero creates a new
         // line and the prior line revision updates it. The count-session
@@ -2253,6 +3003,9 @@ final class DriftHouseholdRepository
   Future<void> _saveSynchronizedList(ShoppingList list) async {
     _requireHomeUuid(list.homeId);
     _requireUuid(list.id, 'shopping list');
+    if (list.name.trim().isEmpty || list.name.length > 120) {
+      throw ArgumentError('List name must contain 1 to 120 characters.');
+    }
     final at = _clock().toUtc();
     var changed = false;
     await _database.transaction(() async {
@@ -2295,12 +3048,39 @@ final class DriftHouseholdRepository
       }
 
       final existingPayload = _validatedProjection(existing, list.homeId);
-      if (_requiredString(existingPayload, 'status') != 'open') {
-        throw StateError('Only an open shopping list can be changed.');
+      if (list.revision > 0 && list.revision != existing.revision) {
+        throw StateError('The shopping list changed. Reload before saving.');
       }
-      if (_requiredString(existingPayload, 'name') != list.name) {
-        throw UnsupportedError(
-          'Shopping-list renaming is not published by sync protocol v2.',
+      final status = list.archived ? 'archived' : 'open';
+      if (_requiredString(existingPayload, 'name') != list.name ||
+          _requiredString(existingPayload, 'status') != status) {
+        await _writeProjection(
+          homeId: list.homeId,
+          entityType: _serverShoppingListType,
+          entityId: list.id,
+          revision: existing.revision + 1,
+          representation: <String, Object?>{
+            ...existingPayload,
+            'name': list.name,
+            'status': status,
+          },
+          at: at,
+        );
+        await _insertGeneratedCommand(
+          homeId: list.homeId,
+          entityType: _serverShoppingListType,
+          entityId: list.id,
+          commandType: 'shopping.list.update',
+          baseRevision: existing.revision,
+          payload: <String, Object?>{'name': list.name, 'status': status},
+          at: at,
+        );
+        changed = true;
+        return;
+      }
+      if (list.archived) {
+        throw StateError(
+          'Restore this shopping list before editing its items.',
         );
       }
       final persistedLines = await _shoppingLineRecords(
@@ -2312,7 +3092,7 @@ final class DriftHouseholdRepository
       };
       if (persistedLines.keys.any((id) => !incomingById.containsKey(id))) {
         throw UnsupportedError(
-          'Removing shopping-list lines is not published by sync protocol v2.',
+          'Archive shopping-list lines to preserve their history.',
         );
       }
       final newLines = list.lines
@@ -2334,6 +3114,19 @@ final class DriftHouseholdRepository
           at: at,
         );
         if (line.suggestionId != null) {
+          await _writeProjection(
+            homeId: list.homeId,
+            entityType: _shoppingFeedbackType,
+            entityId: line.id,
+            revision: 1,
+            representation: <String, Object?>{
+              'suggestionId': line.suggestionId,
+              'decision': 'accepted',
+              'resultQuantity': _decimal(line.quantity),
+              'reason': 'Confirmed on the shopping list.',
+            },
+            at: at,
+          );
           await _writeRecord(
             homeId: list.homeId,
             entityType: _shoppingSuggestionLineLinkType,
@@ -2371,6 +3164,7 @@ final class DriftHouseholdRepository
                 : null,
             'description': line.name,
             'quantity': _decimal(line.quantity),
+            if (line.suggestionId != null) 'suggestionId': line.suggestionId,
           },
           at: at,
         );
@@ -2385,23 +3179,54 @@ final class DriftHouseholdRepository
         final oldQuantity = _requiredDecimal(payload, 'quantityToBuy');
         final oldName = _requiredString(payload, 'description');
         final oldProduct = _nullableString(payload['homeProductId']);
-        if ((oldQuantity - line.quantity).abs() > 0.00000001 ||
-            oldName != line.name ||
-            oldProduct != _shoppingHomeProductId(line)) {
-          throw UnsupportedError(
-            'Shopping-line edits are not published by sync protocol v2.',
+        if (oldProduct != _shoppingHomeProductId(line)) {
+          throw StateError(
+            'Shopping-line product identity cannot be replaced.',
           );
         }
-        if ((payload['checked'] == true) != line.checked) {
+        if ((oldQuantity - line.quantity).abs() > 0.00000001 ||
+            oldName != line.name ||
+            ((payload['archived'] == true || payload['archivedAt'] != null) !=
+                line.archived) ||
+            ((payload['checked'] == true || payload['checkedAt'] != null) !=
+                line.checked)) {
           changedLines.add((line, row));
         }
       }
       if (changedLines.isEmpty) return;
       if (changedLines.length != 1) {
-        throw UnsupportedError('Check one shopping-list line at a time.');
+        throw UnsupportedError('Change one shopping-list line at a time.');
       }
       final (line, row) = changedLines.single;
+      if (line.revision > 0 && line.revision != row.revision) {
+        throw StateError('The shopping item changed. Reload before saving.');
+      }
+      if (!line.quantity.isFinite ||
+          line.quantity <= 0 ||
+          line.name.trim().isEmpty ||
+          line.name.length > 191) {
+        throw ArgumentError(
+          'Provide an item description and a quantity greater than zero.',
+        );
+      }
       final representation = _validatedProjection(row, list.homeId);
+      final checkChanged =
+          (representation['checked'] == true ||
+              representation['checkedAt'] != null) !=
+          line.checked;
+      final detailsChanged =
+          _requiredString(representation, 'description') != line.name ||
+          (_requiredDecimal(representation, 'quantityToBuy') - line.quantity)
+                  .abs() >
+              0.00000001 ||
+          (representation['archived'] == true ||
+                  representation['archivedAt'] != null) !=
+              line.archived;
+      if (checkChanged && (detailsChanged || line.archived)) {
+        throw StateError(
+          'Check or edit a shopping item in separate operations.',
+        );
+      }
       await _writeProjection(
         homeId: list.homeId,
         entityType: _serverShoppingLineType,
@@ -2409,18 +3234,41 @@ final class DriftHouseholdRepository
         revision: row.revision + 1,
         representation: <String, Object?>{
           ...representation,
+          'description': line.name,
+          'quantityToBuy': _decimal(line.quantity),
+          'archived': line.archived,
+          'archivedAt': line.archived ? at.toIso8601String() : null,
           'checked': line.checked,
-          'checkedAt': line.checked ? at.toIso8601String() : null,
+          'checkedAt': checkChanged
+              ? (line.checked ? at.toIso8601String() : null)
+              : representation['checkedAt'],
         },
+        at: at,
+      );
+      await _writeProjection(
+        homeId: list.homeId,
+        entityType: _serverShoppingListType,
+        entityId: list.id,
+        revision: existing.revision + 1,
+        representation: existingPayload,
         at: at,
       );
       await _insertGeneratedCommand(
         homeId: list.homeId,
         entityType: _serverShoppingLineType,
         entityId: line.id,
-        commandType: 'shopping.list-line.checked',
+        commandType: checkChanged
+            ? 'shopping.list-line.checked'
+            : 'shopping.list-line.update',
         baseRevision: row.revision,
-        payload: <String, Object?>{'listId': list.id, 'checked': line.checked},
+        payload: checkChanged
+            ? <String, Object?>{'listId': list.id, 'checked': line.checked}
+            : <String, Object?>{
+                'listId': list.id,
+                'description': line.name,
+                'quantity': _decimal(line.quantity),
+                'archived': line.archived,
+              },
         at: at,
       );
       changed = true;
@@ -2750,6 +3598,8 @@ final class DriftHouseholdRepository
   ) => <String, Object?>{
     'listId': listId,
     'homeProductId': _shoppingHomeProductId(line),
+    'suggestionId': line.suggestionId,
+    'selectedPackId': line.selectedPackId,
     'description': line.name,
     'source': line.origin == ShoppingLineOrigin.suggestion
         ? 'suggestion'
@@ -3436,6 +4286,7 @@ Map<String, Object?> _encodeShoppingList(ShoppingList list) =>
       'id': list.id,
       'homeId': list.homeId,
       'name': list.name,
+      'archived': list.archived,
       'createdAt': list.createdAt.toUtc().toIso8601String(),
       'lines': list.lines
           .map(
@@ -3451,6 +4302,7 @@ Map<String, Object?> _encodeShoppingList(ShoppingList list) =>
               'selectedPackId': line.selectedPackId,
               'productPackId': line.productPackId,
               'checked': line.checked,
+              'archived': line.archived,
               'explanation': line.explanation,
             },
           )
@@ -3466,6 +4318,7 @@ ShoppingList _decodeShoppingList(String encoded) {
     id: _requiredString(json, 'id'),
     homeId: _requiredString(json, 'homeId'),
     name: _requiredString(json, 'name'),
+    archived: json['archived'] == true,
     createdAt: DateTime.parse(_requiredString(json, 'createdAt')).toUtc(),
     lines: _objectList(json['lines'], 'lines')
         .map(
@@ -3485,6 +4338,7 @@ ShoppingList _decodeShoppingList(String encoded) {
             selectedPackId: _nullableString(line['selectedPackId']),
             productPackId: _nullableString(line['productPackId']),
             checked: line['checked'] == true,
+            archived: line['archived'] == true,
             explanation: _nullableString(line['explanation']),
           ),
         )

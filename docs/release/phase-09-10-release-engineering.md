@@ -127,7 +127,7 @@ Chrome runs the authenticated mailbox flow. The other engines run the PWA and
 persistence checks without requesting another email, keeping a workflow retry
 inside the backend's five-attempt per-address window.
 
-Authenticated browser acceptance uses the API 2.0.0 email-code protocol. It
+Authenticated browser acceptance uses the API 2.1.0 email-code protocol. It
 requests a challenge for a fresh installation, reads only a newly arrived
 verification message addressed to the controlled synthetic account, and enters
 the code through the same browser's JSON API context. It verifies that an

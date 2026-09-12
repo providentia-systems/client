@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:providentia/features/ai_integration/application/ai_ports.dart';
 import 'package:providentia/features/ai_integration/domain/ai_models.dart';
 import 'package:providentia/features/ai_integration/domain/ai_policy.dart';
+import 'package:providentia/features/ai_integration/domain/ai_transmission_plan.dart';
 import 'package:providentia/features/ai_integration/domain/proposal_validation.dart';
 import 'package:providentia/features/ai_integration/domain/server_ai_models.dart';
 import 'package:providentia/features/ai_integration/infrastructure/api17_ai_gateway.dart';
@@ -137,12 +138,14 @@ final class StockPhotoAiRoute {
     required this.gateway,
     required this.privacyMode,
     this.reviewCandidate,
+    this.transmissionPlan,
   });
 
   final AiProviderProfile profile;
   final AiProviderGateway gateway;
   final AiPrivacyMode privacyMode;
   final StockCandidateReviewer? reviewCandidate;
+  final AiTransmissionPlan? transmissionPlan;
 
   void validate() {
     final expected = switch (gateway.route) {
@@ -155,7 +158,10 @@ final class StockPhotoAiRoute {
         privacyMode == AiPrivacyMode.strictLocal &&
             profile.transport != AiTransport.directNative ||
         privacyMode == AiPrivacyMode.serverProxyCloud &&
-            reviewCandidate == null ||
+            (reviewCandidate == null ||
+                transmissionPlan == null ||
+                transmissionPlan!.primary.profileId != profile.id ||
+                transmissionPlan!.primary.revision != profile.revision) ||
         privacyMode == AiPrivacyMode.strictLocal && reviewCandidate != null) {
       throw const AiPolicyViolation(
         code: 'ai_route_mismatch',
@@ -176,6 +182,7 @@ final class StockPhotoCountController extends ChangeNotifier {
     required PreparedMediaByteReader mediaReader,
     AiProviderGateway? gateway,
     StockCandidateReviewer? reviewCandidate,
+    AiTransmissionPlan? transmissionPlan,
     required StockPhotoAssetPicker pickAssets,
     StockPhotoProviderLoader? loadProvider,
     StockPhotoAiRouteLoader? loadRoute,
@@ -196,6 +203,7 @@ final class StockPhotoCountController extends ChangeNotifier {
                   AiGatewayRoute.directStrictLocal => AiPrivacyMode.strictLocal,
                 },
                 reviewCandidate: reviewCandidate,
+                transmissionPlan: transmissionPlan,
               )
             : null);
     if (effectiveLoader == null) {
@@ -254,6 +262,7 @@ final class StockPhotoCountController extends ChangeNotifier {
 
   StockPhotoCountState get state => _state;
   AiConsent? get confirmedConsent => _consent;
+  AiTransmissionPlan? get transmissionPlan => _activeRoute?.transmissionPlan;
   bool get canCreatePrivateProduct => _inventory.canCreatePrivateProduct;
   bool get canAddCatalogProduct => _inventory.canAddCatalogProduct;
 

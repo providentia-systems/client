@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:providentia/features/inventory/domain/inventory_models.dart';
 import 'package:providentia/features/inventory/presentation/inventory_controller.dart';
+import 'package:providentia/features/inventory/presentation/stock_preference_editor.dart';
 
 Future<void> showInventoryProductEditor(
   BuildContext context,
@@ -67,6 +68,17 @@ Future<void> showInventoryProductEditor(
                           ? null
                           : (value) => categoryId = value == '' ? null : value,
                     ),
+                    if (!archived && controller.canManageStockPreferences)
+                      OutlinedButton(
+                        onPressed: busy
+                            ? null
+                            : () => showStockPreferenceEditor(
+                                context,
+                                controller,
+                                item,
+                              ),
+                        child: const Text('Stock limits and recommendations'),
+                      ),
                     const Text(
                       'Changes are queued for synchronization. Removing a product requires zero stock and no active count or receipt references. History is retained.',
                     ),

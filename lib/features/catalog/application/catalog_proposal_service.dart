@@ -20,6 +20,16 @@ abstract interface class CatalogSharingConsentRepository {
   });
 }
 
+/// Confirms that an explicit contribution's private source exists on the
+/// server. Preparing a source never publishes any catalog data.
+abstract interface class CatalogProductSourcePreparation {
+  Future<void> prepare({required String homeId, required String homeProductId});
+}
+
+final class CatalogContributionSourcePendingException implements Exception {
+  const CatalogContributionSourcePendingException();
+}
+
 final class CatalogProposalConsentRequiredException implements Exception {
   const CatalogProposalConsentRequiredException();
 }

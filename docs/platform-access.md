@@ -1,6 +1,6 @@
 # Email codes, profiles and scoped home access
 
-This document records the API 2.0.0 pre-release alignment. Earlier phase
+This document records the API 2.1.0 pre-release alignment. Earlier phase
 snapshots describe historical designs; this document and the current contract
 supersede their login-link and administrator visibility rules.
 

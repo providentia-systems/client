@@ -199,10 +199,14 @@ void main() {
 
   test('production online suggestions are composed without unsafe writes', () {
     const capabilities =
-        ShoppingInteractionCapabilities.onlineEvidenceSuggestions;
+        ShoppingInteractionCapabilities.durableEvidenceSuggestions;
     expect(capabilities.onlineSuggestionsComposed, isTrue);
-    expect(capabilities.canEditExistingQuantities, isFalse);
-    expect(capabilities.canRecordSuggestionFeedback, isFalse);
+    expect(capabilities.canEditExistingQuantities, isTrue);
+    expect(capabilities.canRecordSuggestionFeedback, isTrue);
+    expect(
+      File('lib/app/production_bootstrap_app.dart').readAsStringSync(),
+      contains('feedbackQueue: household'),
+    );
 
     final source = File(
       'lib/app/production_bootstrap_app.dart',
@@ -211,7 +215,7 @@ void main() {
     expect(source, contains('DriftShoppingSuggestionCache'));
     expect(
       source,
-      contains('ShoppingInteractionCapabilities.onlineEvidenceSuggestions'),
+      contains('ShoppingInteractionCapabilities.durableEvidenceSuggestions'),
     );
   });
 

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:providentia/core/presentation/place_management_dialog.dart';
 import 'package:providentia/features/purchasing/domain/purchase_models.dart';
 import 'package:providentia/features/purchasing/presentation/purchasing_controller.dart';
+import 'package:providentia/features/purchasing/presentation/receipt_draft_editor.dart';
 
 class PurchasingWorkspace extends StatefulWidget {
   const PurchasingWorkspace({required this.controller, super.key});
@@ -28,7 +30,48 @@ class _PurchasingWorkspaceState extends State<PurchasingWorkspace> {
           key: const Key('purchasing-workspace'),
           padding: const EdgeInsets.all(20),
           children: <Widget>[
-            Text('Purchases', style: Theme.of(context).textTheme.headlineLarge),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Purchases',
+                    style: Theme.of(context).textTheme.headlineLarge,
+                  ),
+                ),
+                if (widget.controller.canEditStores)
+                  IconButton(
+                    tooltip: 'Manage stores',
+                    icon: const Icon(Icons.store_outlined),
+                    onPressed: () => showDialog<void>(
+                      context: context,
+                      builder: (_) => PlaceManagementDialog(
+                        title: 'Stores',
+                        singular: 'store',
+                        detailLabel: 'Location (optional)',
+                        listenable: widget.controller,
+                        entries: () => widget.controller.stores
+                            .map(
+                              (place) => PlaceDetails(
+                                id: place.id,
+                                name: place.name,
+                                detail: place.location,
+                                archived: place.archived,
+                                revision: place.revision,
+                              ),
+                            )
+                            .toList(),
+                        save: (place) => widget.controller.saveStore(
+                          id: place.id,
+                          name: place.name,
+                          location: place.detail,
+                          archived: place.archived,
+                          expectedRevision: place.revision,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
             const SizedBox(height: 12),
             SegmentedButton<PurchaseView>(
               segments: const <ButtonSegment<PurchaseView>>[
@@ -104,6 +147,7 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
   final _lineTotal = TextEditingController();
   final Map<String, String> _selectedProducts = <String, String>{};
   bool _showDraftForm = false;
+  String? _storeId;
 
   @override
   void dispose() {
@@ -186,6 +230,36 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
+        DropdownButtonFormField<String>(
+          key: ValueKey(
+            'receipt-store-${widget.controller.stores.map((store) => '${store.id}:${store.archived}').join(',')}',
+          ),
+          initialValue:
+              widget.controller.stores.any(
+                (store) => store.id == _storeId && !store.archived,
+              )
+              ? _storeId
+              : '',
+          decoration: const InputDecoration(labelText: 'Store'),
+          items: [
+            const DropdownMenuItem(value: '', child: Text('Unspecified store')),
+            for (final store in widget.controller.stores.where(
+              (store) => !store.archived,
+            ))
+              DropdownMenuItem(
+                value: store.id,
+                child: Text(
+                  store.location.isEmpty
+                      ? store.name
+                      : '${store.name} · ${store.location}',
+                ),
+              ),
+          ],
+          onChanged: state.captureBusy
+              ? null
+              : (value) =>
+                    setState(() => _storeId = value == '' ? null : value),
+        ),
         TextField(
           key: const Key('purchase-receipt-currency'),
           controller: _currency,
@@ -286,7 +360,52 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
           ),
         ],
         const SizedBox(height: 12),
-        for (final line in capture.lines) _lineReview(context, line),
+        if (widget.controller.canMaintainDraft)
+          Wrap(
+            spacing: 8,
+            children: [
+              OutlinedButton.icon(
+                key: const Key('purchase-edit-receipt'),
+                onPressed: widget.controller.state.captureBusy
+                    ? null
+                    : () => _editDraft(capture),
+                icon: const Icon(Icons.edit_outlined),
+                label: const Text('Edit receipt'),
+              ),
+              TextButton(
+                key: const Key('purchase-cancel-draft'),
+                onPressed: widget.controller.state.captureBusy
+                    ? null
+                    : () => _cancelDraft(capture),
+                child: const Text('Cancel draft'),
+              ),
+            ],
+          ),
+        for (final line in capture.lines) ...[
+          _lineReview(context, line),
+          if (widget.controller.canMaintainDraft)
+            Wrap(
+              spacing: 8,
+              children: [
+                TextButton.icon(
+                  key: Key('purchase-edit-line-${line.id}'),
+                  onPressed: widget.controller.state.captureBusy
+                      ? null
+                      : () => _editDraft(capture, line),
+                  icon: const Icon(Icons.edit_outlined),
+                  label: const Text('Edit line'),
+                ),
+                TextButton.icon(
+                  key: Key('purchase-remove-line-${line.id}'),
+                  onPressed: widget.controller.state.captureBusy
+                      ? null
+                      : () => _removeLine(line),
+                  icon: const Icon(Icons.remove_circle_outline),
+                  label: const Text('Remove line'),
+                ),
+              ],
+            ),
+        ],
         TextField(
           key: const Key('purchase-line-description'),
           controller: _description,
@@ -353,6 +472,59 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
         ),
       ],
     );
+  }
+
+  Future<void> _editDraft(
+    PurchaseReceiptCapture receipt, [
+    PurchaseReceiptLineCapture? line,
+  ]) => showDialog<void>(
+    context: context,
+    builder: (_) => ReceiptDraftEditor(
+      controller: widget.controller,
+      receipt: receipt,
+      line: line,
+    ),
+  );
+
+  Future<bool> _confirmRemoval(String title, String message) async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(title),
+          content: Text(message),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Keep draft'),
+            ),
+            FilledButton(
+              key: const Key('purchase-confirm-removal'),
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Confirm'),
+            ),
+          ],
+        ),
+      ) ??
+      false;
+
+  Future<void> _cancelDraft(PurchaseReceiptCapture receipt) async {
+    if (await _confirmRemoval(
+          'Cancel draft?',
+          'This receipt will leave the draft workspace without recording purchases or changing stock.',
+        ) &&
+        mounted) {
+      await widget.controller.cancelDraft(receipt);
+    }
+  }
+
+  Future<void> _removeLine(PurchaseReceiptLineCapture line) async {
+    if (await _confirmRemoval(
+          'Remove line?',
+          'This line will be excluded from receipt approval and commit.',
+        ) &&
+        mounted) {
+      await widget.controller.removeLine(line);
+    }
   }
 
   Widget _lineReview(BuildContext context, PurchaseReceiptLineCapture line) {
@@ -522,6 +694,12 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
     }
     final saved = await widget.controller.createDraft(
       purchaseDate: DateTime.now().toUtc(),
+      storeId:
+          widget.controller.stores.any(
+            (store) => store.id == _storeId && !store.archived,
+          )
+          ? _storeId
+          : null,
       currency: currency,
       total: total,
       notes: _notes.text,

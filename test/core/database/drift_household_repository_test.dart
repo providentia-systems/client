@@ -1894,60 +1894,101 @@ void main() {
     },
   );
 
-  test('shopping writes only published create and checked semantics', () async {
-    var idIndex = 0;
-    final operationIds = <String>[_operationId1, _operationId2, _operationId3];
-    repository = DriftHouseholdRepository(
-      database,
-      clock: () => now,
-      deviceId: _deviceId,
-      idGenerator: () => operationIds[idIndex++],
-    );
-    final empty = ShoppingList(
-      id: _listId,
-      homeId: _homeId,
-      name: 'Shopping list',
-      createdAt: now,
-    );
-    await repository.saveList(empty);
-    final withLine = empty.add(
-      ShoppingListLine(
-        id: _shoppingLineId,
+  test(
+    'shopping lifecycle preserves history and durable command order',
+    () async {
+      var idIndex = 1;
+      repository = DriftHouseholdRepository(
+        database,
+        clock: () => now,
+        deviceId: _deviceId,
+        idGenerator: () => _fixtureUuid(4, idIndex++),
+      );
+      final empty = ShoppingList(
+        id: _listId,
         homeId: _homeId,
-        name: 'Flour',
-        quantity: 2,
-        origin: ShoppingLineOrigin.manual,
+        name: 'Shopping list',
         createdAt: now,
-        homeProductId: _productId,
-      ),
-    );
-    await repository.saveList(withLine);
-    await repository.saveList(withLine.toggle(_shoppingLineId));
-
-    final beforeUnsupported = await database
-        .select(database.clientOperations)
-        .get();
-    await expectLater(
-      repository.saveList(withLine.updateQuantity(_shoppingLineId, 4)),
-      throwsA(isA<UnsupportedError>()),
-    );
-    final operations = await database.select(database.clientOperations).get();
-    expect(operations, hasLength(beforeUnsupported.length));
-    expect(
-      operations.map((operation) => operation.operationType),
-      containsAll(<String>[
+      );
+      await repository.saveList(empty);
+      var list = await repository.watchActiveList(homeId: _homeId).first;
+      await repository.saveList(
+        list.add(
+          ShoppingListLine(
+            id: _shoppingLineId,
+            homeId: _homeId,
+            name: 'Flour',
+            quantity: 2,
+            origin: ShoppingLineOrigin.manual,
+            createdAt: now,
+          ),
+        ),
+      );
+      list = await repository.watchActiveList(homeId: _homeId).first;
+      await repository.saveList(list.toggle(_shoppingLineId));
+      list = await repository.watchActiveList(homeId: _homeId).first;
+      final stale = list;
+      await repository.saveList(list.updateQuantity(_shoppingLineId, 4));
+      await expectLater(
+        repository.saveList(stale.copyWith(name: 'Lost update')),
+        throwsStateError,
+      );
+      list = await repository.watchActiveList(homeId: _homeId).first;
+      await repository.saveList(
+        list.copyWith(
+          lines: [
+            list.lines.single.copyWith(name: 'Wholemeal flour', archived: true),
+          ],
+        ),
+      );
+      list = await repository.watchActiveList(homeId: _homeId).first;
+      expect(list.activeLines, isEmpty);
+      expect(list.lines.single.checked, isTrue);
+      await repository.saveList(
+        list.copyWith(lines: [list.lines.single.copyWith(archived: false)]),
+      );
+      list = await repository.watchActiveList(homeId: _homeId).first;
+      await repository.saveList(
+        list.copyWith(name: 'Month end', archived: true),
+      );
+      final archived =
+          (await repository.watchLists(homeId: _homeId).first).single;
+      expect(archived.archived, isTrue);
+      expect(archived.lines.single.quantity, 4);
+      await repository.saveList(archived.copyWith(archived: false));
+      repository = DriftHouseholdRepository(
+        database,
+        clock: () => now,
+        deviceId: _deviceId,
+      );
+      list = await repository.watchActiveList(homeId: _homeId).first;
+      expect(list.name, 'Month end');
+      expect(list.lines.single.name, 'Wholemeal flour');
+      expect(list.lines.single.archived, isFalse);
+      expect(list.revision, 8);
+      final operations = await database.select(database.clientOperations).get();
+      expect(operations.map((operation) => operation.operationType).toList(), [
         'shopping.list.create',
         'shopping.list-line.create',
         'shopping.list-line.checked',
-      ]),
-    );
-    final line = await (database.select(
-      database.localRecords,
-    )..where((row) => row.entityType.equals('shopping-list-line'))).getSingle();
-    final payload = jsonDecode(line.payload) as Map<String, Object?>;
-    expect(payload['quantityToBuy'], '2');
-    expect(payload['checked'], isTrue);
-  });
+        'shopping.list-line.update',
+        'shopping.list-line.update',
+        'shopping.list-line.update',
+        'shopping.list.update',
+        'shopping.list.update',
+      ]);
+      expect(operations.map((operation) => operation.baseRevision).toList(), [
+        null,
+        1,
+        1,
+        2,
+        3,
+        4,
+        6,
+        7,
+      ]);
+    },
+  );
 
   test(
     'suggestion add keeps three identities while queuing ordinary v2 line create',
@@ -2001,6 +2042,7 @@ void main() {
         'homeProductId': _productId,
         'description': 'Flour',
         'quantity': '2',
+        'suggestionId': _suggestionId,
       });
       expect(
         operations.any(

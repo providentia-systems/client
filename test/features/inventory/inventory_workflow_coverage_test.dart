@@ -10,6 +10,37 @@ import 'package:providentia/features/inventory/presentation/inventory_controller
 import 'package:providentia/features/inventory/presentation/inventory_workspace.dart';
 
 void main() {
+  test(
+    'manual recount updates the same line and removal preserves existing stock',
+    () async {
+      final repository = _RecordingInventoryRepository(
+        publishSavedSessions: true,
+      );
+      final controller = _controller(repository)..start();
+      addTearDown(() async {
+        controller.dispose();
+        await repository.close();
+      });
+      final item = _item(id: 'rice', name: 'Rice', quantity: 4);
+      repository.items.add([item]);
+      await controller.startCount();
+      await pumpEventQueue();
+      await controller.recordManualCount(item: item, observedQuantity: 3);
+      await pumpEventQueue();
+      final lineId = controller.state.activeSession!.lines.single.id;
+      await controller.recordManualCount(item: item, observedQuantity: 2);
+      await pumpEventQueue();
+      expect(controller.state.activeSession!.lines, hasLength(1));
+      expect(controller.state.activeSession!.lines.single.id, lineId);
+      expect(controller.state.activeSession!.lines.single.observedQuantity, 2);
+      await controller.removeCountForItem(item);
+      await pumpEventQueue();
+      expect(controller.state.activeSession!.lines, isEmpty);
+      expect(controller.state.items.single.currentQuantity, 4);
+      expect(repository.movements, isEmpty);
+    },
+  );
+
   group('InventoryController stream isolation', () {
     test(
       'starts once and reports item and count-session access failures',
