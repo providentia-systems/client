@@ -1,7 +1,7 @@
 # Server AI integration
 
 Status: production-composed for testing against API `2.0.0`, SHA-256
-`40a8477521baa6c41cf2c5d872068f5ae1bf255a8d0bbccc97a05688d705ad57`.
+`d8263a996b1382a0b0742ba4b3ca232e1d6f291644a2659d966e95b2abb038fc`.
 This is not live-provider or production-acceptance evidence.
 
 ## Delivered user paths
