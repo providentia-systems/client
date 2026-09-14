@@ -16104,7 +16104,31 @@
             "type": "integer",
             "minimum": 1
           }
-        }
+        },
+        "description": "Supported identities: private (productId and packId null), product family awaiting pack resolution (productId set, packId null), or an explicitly selected catalog pack (both set). Pack-only creation resolves the exact pack parent in persistence; response and sync always contain the normalized parent. Never select the first or infer a pack from an ambiguous family. Family records retain homeProductId, raw wording, balances and history.",
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "properties": {
+                  "packId": {
+                    "type": "null"
+                  }
+                }
+              },
+              {
+                "required": [
+                  "productId"
+                ],
+                "properties": {
+                  "productId": {
+                    "$ref": "#/components/schemas/Uuid"
+                  }
+                }
+              }
+            ]
+          }
+        ]
       },
       "HomeItemMasterProduct": {
         "type": "object",
@@ -16226,7 +16250,31 @@
               null
             ]
           }
-        }
+        },
+        "description": "Supported identities: private (productId and packId null), product family awaiting pack resolution (productId set, packId null), or an explicitly selected catalog pack (both set). Pack-only creation resolves the exact pack parent in persistence; response and sync always contain the normalized parent. Never select the first or infer a pack from an ambiguous family. Family records retain homeProductId, raw wording, balances and history.",
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "properties": {
+                  "packId": {
+                    "type": "null"
+                  }
+                }
+              },
+              {
+                "required": [
+                  "productId"
+                ],
+                "properties": {
+                  "productId": {
+                    "$ref": "#/components/schemas/Uuid"
+                  }
+                }
+              }
+            ]
+          }
+        ]
       },
       "OffsetPagination": {
         "type": "object",
@@ -16905,7 +16953,8 @@
             "format": "uuid",
             "description": "Optional category within this household for either a private or catalog-backed home product. It does not change the global catalog category or identity."
           }
-        }
+        },
+        "description": "Supported identities: private (productId and packId null), product family awaiting pack resolution (productId set, packId null), or an explicitly selected catalog pack (both set). Pack-only creation resolves the exact pack parent in persistence; response and sync always contain the normalized parent. Never select the first or infer a pack from an ambiguous family. Family records retain homeProductId, raw wording, balances and history."
       },
       "StockAdjustmentRequest": {
         "type": "object",
@@ -17238,7 +17287,10 @@
           "serverPersistsUploadedMedia",
           "mediaHandling",
           "humanReviewRequired",
-          "credentialEncryptionAvailable"
+          "credentialEncryptionAvailable",
+          "providerProfiles",
+          "orchestrationPolicy",
+          "transmissionPlan"
         ],
         "properties": {
           "mode": {
@@ -17325,7 +17377,18 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Null is an actionable setup/unavailable state, not a malformed response. Management remains reachable; extraction is prohibited until a saved shared policy resolves to usable, disclosed recipients for this viewer. Settings, profiles, policy and plan are returned from one transaction."
+          },
+          "providerProfiles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AiProviderProfile"
+            },
+            "description": "Atomic viewer-authorized snapshot. Includes shared profiles and this viewer's private profiles only; never another member's private configuration."
+          },
+          "orchestrationPolicy": {
+            "$ref": "#/components/schemas/AiOrchestrationPolicy"
           }
         }
       },
@@ -17891,7 +17954,8 @@
             "type": "integer",
             "minimum": 0
           }
-        }
+        },
+        "description": "Shared home policy. References shared profiles only. Empty extraction IDs and null validation profile mean setup/repair required; the current revision is retained for optimistic repair. Private/deleted references are never disclosed. Personal overrides are resolved separately into the viewer-specific transmission plan, never substituted after consent."
       },
       "PutAiOrchestrationPolicyRequest": {
         "type": "object",
@@ -17945,7 +18009,8 @@
             "type": "integer",
             "minimum": 0
           }
-        }
+        },
+        "description": "Shared policy writes may reference only active shared-home profiles. Personal profiles remain private; the effective per-viewer plan discloses and hashes any permitted private override."
       },
       "CreateStoredMediaExtractionRequest": {
         "type": "object",
@@ -22795,15 +22860,13 @@
         ],
         "properties": {
           "profileId": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "pattern": "^[A-Za-z0-9-]{1,36}$"
+            "type": "string",
+            "pattern": "^[A-Za-z0-9-]{1,36}$",
+            "description": "Actual saved profile executed for this viewer, including an explicitly disclosed personal override. Never null."
           },
           "revision": {
             "type": "integer",
-            "minimum": 0
+            "minimum": 1
           },
           "provider": {
             "type": "string",
