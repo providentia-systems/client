@@ -5,13 +5,19 @@ import 'package:providentia/core/synchronization/sync_ports.dart';
 /// Existing operations keep their immutable device binding; mismatches require
 /// recovery rather than being rewritten and replayed.
 final class SessionBoundSyncGateway implements SyncRemoteGateway {
-  SessionBoundSyncGateway({
+  factory SessionBoundSyncGateway({
     required SyncRemoteGateway delegate,
-    required this.homeId,
-    required this.deviceId,
+    required String homeId,
+    required String deviceId,
     required bool Function() isCurrent,
-  }) : _delegate = delegate,
-       _isCurrent = isCurrent;
+  }) => SessionBoundSyncGateway._(delegate, homeId, deviceId, isCurrent);
+
+  SessionBoundSyncGateway._(
+    this._delegate,
+    this.homeId,
+    this.deviceId,
+    this._isCurrent,
+  );
 
   final SyncRemoteGateway _delegate;
   final String homeId;
