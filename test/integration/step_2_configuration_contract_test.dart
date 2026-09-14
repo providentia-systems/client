@@ -1,8 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:providentia/features/ai_integration/domain/ai_transmission_plan.dart';
-
 import 'package:drift/drift.dart' hide isNotNull, isNull;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -10,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:providentia/core/database/app_database.dart';
 import 'package:providentia/core/database/drift_household_repository.dart';
+import 'package:providentia/features/ai_integration/domain/ai_transmission_plan.dart';
 import 'package:providentia/features/ai_integration/domain/server_ai_models.dart';
 import 'package:providentia/features/ai_integration/infrastructure/generated_server_ai_repository.dart';
 import 'package:providentia/features/inventory/domain/inventory_models.dart';
