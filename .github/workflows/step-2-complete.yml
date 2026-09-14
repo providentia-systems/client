@@ -1,0 +1,78 @@
+name: Step 2 client final verification
+on:
+  pull_request:
+    paths:
+      - .step2-complete.py
+      - .github/workflows/step-2-complete.yml
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/step-1-authoritative-sync'
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          repository: providentia-systems/backend
+          ref: b223bba83d23f42c70266bce6da7befc7fee3450
+          path: _step2_backend
+          persist-credentials: false
+      - name: Install pinned Flutter and Dart
+        run: |
+          tool/install_flutter_linux.sh "$RUNNER_TEMP/providentia-sdk"
+          echo "$RUNNER_TEMP/providentia-sdk/flutter/bin" >> "$GITHUB_PATH"
+      - name: Apply source and regenerate exact backend-owned contract
+        run: |
+          python3 .step2-complete.py
+          cp _step2_backend/contracts/source/providentia-v1.json.gz contracts/source/providentia-v1.json.gz
+          python3 - <<'PY'
+          import pathlib,hashlib,gzip
+          p=pathlib.Path('contracts/source/providentia-v1.json.gz')
+          archive=hashlib.sha256(p.read_bytes()).hexdigest()
+          plain=hashlib.sha256(gzip.decompress(p.read_bytes())).hexdigest()
+          assert archive=='beba4827515c2dc63f69145fad090769fea50a031c9f88f31bf2be4ddd951e55'
+          assert plain=='b29608746e59216ef69554c346d0606ac5815e42a6e04d5f284872b608d05647'
+          p=pathlib.Path('tool/materialize-openapi-contract.sh')
+          p.write_text(p.read_text().replace('5e1e3f7224b85e52e09a298d2ad4c5a82d564c35d21d90e2b872bf33b3e9db8f',archive).replace('40a8477521baa6c41cf2c5d872068f5ae1bf255a8d0bbccc97a05688d705ad57',plain))
+          PY
+          bash tool/materialize-openapi-contract.sh
+          node tool/generate_api_client.mjs
+          flutter pub get --enforce-lockfile
+          dart run build_runner build --delete-conflicting-outputs
+          dart format lib/features/ai_integration/domain/ai_transmission_plan.dart test/features/ai_integration/server_ai_workspace_controller_test.dart test/integration/step_2_configuration_contract_test.dart
+          git diff --check
+      - name: Commit verified-generation outputs and remove preparation helpers
+        run: |
+          git rm .step2-complete.py .github/workflows/step-2-complete.yml
+          git add contracts tool/materialize-openapi-contract.sh lib/features/ai_integration/domain/ai_transmission_plan.dart test/features/ai_integration/server_ai_workspace_controller_test.dart test/integration/step_2_configuration_contract_test.dart
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(step2): require saved AI recipients and regenerate paired response contract'
+          git push origin HEAD:fix/step-1-authoritative-sync
+          git rev-parse HEAD > /tmp/SOURCE_COMMIT.txt
+          git archive --format=tar.gz HEAD > /tmp/step2-client-final-source.tar.gz
+      - name: Full Flutter regression suite and actual synthetic UI rendering
+        env:
+          PROVIDENTIA_UI_EVIDENCE: /tmp/step2-ui
+        run: flutter test --reporter json > /tmp/step2-client-final-tests.jsonl 2>&1
+      - name: Static analysis
+        if: always()
+        run: flutter analyze --no-pub > /tmp/step2-client-final-analysis.txt 2>&1
+      - name: Preserve source and test evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: step2-client-final-verification
+          path: |
+            /tmp/SOURCE_COMMIT.txt
+            /tmp/step2-client-final-source.tar.gz
+            /tmp/step2-client-final-tests.jsonl
+            /tmp/step2-client-final-analysis.txt
+            /tmp/step2-ui
+          retention-days: 14
