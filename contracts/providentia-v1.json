@@ -16122,7 +16122,8 @@
                 ],
                 "properties": {
                   "productId": {
-                    "$ref": "#/components/schemas/Uuid"
+                    "type": "string",
+                    "format": "uuid"
                   }
                 }
               }
@@ -16268,7 +16269,8 @@
                 ],
                 "properties": {
                   "productId": {
-                    "$ref": "#/components/schemas/Uuid"
+                    "type": "string",
+                    "format": "uuid"
                   }
                 }
               }

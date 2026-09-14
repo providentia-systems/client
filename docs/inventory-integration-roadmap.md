@@ -180,7 +180,7 @@ remains required.
 
 - Backend API: `2.0.0`
 - Client lock SHA-256:
-  `40a8477521baa6c41cf2c5d872068f5ae1bf255a8d0bbccc97a05688d705ad57`
+  `d8263a996b1382a0b0742ba4b3ca232e1d6f291644a2659d966e95b2abb038fc`
 - Contract additions: public, bounded catalog contributions from API 1.12;
   revision-bound, movement-free stock-count cancellation and precise direct
   extraction versus encrypted private-media disclosure, and a typed paged
