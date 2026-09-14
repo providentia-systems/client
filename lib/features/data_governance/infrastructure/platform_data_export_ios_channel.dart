@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:flutter/services.dart';
 
 /// Transport for the owned iOS export picker. Files remain a native concern.

@@ -16,10 +16,11 @@ void main() {
         final calls = <http.Request>[];
         final repository = _repository((request) async {
           calls.add(request);
-          if (request.method == 'GET')
+          if (request.method == 'GET') {
             return _json({
               'data': [_row(scope)],
             });
+          }
           if (request.url.path.endsWith('/download-token')) {
             expect(jsonDecode(request.body), {'expectedRevision': 7});
             return _json({
@@ -59,10 +60,11 @@ void main() {
       var issued = 0;
       final downloads = <String>[];
       final repository = _repository((request) async {
-        if (request.method == 'GET')
+        if (request.method == 'GET') {
           return _json({
             'data': [_row(DataGovernanceScope.account, revision: 7 + reads++)],
           });
+        }
         if (request.url.path.endsWith('/download-token')) {
           expect(jsonDecode(request.body), {'expectedRevision': 7 + issued});
           issued++;
@@ -105,8 +107,9 @@ void main() {
           if (request.method == 'GET') {
             final row = _row(DataGovernanceScope.home);
             if (failure == 'cancelled') row['status'] = 'cancelled';
-            if (failure == 'expired')
+            if (failure == 'expired') {
               row['artifactExpiresAt'] = '2000-01-01T00:00:00Z';
+            }
             if (failure == 'foreign-requester') row['downloadEligible'] = false;
             return _json({
               'data': [row],
@@ -122,12 +125,13 @@ void main() {
           }
           downloads++;
           final artifact = _artifact(DataGovernanceScope.home);
-          if (failure == 'wrong-home')
+          if (failure == 'wrong-home') {
             artifact['data'] = {
               'home': [
                 {'id': '22222222-2222-4222-8222-222222222222'},
               ],
             };
+          }
           return _json(artifact, noStore: failure != 'cacheable-artifact');
         });
         await expectLater(
