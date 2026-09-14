@@ -138,7 +138,10 @@ final class DataGovernanceService {
         DataGovernanceFailureKind.unavailable,
       );
     }
-    return repository.retrieveExport(request, isCurrent: isCurrent);
+    return (repository as DataExportRepository).retrieveExport(
+      request,
+      isCurrent: isCurrent,
+    );
   }
 
   void _require(DataGovernanceCapability capability) {

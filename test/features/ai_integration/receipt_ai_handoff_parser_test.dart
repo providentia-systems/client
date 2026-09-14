@@ -82,6 +82,9 @@ Map<String, Object?> _extraction() => <String, Object?>{
   'id': 'extract-1',
   'kind': 'receipt',
   'status': 'review_required',
+  'targetId': null,
+  'observationDecisions': <Object?>[],
+  'discrepancies': <Object?>[],
   'schemaVersion': 2,
   'result': <String, Object?>{
     'documentType': 'receipt',

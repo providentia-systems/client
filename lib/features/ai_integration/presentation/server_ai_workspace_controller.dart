@@ -1,9 +1,8 @@
-import 'package:providentia/features/ai_integration/application/ai_review_resume_store.dart';
-
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:providentia/features/ai_integration/application/ai_ports.dart';
+import 'package:providentia/features/ai_integration/application/ai_review_resume_store.dart';
 import 'package:providentia/features/ai_integration/application/ai_use_cases.dart';
 import 'package:providentia/features/ai_integration/application/server_ai_repository.dart';
 import 'package:providentia/features/ai_integration/domain/ai_models.dart';
@@ -575,8 +574,9 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
   }) async {
     if (isBusy ||
         _status != ServerAiWorkspaceStatus.reviewRequired ||
-        !_requireUse())
+        !_requireUse()) {
       return;
+    }
     final review = _review;
     final candidate = review?.candidates
         .where((item) => item.position == position)
@@ -605,8 +605,9 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
   ) async {
     if (isBusy ||
         _status != ServerAiWorkspaceStatus.reviewRequired ||
-        !_requireUse())
+        !_requireUse()) {
       return;
+    }
     final review = _review;
     final repository = _repository;
     final observation = review?.observations
@@ -616,11 +617,12 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
         observation == null ||
         repository is! AiEvidenceReviewRepository ||
         observation.exactDigest ||
-        decision == AiObservationDecision.pending)
+        decision == AiObservationDecision.pending) {
       return;
+    }
     await _changeReview(
       review,
-      () => repository.reviewObservation(
+      () => (repository as AiEvidenceReviewRepository).reviewObservation(
         review: review,
         observation: observation,
         decision: decision,
@@ -634,8 +636,9 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
   ) async {
     if (isBusy ||
         _status != ServerAiWorkspaceStatus.reviewRequired ||
-        !_requireUse())
+        !_requireUse()) {
       return;
+    }
     final review = _review;
     final repository = _repository;
     final discrepancy = review?.discrepancies
@@ -644,11 +647,12 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
     if (review == null ||
         discrepancy == null ||
         repository is! AiEvidenceReviewRepository ||
-        decision == AiDiscrepancyDecision.pending)
+        decision == AiDiscrepancyDecision.pending) {
       return;
+    }
     await _changeReview(
       review,
-      () => repository.reviewDiscrepancy(
+      () => (repository as AiEvidenceReviewRepository).reviewDiscrepancy(
         review: review,
         discrepancy: discrepancy,
         decision: decision,
@@ -794,8 +798,9 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
   AiReviewHandoff? buildReviewHandoff() {
     if (isBusy ||
         _status != ServerAiWorkspaceStatus.reviewRequired ||
-        !_requireUse())
+        !_requireUse()) {
       return null;
+    }
     final review = _review;
     if (review == null || review.homeId != _capabilities.homeId) {
       _setFailure('Complete the AI candidate review first.');

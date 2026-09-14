@@ -2,10 +2,11 @@ import 'dart:async';
 import 'dart:collection';
 
 import 'package:flutter/foundation.dart';
-import '../application/data_export_ports.dart';
-import '../domain/data_export_artifact.dart';
 import 'package:providentia/features/data_governance/application/data_governance_service.dart';
 import 'package:providentia/features/data_governance/domain/data_governance_models.dart';
+
+import '../application/data_export_ports.dart';
+import '../domain/data_export_artifact.dart';
 
 enum DataGovernanceViewStatus { idle, loading, ready, submitting, failure }
 
@@ -28,8 +29,7 @@ enum DataGovernanceNotice {
 /// Presentation state retains only a fixed, user-safe failure classification.
 /// Raw backend problem details and diagnostic failure reasons never enter it.
 final class DataGovernanceController extends ChangeNotifier {
-  DataGovernanceController(this._service, {DataExportSaver? exportSaver})
-    : _exportSaver = exportSaver;
+  DataGovernanceController(this._service, {this._exportSaver});
 
   final DataExportSaver? _exportSaver;
   DataExportArtifact? _artifact;
@@ -162,10 +162,11 @@ final class DataGovernanceController extends ChangeNotifier {
     _status = DataGovernanceViewStatus.submitting;
     _notifyListeners();
     try {
-      if (saver == null)
+      if (saver == null) {
         throw const DataGovernanceRepositoryException(
           DataGovernanceFailureKind.unavailable,
         );
+      }
       final result = await saver.save(artifact);
       if (!_isCurrent(generation)) return;
       _notice = switch (result) {

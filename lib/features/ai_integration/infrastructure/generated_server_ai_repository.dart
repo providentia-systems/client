@@ -762,8 +762,9 @@ List<AiObservationReview> _observationReviews(
   return _objectList(object, 'observationDecisions')
       .map((item) {
         final id = _string(item, 'id');
-        if (!ids.add(id))
+        if (!ids.add(id)) {
           throw const FormatException('Duplicate observation decision.');
+        }
         final exactDigest = switch (_string(item, 'decisionType')) {
           'exact_digest' => true,
           'visual_overlap' => false,
@@ -826,8 +827,9 @@ List<AiDiscrepancyReview> _discrepancyReviews(Map<String, Object?> object) {
   return _objectList(object, 'discrepancies')
       .map((item) {
         final position = _integer(item, 'position', minimum: 0);
-        if (!positions.add(position))
+        if (!positions.add(position)) {
           throw const FormatException('Duplicate discrepancy.');
+        }
         final payload = _object(item['payload'], 'discrepancy evidence');
         final type = _string(payload, 'type');
         if (!const <String>{

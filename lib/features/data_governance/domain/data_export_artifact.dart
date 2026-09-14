@@ -1,7 +1,8 @@
 import 'dart:typed_data';
 
-import 'data_governance_models.dart';
 import 'package:providentia/core/security/uuid_v4.dart';
+
+import 'data_governance_models.dart';
 
 /// A retrieved private artifact, retained in memory only until save/discard.
 /// Its token is deliberately not represented. Saved user copies are not caches.
