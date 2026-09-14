@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:providentia/features/ai_integration/domain/ai_transmission_plan.dart';
+
 import 'package:drift/drift.dart' hide isNotNull, isNull;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -20,6 +22,24 @@ const pack = '44444444-4444-4444-8444-444444444444';
 const privateProduct = '55555555-5555-4555-8555-555555555555';
 
 void main() {
+  for (final invalid in <Map<String, Object?>>[
+    {'profileId': null, 'revision': 1},
+    {'profileId': '', 'revision': 1},
+    {'profileId': 'saved-profile', 'revision': 0},
+  ]) {
+    test('Step 2 rejects unsaved recipient $invalid', () {
+      expect(
+        () => AiTransmissionRecipient.fromJson({
+          ...invalid,
+          'provider': 'ollama',
+          'model': 'synthetic',
+          'endpoint': null,
+        }),
+        throwsFormatException,
+      );
+    });
+  }
+
   for (final mode in ['manual_only', 'server_proxy']) {
     for (final available in [false, true]) {
       test('Step 2 $mode setup reopens with adapters=$available', () async {
