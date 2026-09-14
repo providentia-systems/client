@@ -160,6 +160,21 @@ final class _ServerAiWorkspacePageState extends State<ServerAiWorkspacePage> {
             ),
           ),
         _PrivacyBoundaryCard(settings: workspace.settings),
+        if (workspace.settings.mode == AiServerMode.serverProxy &&
+            workspace.settings.transmissionPlan == null)
+          const Card(
+            key: Key('ai-configuration-required'),
+            child: ListTile(
+              leading: Icon(Icons.settings_outlined),
+              title: Text('AI setup needs attention'),
+              subtitle: Text(
+                'Add or repair a shared provider profile and save a household '
+                'policy. Check that its provider and credential vault are '
+                'available. Settings remain editable; images cannot be sent '
+                'until the exact recipients can be confirmed.',
+              ),
+            ),
+          ),
         const SizedBox(height: 12),
         Text(
           'Provider profiles',
@@ -268,6 +283,7 @@ final class _ServerAiWorkspacePageState extends State<ServerAiWorkspacePage> {
                 key: const Key('ai-single-profile-policy'),
                 onPressed:
                     selected == null ||
+                        selected.ownerScope != AiProfileOwnerScope.home ||
                         controller.isBusy ||
                         selected.availability !=
                             AiProviderAvailability.available
@@ -284,11 +300,19 @@ final class _ServerAiWorkspacePageState extends State<ServerAiWorkspacePage> {
                         ),
                       ),
                 icon: const Icon(Icons.account_tree_outlined),
-                label: const Text('Use single-profile policy'),
+                label: const Text('Use shared profile in policy'),
               ),
             ],
           ),
         ],
+        const Padding(
+          padding: EdgeInsets.only(top: 8),
+          child: Text(
+            'Household policies use shared profiles only. Your private profile '
+            'may override the same provider for you; the confirmation shows '
+            'the exact effective recipients before anything is sent.',
+          ),
+        ),
         const Divider(height: 32),
         Text(
           'Extract receipt pages or a stock image',
@@ -410,9 +434,18 @@ final class _ServerAiWorkspacePageState extends State<ServerAiWorkspacePage> {
   }
 
   bool _canExtract(AiProviderProfile? selected) {
+    final workspace = widget.controller.workspace;
     return selected != null &&
+        workspace?.settings.mode == AiServerMode.serverProxy &&
+        workspace?.settings.transmissionPlan?.primary.profileId ==
+            selected.id &&
         selected.enabled &&
-        selected.credentialConfigured &&
+        (selected.credentialConfigured ||
+            workspace!.settings.availableProviders.any(
+              (provider) =>
+                  provider.id == selected.providerWireId &&
+                  !provider.requiresCredential,
+            )) &&
         selected.availability == AiProviderAvailability.available &&
         widget.controller.capabilities.mayUse &&
         !widget.controller.isBusy;

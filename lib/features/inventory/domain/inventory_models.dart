@@ -179,6 +179,10 @@ final class InventoryItem {
 
   bool get isCounted => currentQuantity != null;
 
+  /// A valid home product-family link, without an invented pack identity.
+  bool get hasUnresolvedCatalogPack =>
+      isHomeProduct && productId != null && packId == null;
+
   InventoryItem copyWith({
     double? currentQuantity,
     bool clearQuantity = false,
