@@ -13752,6 +13752,19 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "downloadEligible": {
+            "type": "boolean",
+            "default": false,
+            "description": "True only for a completed, unexpired export with an available artifact requested by the authenticated viewer. Rechecked before authenticated single-use token issuance and retrieval."
+          },
+          "homeId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Home scope for a home request; null for an account request."
           }
         }
       },

@@ -47,3 +47,18 @@ abstract interface class PurchaseCaptureRepository
     required String receiptId,
   });
 }
+
+/// A home-scoped durable intake marker projected from ordinary receipts. A
+/// completed or cancelled receipt must not become another draft after restart.
+final class PurchaseIntakeReceipt {
+  const PurchaseIntakeReceipt({required this.id, required this.status});
+  final String id;
+  final String status;
+}
+
+abstract interface class PurchaseIntakeRecoveryRepository {
+  Future<PurchaseIntakeReceipt?> findIntakeReceipt({
+    required String homeId,
+    required String sourceReference,
+  });
+}

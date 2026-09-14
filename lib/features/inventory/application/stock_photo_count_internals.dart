@@ -4,6 +4,7 @@ extension StockPhotoCountLifecycle on StockPhotoCountController {
   Future<void> abandonPhotos() async {
     if (_disposed) return;
     _accessEpoch += 1;
+    _handoffTargetId = null;
     _consent = null;
     _activeRoute = null;
     await _discardPrepared();
@@ -15,7 +16,9 @@ extension StockPhotoCountLifecycle on StockPhotoCountController {
   }
 
   void _handleInventoryChange() {
-    if (_state.prepared != null && _inventory.state.activeSession == null) {
+    if ((_state.prepared != null || _state.proposal != null) &&
+        (_inventory.state.activeSession == null ||
+            (_handoffTargetId != null && _handoffTargetId != activeCountId))) {
       unawaited(abandonPhotos());
     }
   }
@@ -140,6 +143,10 @@ extension StockPhotoCountLifecycle on StockPhotoCountController {
     final unique = <StockCandidateProposal>[];
     var removed = 0;
     for (final candidate in candidates) {
+      if (candidate.serverReview != null) {
+        unique.add(candidate);
+        continue; // Cross-image server evidence must be resolved by the user.
+      }
       final key = <String>[
         normalized(candidate.productName.value),
         normalized(candidate.brand.value),

@@ -1,4 +1,6 @@
 import 'package:providentia/features/data_governance/domain/data_governance_models.dart';
+import '../domain/data_export_artifact.dart';
+import 'data_export_ports.dart';
 
 enum DataGovernanceFailureKind {
   authenticationRequired,
@@ -113,6 +115,30 @@ final class DataGovernanceService {
       requestId: request.id,
       expectedRevision: request.revision,
     );
+  }
+
+  Future<DataExportArtifact> retrieveExport(
+    DataGovernanceRequest request, {
+    required bool Function() isCurrent,
+  }) {
+    _require(
+      request.scope == DataGovernanceScope.account
+          ? DataGovernanceCapability.accountExport
+          : DataGovernanceCapability.homeExport,
+    );
+    if (!request.isExport ||
+        !isCurrent() ||
+        request.scope == DataGovernanceScope.home &&
+            request.homeId != _requiredHomeId()) {
+      throw const DataGovernanceCapabilityException();
+    }
+    final repository = _repository;
+    if (repository is! DataExportRepository) {
+      throw const DataGovernanceRepositoryException(
+        DataGovernanceFailureKind.unavailable,
+      );
+    }
+    return repository.retrieveExport(request, isCurrent: isCurrent);
   }
 
   void _require(DataGovernanceCapability capability) {

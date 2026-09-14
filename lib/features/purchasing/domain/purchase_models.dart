@@ -282,6 +282,7 @@ final class PurchaseReceiptDraftRequest {
     this.total,
     this.notes = '',
     this.sourceReference,
+    this.clientReceiptId,
   }) {
     _requireText(homeId, 'homeId');
     _requireCurrency(currency);
@@ -314,6 +315,7 @@ final class PurchaseReceiptDraftRequest {
   final Money? total;
   final String notes;
   final String? sourceReference;
+  final String? clientReceiptId;
 }
 
 final class PurchaseReceiptLineRequest {
@@ -325,6 +327,7 @@ final class PurchaseReceiptLineRequest {
     this.originalPackText,
     this.unitPrice,
     this.lineTotal,
+    this.clientLineId,
   }) {
     _requireText(homeId, 'homeId');
     _requireText(receiptId, 'receiptId');
@@ -364,6 +367,7 @@ final class PurchaseReceiptLineRequest {
   final String? originalPackText;
   final Money? unitPrice;
   final Money? lineTotal;
+  final String? clientLineId;
 }
 
 final class PurchaseLine {

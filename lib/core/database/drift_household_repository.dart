@@ -59,6 +59,7 @@ final class DriftHouseholdRepository
         PurchaseStoreRepository,
         StockPreferenceRepository,
         PurchaseCaptureRepository,
+        PurchaseIntakeRecoveryRepository,
         PurchaseDraftMaintenanceRepository,
         ShoppingRepository,
         ShoppingListLifecycleRepository,
@@ -1146,6 +1147,39 @@ final class DriftHouseholdRepository
   }
 
   @override
+  Future<PurchaseIntakeReceipt?> findIntakeReceipt({
+    required String homeId,
+    required String sourceReference,
+  }) async {
+    _requireHomeUuid(homeId);
+    final rows =
+        await (_database.select(_database.localRecords)..where(
+              (row) =>
+                  row.homeId.equals(homeId) &
+                  row.entityType.equals(_receiptType),
+            ))
+            .get();
+    final matches = rows
+        .where(
+          (row) =>
+              _validatedProjection(row, homeId)['sourceReference'] ==
+              sourceReference,
+        )
+        .toList();
+    if (matches.length > 1) {
+      throw const PurchaseCaptureException(
+        'This intake has ambiguous legacy receipts. Review them in Purchases; no new draft was created.',
+      );
+    }
+    if (matches.isEmpty) return null;
+    final row = matches.single;
+    return PurchaseIntakeReceipt(
+      id: row.entityId,
+      status: _requiredString(_validatedProjection(row, homeId), 'status'),
+    );
+  }
+
+  @override
   Future<PurchaseMutationResult> createReceiptDraft(
     PurchaseReceiptDraftRequest request,
   ) async {
@@ -1162,8 +1196,30 @@ final class DriftHouseholdRepository
     final totalAmount = request.total == null
         ? null
         : _moneyDecimal(request.total!);
+    final clientId = request.clientReceiptId;
+    if (clientId != null) _requireUuid(clientId, 'intake receipt');
     final at = _clock().toUtc();
     final result = await _database.transaction<PurchaseMutationResult>(() async {
+      if (clientId != null) {
+        final prior = await _record(
+          homeId: request.homeId,
+          entityType: _receiptType,
+          entityId: clientId,
+        );
+        if (prior != null) {
+          if (_validatedProjection(prior, request.homeId)['sourceReference'] !=
+              sourceReference) {
+            throw const PurchaseCaptureException(
+              'The intake receipt has a different source.',
+            );
+          }
+          return _existingMutationResult(
+            row: prior,
+            entityId: clientId,
+            commandType: 'purchasing.receipt.create',
+          );
+        }
+      }
       if (await _activeReceiptRecord(homeId: request.homeId) != null) {
         throw const PurchaseCaptureException(
           'Finish or synchronize the current receipt before starting another.',
@@ -1186,7 +1242,7 @@ final class DriftHouseholdRepository
           );
         }
       }
-      final receiptId = _nextUuid('purchase receipt');
+      final receiptId = clientId ?? _nextUuid('purchase receipt');
       final representation = <String, Object?>{
         'storeId': storeId,
         'purchaseDate': purchaseDate,
@@ -1240,76 +1296,97 @@ final class DriftHouseholdRepository
     _requireSynchronizedPurchasing();
     _requireHomeUuid(request.homeId);
     _requireUuid(request.receiptId, 'purchase receipt');
+    final clientId = request.clientLineId;
+    if (clientId != null) _requireUuid(clientId, 'intake receipt line');
     final at = _clock().toUtc();
-    final result = await _database.transaction<PurchaseMutationResult>(
-      () async {
-        final receipt = await _requiredDraftReceipt(
+    final result = await _database.transaction<PurchaseMutationResult>(() async {
+      if (clientId != null) {
+        final prior = await _record(
           homeId: request.homeId,
-          receiptId: request.receiptId,
+          entityType: _receiptLineType,
+          entityId: clientId,
         );
-        final receiptPayload = _validatedProjection(receipt, request.homeId);
-        final currency = _requiredString(receiptPayload, 'currency');
-        _requireRequestMoneyCurrency(request.unitPrice, currency);
-        _requireRequestMoneyCurrency(request.lineTotal, currency);
-        final lineId = _nextUuid('purchase receipt line');
-        final rawDescription = request.rawDescription.trim();
-        final originalPackText = _trimToNull(request.originalPackText);
-        final unitPrice = request.unitPrice == null
-            ? null
-            : _moneyDecimal(request.unitPrice!);
-        final lineTotal = request.lineTotal == null
-            ? null
-            : _moneyDecimal(request.lineTotal!);
-        final lineRepresentation = <String, Object?>{
+        if (prior != null) {
+          if (_validatedProjection(prior, request.homeId)['receiptId'] !=
+              request.receiptId) {
+            throw const PurchaseCaptureException(
+              'The intake line belongs to another receipt.',
+            );
+          }
+          // Preserve later human edits/removals rather than recreating AI text.
+          return _existingMutationResult(
+            row: prior,
+            entityId: clientId,
+            commandType: 'purchasing.receipt-line.create',
+          );
+        }
+      }
+      final receipt = await _requiredDraftReceipt(
+        homeId: request.homeId,
+        receiptId: request.receiptId,
+      );
+      final receiptPayload = _validatedProjection(receipt, request.homeId);
+      final currency = _requiredString(receiptPayload, 'currency');
+      _requireRequestMoneyCurrency(request.unitPrice, currency);
+      _requireRequestMoneyCurrency(request.lineTotal, currency);
+      final lineId = clientId ?? _nextUuid('purchase receipt line');
+      final rawDescription = request.rawDescription.trim();
+      final originalPackText = _trimToNull(request.originalPackText);
+      final unitPrice = request.unitPrice == null
+          ? null
+          : _moneyDecimal(request.unitPrice!);
+      final lineTotal = request.lineTotal == null
+          ? null
+          : _moneyDecimal(request.lineTotal!);
+      final lineRepresentation = <String, Object?>{
+        'receiptId': request.receiptId,
+        // Raw text remains within this home-private receipt projection.
+        'rawDescription': rawDescription,
+        'quantity': _decimal(request.quantity),
+        'originalPackText': originalPackText,
+        'unitPrice': unitPrice,
+        'lineTotal': lineTotal,
+        'homeProductId': null,
+        'approvalStatus': 'unreviewed',
+      };
+      await _writeProjection(
+        homeId: request.homeId,
+        entityType: _receiptLineType,
+        entityId: lineId,
+        revision: 1,
+        representation: lineRepresentation,
+        at: at,
+      );
+      await _writeProjection(
+        homeId: request.homeId,
+        entityType: _receiptType,
+        entityId: request.receiptId,
+        revision: receipt.revision + 1,
+        representation: _withoutProjectionMetadata(receiptPayload),
+        at: at,
+      );
+      await _insertGeneratedCommand(
+        homeId: request.homeId,
+        entityType: _receiptLineType,
+        entityId: lineId,
+        commandType: 'purchasing.receipt-line.create',
+        baseRevision: receipt.revision,
+        payload: <String, Object?>{
           'receiptId': request.receiptId,
-          // Raw text remains within this home-private receipt projection.
           'rawDescription': rawDescription,
           'quantity': _decimal(request.quantity),
           'originalPackText': originalPackText,
           'unitPrice': unitPrice,
           'lineTotal': lineTotal,
-          'homeProductId': null,
-          'approvalStatus': 'unreviewed',
-        };
-        await _writeProjection(
-          homeId: request.homeId,
-          entityType: _receiptLineType,
-          entityId: lineId,
-          revision: 1,
-          representation: lineRepresentation,
-          at: at,
-        );
-        await _writeProjection(
-          homeId: request.homeId,
-          entityType: _receiptType,
-          entityId: request.receiptId,
-          revision: receipt.revision + 1,
-          representation: _withoutProjectionMetadata(receiptPayload),
-          at: at,
-        );
-        await _insertGeneratedCommand(
-          homeId: request.homeId,
-          entityType: _receiptLineType,
-          entityId: lineId,
-          commandType: 'purchasing.receipt-line.create',
-          baseRevision: receipt.revision,
-          payload: <String, Object?>{
-            'receiptId': request.receiptId,
-            'rawDescription': rawDescription,
-            'quantity': _decimal(request.quantity),
-            'originalPackText': originalPackText,
-            'unitPrice': unitPrice,
-            'lineTotal': lineTotal,
-          },
-          at: at,
-        );
-        return PurchaseMutationResult(
-          entityId: lineId,
-          revision: 1,
-          disposition: PurchaseMutationDisposition.queued,
-        );
-      },
-    );
+        },
+        at: at,
+      );
+      return PurchaseMutationResult(
+        entityId: lineId,
+        revision: 1,
+        disposition: PurchaseMutationDisposition.queued,
+      );
+    });
     _triggerForegroundSync();
     return result;
   }

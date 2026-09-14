@@ -1,3 +1,5 @@
+import 'package:providentia/core/security/intake_entity_id.dart';
+
 import 'dart:async';
 import 'dart:collection';
 
@@ -188,6 +190,7 @@ final class StockPhotoCountController extends ChangeNotifier {
     StockPhotoAiRouteLoader? loadRoute,
     required String Function() idGenerator,
     Future<void> Function()? onAuthorizationDenied,
+    Future<void> Function(String extractionId)? onServerReviewRequired,
     DateTime Function()? clock,
     AiPrivacyPolicy policy = const AiPrivacyPolicy(),
   }) {
@@ -218,6 +221,7 @@ final class StockPhotoCountController extends ChangeNotifier {
       loadRoute: effectiveLoader,
       idGenerator: idGenerator,
       onAuthorizationDenied: onAuthorizationDenied,
+      onServerReviewRequired: onServerReviewRequired,
       clock: clock ?? DateTime.now,
       policy: policy,
     );
@@ -232,6 +236,7 @@ final class StockPhotoCountController extends ChangeNotifier {
     required this._loadRoute,
     required this._idGenerator,
     required this._onAuthorizationDenied,
+    required this.onServerReviewRequired,
     required this._clock,
     required this._policy,
   }) : _inventory = inventory {
@@ -249,6 +254,8 @@ final class StockPhotoCountController extends ChangeNotifier {
   final StockPhotoAiRouteLoader _loadRoute;
   final String Function() _idGenerator;
   final Future<void> Function()? _onAuthorizationDenied;
+  final Future<void> Function(String extractionId)? onServerReviewRequired;
+  String? _handoffTargetId;
   final DateTime Function() _clock;
   final AiPrivacyPolicy _policy;
   StockPhotoCountState _state = const StockPhotoCountState.idle();
@@ -270,6 +277,100 @@ final class StockPhotoCountController extends ChangeNotifier {
 
   List<InventoryItem> get homeProducts =>
       searchItems().where((item) => item.isHomeProduct).toList(growable: false);
+
+  String? get activeCountId {
+    final session = _inventory.state.activeSession;
+    return !_disposed &&
+            _state.status != StockPhotoCountStatus.accessDenied &&
+            session?.status == CountSessionStatus.open
+        ? session!.id
+        : null;
+  }
+
+  /// Transfers structured accepted candidates only. Matching, quantity approval
+  /// and closing still use the ordinary count controller and durable outbox.
+  Future<void> acceptReviewedHandoff(AiReviewHandoff handoff) async {
+    if (_disposed ||
+        handoff.homeId != homeId ||
+        handoff.kind != AiExtractionKind.stockPhoto ||
+        handoff.targetId == null ||
+        handoff.targetId != activeCountId ||
+        handoff.acceptedCandidates.any(
+          (candidate) => candidate.stockPayload == null,
+        )) {
+      throw StateError(
+        'Reopen the original count before receiving its reviewed candidates.',
+      );
+    }
+    final session = _inventory.state.activeSession!;
+    final candidates = handoff.acceptedCandidates
+        .map((candidate) {
+          final payload = candidate.stockPayload!;
+          final reference = '${candidate.extractionId}:${candidate.position}';
+          final lineId = intakeEntityId(<String>[
+            'stock-line',
+            homeId,
+            session.id,
+            reference,
+          ]);
+          final prior = session.lines
+              .where((line) => line.id == lineId)
+              .firstOrNull;
+          final proposal = StockCandidateProposal(
+            candidateId: reference,
+            brand: const ExtractedField<String>(value: null, confidence: 0),
+            productName: ExtractedField<String>(
+              value: payload.rawText ?? payload.description,
+              confidence: 0,
+            ),
+            variant: const ExtractedField<String>(value: null, confidence: 0),
+            packDescription: ExtractedField<String>(
+              value: payload.packText,
+              confidence: 0,
+            ),
+            quantityMinimum: payload.quantityMinimum,
+            quantityMaximum: payload.quantityMaximum,
+            confidence: 0,
+            warnings: const <String>[
+              'Match a home product and explicitly confirm the observed quantity.',
+            ],
+          );
+          return StockPhotoCandidateReview(
+            proposal: proposal,
+            serverCandidate: candidate,
+            homeProductId: prior?.itemId,
+            quantity:
+                prior?.observedQuantity ??
+                (payload.quantityMinimum == payload.quantityMaximum
+                    ? payload.quantityMinimum
+                    : null),
+            counted: prior?.status == CountLineStatus.confirmed,
+          );
+        })
+        .toList(growable: false);
+    _handoffTargetId = handoff.targetId;
+    _setState(
+      StockPhotoCountState(
+        status: StockPhotoCountStatus.review,
+        prepared: _state.prepared,
+        provider: _state.provider,
+        privacyMode: _state.privacyMode,
+        proposal: StockPhotoProposal(
+          id: handoff.extractionId,
+          runId: handoff.extractionId,
+          schemaVersion: AiProposalSchemas.stockPhotoVersion,
+          classification: StockImageClassification.householdStock,
+          candidates: candidates
+              .map((candidate) => candidate.proposal)
+              .toList(growable: false),
+          warnings: const <String>[],
+        ),
+        candidates: candidates,
+        safeMessage:
+            'Evidence review is complete. Confirm ordinary count lines once, then explicitly finish and apply the count.',
+      ),
+    );
+  }
 
   void _setState(StockPhotoCountState state) {
     if (_disposed) return;

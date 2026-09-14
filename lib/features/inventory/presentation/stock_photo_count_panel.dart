@@ -155,7 +155,12 @@ final class StockPhotoCountPanel extends StatelessWidget {
         ];
       case StockPhotoCountStatus.review:
         return <Widget>[
-          _PreviewStrip(controller: controller, media: state.prepared!.media),
+          if (state.prepared != null)
+            _PreviewStrip(controller: controller, media: state.prepared!.media)
+          else
+            const Text(
+              'Structured review restored. Original images remain on their originating device.',
+            ),
           const SizedBox(height: 12),
           if (state.candidates.isEmpty)
             const Text('No stock candidates were found. The count stays open.'),

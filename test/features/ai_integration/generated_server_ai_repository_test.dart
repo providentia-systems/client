@@ -855,6 +855,8 @@ Map<String, Object?> _extraction({
   'provider': 'openai',
   'model': 'gpt-5-mini',
   'status': 'review_required',
+  'observationDecisions': <Object?>[],
+  'discrepancies': <Object?>[],
   'inputMimeType': 'image/jpeg',
   'inputSha256':
       'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
