@@ -1,0 +1,36 @@
+name: Step 1 synchronization regressions
+
+on:
+  pull_request:
+    paths:
+      - lib/app/**
+      - lib/core/networking/**
+      - lib/core/synchronization/**
+      - test/app/step_1_sync_binding_test.dart
+      - test/core/synchronization/**
+      - .github/workflows/step-1-sync-regressions.yml
+
+permissions:
+  contents: read
+
+jobs:
+  regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Install repository-pinned Flutter and Dart
+        run: |
+          tool/install_flutter_linux.sh "$RUNNER_TEMP/providentia-sdk"
+          echo "$RUNNER_TEMP/providentia-sdk/flutter/bin" >> "$GITHUB_PATH"
+      - run: flutter pub get --enforce-lockfile
+      - name: Run production binding and synchronization regressions
+        run: |
+          flutter test test/app/step_1_sync_binding_test.dart
+          flutter test test/core/synchronization
+      - name: Run protected identity and onboarding regressions
+        run: |
+          flutter test test/features/identity
+          flutter test test/integration/api11_onboarding_adapters_test.dart
