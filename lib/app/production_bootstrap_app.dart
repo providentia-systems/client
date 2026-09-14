@@ -757,7 +757,7 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
         final plan = workspace.settings.transmissionPlan;
         final profile = plan == null
             ? null
-            : workspace.profile(plan.primary.profileId ?? '');
+            : workspace.profile(plan.primary.profileId);
         if (profile != null && profile.enabled) {
           return StockPhotoAiRoute(
             profile: profile,

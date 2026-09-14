@@ -1,11 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:ui' as ui;
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:providentia/features/ai_integration/application/ai_ports.dart';
 import 'package:providentia/features/ai_integration/application/server_ai_repository.dart';
@@ -18,6 +19,17 @@ import 'package:providentia/features/ai_integration/presentation/server_ai_works
 import 'test_fixtures.dart';
 
 void main() {
+  setUpAll(() async {
+    final path = Platform.environment['PROVIDENTIA_UI_FONT'];
+    if (path != null) {
+      final loader = FontLoader('Roboto')
+        ..addFont(
+          Future.value(ByteData.sublistView(await File(path).readAsBytes())),
+        );
+      await loader.load();
+    }
+  });
+
   test(
     'removing personal AI credentials feature keeps read access and disables use',
     () {
@@ -1549,6 +1561,7 @@ void main() {
           find.byKey(const Key('ai-configuration-required')),
           findsOneWidget,
         );
+        await _scrollTo(tester, const Key('ai-configuration-required'));
         await _captureStep2(tester, 'household-ai-setup-required');
         await _scrollTo(tester, const Key('ai-add-profile'));
         expect(find.textContaining('No provider profile'), findsOneWidget);
@@ -1562,7 +1575,7 @@ void main() {
       },
     );
 
-    testWidgets('manager controls send exact revisioned write-only requests', (
+    testWidgets('owner controls send exact revisioned write-only requests', (
       tester,
     ) async {
       final repository = _ServerRepository(
@@ -1572,7 +1585,10 @@ void main() {
           ],
         ),
       );
-      final controller = _controller(repository: repository);
+      final controller = _controller(
+        repository: repository,
+        capabilities: _ownerCapabilities(),
+      );
       addTearDown(controller.dispose);
       await controller.load();
       await _pumpPage(tester, controller);
