@@ -1,13 +1,13 @@
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/services.dart';
 
 import '../application/data_export_ports.dart';
 import '../domain/data_export_artifact.dart';
+import 'platform_data_export_ios_channel.dart';
 
 final class PlatformDataExportSaver implements DataExportSaver {
-  static const _channel = MethodChannel('providentia/data-export');
+  static const _channel = IosDataExportChannel();
   var _generation = 0;
 
   @override
@@ -17,10 +17,7 @@ final class PlatformDataExportSaver implements DataExportSaver {
       // file_picker 11.0.3 leaves a plaintext Documents copy on iOS. The owned
       // bridge instead uses excluded-from-backup, file-protected temporary
       // storage and removes it on success, cancellation, and the next launch.
-      final saved = await _channel.invokeMethod<bool>('save', <String, Object?>{
-        'filename': artifact.filename,
-        'bytes': artifact.bytes,
-      });
+      final saved = await _channel.save(artifact.filename, artifact.bytes);
       return saved == true
           ? DataExportSaveResult.saved
           : DataExportSaveResult.cancelled;
@@ -54,6 +51,6 @@ final class PlatformDataExportSaver implements DataExportSaver {
   @override
   Future<void> clearTemporaryState() async {
     _generation++;
-    if (Platform.isIOS) await _channel.invokeMethod<void>('discard');
+    if (Platform.isIOS) await _channel.discard();
   }
 }

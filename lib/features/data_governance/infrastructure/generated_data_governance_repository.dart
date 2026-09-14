@@ -2,11 +2,12 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
-import '../application/data_export_ports.dart';
-import '../domain/data_export_artifact.dart';
 import 'package:providentia/features/data_governance/application/data_governance_service.dart';
 import 'package:providentia/features/data_governance/domain/data_governance_models.dart';
 import 'package:providentia_api_client/providentia_api_client.dart';
+
+import '../application/data_export_ports.dart';
+import '../domain/data_export_artifact.dart';
 
 /// Current-contract adapter for account and home data-governance requests.
 ///
@@ -188,8 +189,9 @@ final class GeneratedDataGovernanceRepository
         // Refreshing a concurrently replaced/consumed token requires the new
         // request revision. Never replay a single-use token or loop endlessly.
         if (attempt == 0 &&
-            (error.statusCode == 409 || error.statusCode == 410))
+            (error.statusCode == 409 || error.statusCode == 410)) {
           continue;
+        }
         rethrow;
       }
     }
@@ -224,8 +226,9 @@ final class GeneratedDataGovernanceRepository
       );
       for (final item in page) {
         if (item.id == request.id) {
-          if (item.kind != request.kind)
+          if (item.kind != request.kind) {
             throw const FormatException('Export kind changed.');
+          }
           return item;
         }
       }

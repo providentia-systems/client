@@ -1,8 +1,4 @@
-import 'package:providentia/features/ai_integration/application/ai_review_resume_store.dart';
-import 'package:providentia/features/ai_integration/infrastructure/drift_ai_review_resume_store.dart';
-
 import 'dart:async';
-import 'package:providentia/features/data_governance/infrastructure/platform_data_export_saver.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -32,12 +28,14 @@ import 'package:providentia/core/synchronization/sync_coordinator.dart';
 import 'package:providentia/core/synchronization/sync_models.dart';
 import 'package:providentia/core/synchronization/sync_ports.dart';
 import 'package:providentia/features/ai_integration/application/ai_ports.dart';
+import 'package:providentia/features/ai_integration/application/ai_review_resume_store.dart';
 import 'package:providentia/features/ai_integration/application/receipt_ai_handoff_controller.dart';
 import 'package:providentia/features/ai_integration/domain/ai_models.dart';
 import 'package:providentia/features/ai_integration/domain/ai_policy.dart';
 import 'package:providentia/features/ai_integration/domain/server_ai_models.dart';
 import 'package:providentia/features/ai_integration/infrastructure/api17_ai_gateway.dart';
 import 'package:providentia/features/ai_integration/infrastructure/captured_file_cleanup.dart';
+import 'package:providentia/features/ai_integration/infrastructure/drift_ai_review_resume_store.dart';
 import 'package:providentia/features/ai_integration/infrastructure/generated_server_ai_repository.dart';
 import 'package:providentia/features/ai_integration/infrastructure/media_acquisition_service.dart';
 import 'package:providentia/features/ai_integration/infrastructure/receipt_page_media_editor.dart';
@@ -76,6 +74,7 @@ import 'package:providentia/features/catalog_import/presentation/catalog_import_
 import 'package:providentia/features/data_governance/application/data_governance_service.dart';
 import 'package:providentia/features/data_governance/domain/data_governance_models.dart';
 import 'package:providentia/features/data_governance/infrastructure/generated_data_governance_repository.dart';
+import 'package:providentia/features/data_governance/infrastructure/platform_data_export_saver.dart';
 import 'package:providentia/features/data_governance/presentation/data_governance_controller.dart';
 import 'package:providentia/features/data_governance/presentation/data_governance_page.dart';
 import 'package:providentia/features/homes/application/home_session_manager.dart';
@@ -2058,8 +2057,9 @@ final class _ProductionServerAiRouteState
         widget.stockPhotoController!
             .acceptReviewedHandoff(handoff)
             .then((_) {
-              if (mounted && !_sensitiveStateCleared)
+              if (mounted && !_sensitiveStateCleared) {
                 widget.onStockReviewReady!();
+              }
             })
             .catchError((Object _) {
               if (mounted && !_sensitiveStateCleared) {

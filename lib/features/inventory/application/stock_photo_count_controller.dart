@@ -1,9 +1,8 @@
-import 'package:providentia/core/security/intake_entity_id.dart';
-
 import 'dart:async';
 import 'dart:collection';
 
 import 'package:flutter/foundation.dart';
+import 'package:providentia/core/security/intake_entity_id.dart';
 import 'package:providentia/features/ai_integration/application/ai_ports.dart';
 import 'package:providentia/features/ai_integration/domain/ai_models.dart';
 import 'package:providentia/features/ai_integration/domain/ai_policy.dart';
@@ -15,8 +14,8 @@ import 'package:providentia/features/inventory/domain/inventory_models.dart';
 import 'package:providentia/features/inventory/presentation/inventory_controller.dart';
 
 part 'stock_photo_count_acquisition.dart';
-part 'stock_photo_count_review.dart';
 part 'stock_photo_count_internals.dart';
+part 'stock_photo_count_review.dart';
 
 enum StockPhotoCountStatus {
   idle,

@@ -14,8 +14,9 @@ final class DriftAiReviewResumeStore implements AiReviewResumeStore {
     required this.homeId,
     required this.accountId,
   }) {
-    if (!isUuid(homeId) || !isUuid(accountId))
+    if (!isUuid(homeId) || !isUuid(accountId)) {
       throw ArgumentError('Invalid AI resume scope.');
+    }
   }
   final AppDatabase _database;
   final String homeId;
@@ -36,9 +37,16 @@ final class DriftAiReviewResumeStore implements AiReviewResumeStore {
             .get();
     final result = <AiReviewResumeReference>[];
     for (final row in rows) {
-      final Object? decoded = jsonDecode(row.payload);
-      if (decoded is! Map<String, Object?> || decoded['accountId'] != accountId)
+      final Object? decoded;
+      try {
+        decoded = jsonDecode(row.payload);
+      } on FormatException {
+        continue; // Corrupt hints never replace authoritative server review.
+      }
+      if (decoded is! Map<String, Object?> ||
+          decoded['accountId'] != accountId) {
         continue;
+      }
       final id = decoded['extractionId'];
       if (id is! String || !isUuid(id) || row.entityId != _id(id)) continue;
       final kind = switch (decoded['kind']) {
@@ -46,8 +54,9 @@ final class DriftAiReviewResumeStore implements AiReviewResumeStore {
         'stockPhoto' => AiExtractionKind.stockPhoto,
         _ => null,
       };
-      if (kind != null)
+      if (kind != null) {
         result.add(AiReviewResumeReference(extractionId: id, kind: kind));
+      }
       if (result.length == 20) break;
     }
     return List<AiReviewResumeReference>.unmodifiable(result);
@@ -55,8 +64,9 @@ final class DriftAiReviewResumeStore implements AiReviewResumeStore {
 
   @override
   Future<void> remember(AiReviewResumeReference reference) async {
-    if (!isUuid(reference.extractionId))
+    if (!isUuid(reference.extractionId)) {
       throw ArgumentError('Invalid extraction reference.');
+    }
     await _database
         .into(_database.localRecords)
         .insertOnConflictUpdate(

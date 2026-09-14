@@ -1,8 +1,7 @@
 import 'dart:async';
 
-import 'package:providentia/core/security/intake_entity_id.dart';
-
 import 'package:flutter/foundation.dart';
+import 'package:providentia/core/security/intake_entity_id.dart';
 import 'package:providentia/features/ai_integration/domain/ai_models.dart';
 import 'package:providentia/features/ai_integration/domain/server_ai_models.dart';
 import 'package:providentia/features/purchasing/application/purchase_repository.dart';
@@ -123,10 +122,11 @@ final class ReceiptAiHandoffController extends ChangeNotifier {
     try {
       final recovery = _repository;
       if (recovery is PurchaseIntakeRecoveryRepository) {
-        final prior = await recovery.findIntakeReceipt(
-          homeId: handoff.homeId,
-          sourceReference: sourceReference,
-        );
+        final prior = await (recovery as PurchaseIntakeRecoveryRepository)
+            .findIntakeReceipt(
+              homeId: handoff.homeId,
+              sourceReference: sourceReference,
+            );
         if (!_stillAuthorized(epoch)) return false;
         if (prior?.status == 'committed') {
           _receiptId = prior!.id;
