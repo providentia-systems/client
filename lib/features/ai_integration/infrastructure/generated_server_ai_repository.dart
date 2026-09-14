@@ -8,7 +8,8 @@ import 'package:providentia_api_client/providentia_api_client.dart';
 /// Closed, current-contract boundary for household AI management
 /// and mandatory review. Raw response maps and credential material never
 /// leave this adapter.
-final class GeneratedServerAiRepository implements ServerAiRepository {
+final class GeneratedServerAiRepository
+    implements ServerAiRepository, AiEvidenceReviewRepository {
   const GeneratedServerAiRepository(this._client);
 
   final ProvidentiaApiClient _client;
@@ -289,7 +290,9 @@ final class GeneratedServerAiRepository implements ServerAiRepository {
       if (candidate.extractionId.trim().isEmpty ||
           candidate.position < 0 ||
           candidate.revision < 1 ||
-          candidate.status != AiCandidateReviewStatus.pending) {
+          (candidate.status != AiCandidateReviewStatus.pending &&
+              !(decision == AiCandidateDecision.reject &&
+                  candidate.status == AiCandidateReviewStatus.accepted))) {
         throw const AiServerException(AiServerFailureKind.validation);
       }
       await _client.reviewAiExtractionCandidate(
@@ -325,6 +328,83 @@ final class GeneratedServerAiRepository implements ServerAiRepository {
       return review;
     });
   }
+
+  @override
+  Future<AiExtractionReview> reviewObservation({
+    required AiExtractionReview review,
+    required AiObservationReview observation,
+    required AiObservationDecision decision,
+  }) => _run(() async {
+    if (decision == AiObservationDecision.pending ||
+        observation.exactDigest ||
+        !review.observations.contains(observation)) {
+      throw const AiServerException(AiServerFailureKind.validation);
+    }
+    await _client.reviewAiObservationDecision(
+      homeId: review.homeId,
+      extractionId: review.extractionId,
+      decisionId: observation.id,
+      body: <String, Object?>{
+        'decision': decision == AiObservationDecision.distinct
+            ? 'distinct'
+            : 'confirmed_duplicate',
+        'expectedRevision': observation.revision,
+      },
+    );
+    final updated = await loadExtractionReview(
+      homeId: review.homeId,
+      extractionId: review.extractionId,
+    );
+    final current = updated.observations
+        .where((item) => item.id == observation.id)
+        .firstOrNull;
+    if (current == null ||
+        current.revision != observation.revision + 1 ||
+        current.decision != decision) {
+      throw const FormatException(
+        'Observation decision was not revision-bound.',
+      );
+    }
+    return updated;
+  });
+
+  @override
+  Future<AiExtractionReview> reviewDiscrepancy({
+    required AiExtractionReview review,
+    required AiDiscrepancyReview discrepancy,
+    required AiDiscrepancyDecision decision,
+  }) => _run(() async {
+    if (decision == AiDiscrepancyDecision.pending ||
+        !review.discrepancies.contains(discrepancy)) {
+      throw const AiServerException(AiServerFailureKind.validation);
+    }
+    await _client.reviewAiExtractionDiscrepancy(
+      homeId: review.homeId,
+      extractionId: review.extractionId,
+      position: discrepancy.position.toString(),
+      body: <String, Object?>{
+        'decision': decision == AiDiscrepancyDecision.acceptedPrimary
+            ? 'accepted_primary'
+            : 'rejected_extraction',
+        'expectedRevision': discrepancy.revision,
+      },
+    );
+    final updated = await loadExtractionReview(
+      homeId: review.homeId,
+      extractionId: review.extractionId,
+    );
+    final current = updated.discrepancies
+        .where((item) => item.position == discrepancy.position)
+        .firstOrNull;
+    if (current == null ||
+        current.revision != discrepancy.revision + 1 ||
+        current.decision != decision) {
+      throw const FormatException(
+        'Discrepancy decision was not revision-bound.',
+      );
+    }
+    return updated;
+  });
 
   Future<T> _run<T>(Future<T> Function() action) async {
     try {
@@ -637,6 +717,21 @@ AiExtractionReview _extractionReview(
             _ => throw const FormatException('Unknown AI candidate status.'),
           },
           revision: _integer(candidate, 'revision', minimum: 1),
+          stockPayload: candidateType == AiCandidateType.stockItem
+              ? AiStockCandidatePayload(
+                  rawText: _nullableBoundedText(payload, 'rawText', 500),
+                  description: _boundedString(payload, 'description', 500),
+                  packText: _nullableBoundedText(payload, 'packText', 191),
+                  quantityMinimum: _nonNegativeDecimal(
+                    payload,
+                    'quantityMinimum',
+                  ),
+                  quantityMaximum: _nonNegativeDecimal(
+                    payload,
+                    'quantityMaximum',
+                  ),
+                )
+              : null,
           receiptPayload: candidateType == AiCandidateType.receiptLine
               ? _receiptCandidatePayload(payload, receiptHeader)
               : null,
@@ -652,7 +747,139 @@ AiExtractionReview _extractionReview(
     extractionId: extractionId,
     kind: kind,
     candidates: candidates,
+    targetId: _nullableString(object, 'targetId'),
+    observations: _observationReviews(object, candidates),
+    discrepancies: _discrepancyReviews(object),
   );
+}
+
+List<AiObservationReview> _observationReviews(
+  Map<String, Object?> object,
+  List<AiReviewCandidate> candidates,
+) {
+  final positions = candidates.map((item) => item.position).toSet();
+  final ids = <String>{};
+  return _objectList(object, 'observationDecisions')
+      .map((item) {
+        final id = _string(item, 'id');
+        if (!ids.add(id))
+          throw const FormatException('Duplicate observation decision.');
+        final exactDigest = switch (_string(item, 'decisionType')) {
+          'exact_digest' => true,
+          'visual_overlap' => false,
+          _ => throw const FormatException(
+            'Unknown observation decision type.',
+          ),
+        };
+        final evidence = _object(item['evidence'], 'observation evidence');
+        final left = exactDigest
+            ? null
+            : _integer(evidence, 'leftCandidatePosition', minimum: 0);
+        final right = exactDigest
+            ? null
+            : _integer(evidence, 'rightCandidatePosition', minimum: 0);
+        if (!exactDigest &&
+            (left == right ||
+                !positions.contains(left) ||
+                !positions.contains(right))) {
+          throw const FormatException(
+            'Observation points outside extraction candidates.',
+          );
+        }
+        final decision = switch (_string(item, 'decision')) {
+          'pending' => AiObservationDecision.pending,
+          'confirmed_duplicate' => AiObservationDecision.confirmedDuplicate,
+          'distinct' => AiObservationDecision.distinct,
+          _ => throw const FormatException('Unknown observation decision.'),
+        };
+        if (exactDigest &&
+            decision != AiObservationDecision.confirmedDuplicate) {
+          throw const FormatException(
+            'Exact digest evidence cannot restore a skipped image.',
+          );
+        }
+        final leftReference = _boundedString(item, 'leftReference', 100);
+        final rightReference = _boundedString(item, 'rightReference', 100);
+        final referencePattern = RegExp(
+          r'^observation:[0-9]+(:candidate:[0-9]+)?$',
+        );
+        if (!referencePattern.hasMatch(leftReference) ||
+            !referencePattern.hasMatch(rightReference)) {
+          throw const FormatException('Invalid observation reference.');
+        }
+        return AiObservationReview(
+          id: id,
+          revision: _integer(item, 'revision', minimum: 1),
+          exactDigest: exactDigest,
+          leftReference: leftReference,
+          rightReference: rightReference,
+          leftCandidatePosition: left,
+          rightCandidatePosition: right,
+          decision: decision,
+        );
+      })
+      .toList(growable: false);
+}
+
+List<AiDiscrepancyReview> _discrepancyReviews(Map<String, Object?> object) {
+  final positions = <int>{};
+  return _objectList(object, 'discrepancies')
+      .map((item) {
+        final position = _integer(item, 'position', minimum: 0);
+        if (!positions.add(position))
+          throw const FormatException('Duplicate discrepancy.');
+        final payload = _object(item['payload'], 'discrepancy evidence');
+        final type = _string(payload, 'type');
+        if (!const <String>{
+          'field',
+          'candidate-field',
+          'missing-primary',
+          'missing-validation',
+        }.contains(type)) {
+          throw const FormatException('Unknown discrepancy type.');
+        }
+        final field = _nullableString(payload, 'field');
+        if ((type == 'field' || type == 'candidate-field') &&
+            !const <String>{
+              'merchant',
+              'receiptNumber',
+              'purchaseDate',
+              'currency',
+              'totalAmount',
+              'taxAmount',
+              'quantity',
+              'quantityMinimum',
+              'quantityMaximum',
+              'packText',
+              'unitPrice',
+              'lineTotal',
+            }.contains(field)) {
+          throw const FormatException('Unknown discrepancy field.');
+        }
+        return AiDiscrepancyReview(
+          position: position,
+          observationIndex: _integer(item, 'observationIndex', minimum: 0),
+          revision: _integer(item, 'revision', minimum: 1),
+          type: type,
+          field: field,
+          primary: _evidenceScalar(payload['primary']),
+          validation: _evidenceScalar(payload['validation']),
+          decision: switch (_string(item, 'reviewStatus')) {
+            'pending' => AiDiscrepancyDecision.pending,
+            'accepted_primary' => AiDiscrepancyDecision.acceptedPrimary,
+            'rejected_extraction' => AiDiscrepancyDecision.rejectedExtraction,
+            _ => throw const FormatException('Unknown discrepancy decision.'),
+          },
+        );
+      })
+      .toList(growable: false);
+}
+
+String? _evidenceScalar(Object? value) {
+  if (value == null) return null;
+  if (value is String && value.length <= 500) return value;
+  if (value is num && value.isFinite) return value.toString();
+  throw const FormatException('Invalid discrepancy scalar.');
 }
 
 AiReceiptHeaderPayload? _receiptHeader(Object? value) {

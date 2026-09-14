@@ -339,6 +339,10 @@ extension StockPhotoCountAcquisition on StockPhotoCountController {
                   : '${deduplicated.$2} overlapping candidate${deduplicated.$2 == 1 ? '' : 's'} removed; confirm the retained count once.',
             ),
           );
+          if (route.privacyMode == AiPrivacyMode.serverProxyCloud &&
+              onServerReviewRequired != null) {
+            await onServerReviewRequired!(result.proposal.id);
+          }
         case AiExtractionQuarantined<StockPhotoProposal>():
           await _discardPrepared();
           _fail('The images were quarantined and cannot update inventory.');

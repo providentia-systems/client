@@ -174,6 +174,11 @@ extension StockPhotoCountReview on StockPhotoCountController {
     );
     if (index < 0) return;
     final candidate = _state.candidates[index];
+    if (onServerReviewRequired != null &&
+        candidate.serverCandidate?.status == AiCandidateReviewStatus.pending) {
+      await onServerReviewRequired!(candidate.serverCandidate!.extractionId);
+      return;
+    }
     if (candidate.counted || _pendingCandidateIds.contains(candidateId)) return;
     if (candidate.rejected ||
         candidate.serverCandidate?.status == AiCandidateReviewStatus.rejected) {
@@ -204,12 +209,24 @@ extension StockPhotoCountReview on StockPhotoCountController {
         ? '${proposal.id}:$candidateId'
         : '${serverCandidate.extractionId}:${serverCandidate.position}';
     final session = _inventory.state.activeSession;
-    if (session == null || session.status != CountSessionStatus.open) {
+    if (session == null ||
+        session.status != CountSessionStatus.open ||
+        (_handoffTargetId != null && session.id != _handoffTargetId)) {
       _fail('Keep the ordinary stock count open.', keepReview: true);
       return;
     }
     final replayedLine = session.confirmedLines
-        .where((line) => line.photoId == photoReferenceId)
+        .where(
+          (line) =>
+              line.photoId == photoReferenceId ||
+              line.id ==
+                  intakeEntityId(<String>[
+                    'stock-line',
+                    homeId,
+                    session.id,
+                    photoReferenceId,
+                  ]),
+        )
         .firstOrNull;
     if (replayedLine != null && replayedLine.itemId != product.id) {
       _fail(
@@ -303,6 +320,14 @@ extension StockPhotoCountReview on StockPhotoCountController {
       return;
     }
     final serverCandidate = candidate.serverCandidate;
+    if (_handoffTargetId != null &&
+        serverCandidate?.status == AiCandidateReviewStatus.accepted) {
+      _updateCandidate(
+        candidateId,
+        (current) => current.copyWith(rejected: true),
+      );
+      return; // Explicit ordinary omission; never creates a count or stock movement.
+    }
     if (serverCandidate?.status == AiCandidateReviewStatus.accepted) {
       _fail(
         'This AI candidate was already accepted; finish or retry its count.',

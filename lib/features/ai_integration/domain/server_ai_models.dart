@@ -384,6 +384,83 @@ final class AiReceiptCandidatePayload {
   final AiReceiptHeaderPayload? header;
 }
 
+enum AiObservationDecision { pending, confirmedDuplicate, distinct }
+
+enum AiDiscrepancyDecision { pending, acceptedPrimary, rejectedExtraction }
+
+/// Only the evidence needed for a human decision crosses this boundary.
+/// Digests, provider traces and reviewer identities are not presentation data.
+final class AiObservationReview {
+  const AiObservationReview({
+    required this.id,
+    required this.revision,
+    required this.exactDigest,
+    required this.leftReference,
+    required this.rightReference,
+    required this.decision,
+    this.leftCandidatePosition,
+    this.rightCandidatePosition,
+  });
+
+  final String id;
+  final int revision;
+  final bool exactDigest;
+  final String leftReference;
+  final String rightReference;
+  final int? leftCandidatePosition;
+  final int? rightCandidatePosition;
+  final AiObservationDecision decision;
+}
+
+final class AiDiscrepancyReview {
+  const AiDiscrepancyReview({
+    required this.position,
+    required this.observationIndex,
+    required this.revision,
+    required this.type,
+    required this.field,
+    required this.primary,
+    required this.validation,
+    required this.decision,
+  });
+
+  final int position;
+  final int observationIndex;
+  final int revision;
+  final String type;
+  final String? field;
+  final String? primary;
+  final String? validation;
+  final AiDiscrepancyDecision decision;
+}
+
+final class AiStockCandidatePayload {
+  AiStockCandidatePayload({
+    required this.rawText,
+    required this.description,
+    required this.packText,
+    required this.quantityMinimum,
+    required this.quantityMaximum,
+  }) {
+    _boundedOptionalText(rawText, 'rawText', 500);
+    _boundedOptionalText(packText, 'packText', 191);
+    if (description.trim().isEmpty ||
+        description.length > 500 ||
+        !quantityMinimum.isFinite ||
+        !quantityMaximum.isFinite ||
+        quantityMinimum < 0 ||
+        quantityMaximum < quantityMinimum) {
+      throw ArgumentError('Invalid stock review payload.');
+    }
+  }
+
+  final String? rawText;
+  final String description;
+  final String? packText;
+  final double quantityMinimum;
+  final double quantityMaximum;
+}
+
 final class AiReviewCandidate {
   const AiReviewCandidate({
     required this.homeId,
@@ -394,6 +471,7 @@ final class AiReviewCandidate {
     required this.status,
     required this.revision,
     this.receiptPayload,
+    this.stockPayload,
   });
 
   final String homeId;
@@ -404,6 +482,7 @@ final class AiReviewCandidate {
   final AiCandidateReviewStatus status;
   final int revision;
   final AiReceiptCandidatePayload? receiptPayload;
+  final AiStockCandidatePayload? stockPayload;
 }
 
 final class AiExtractionReview {
@@ -412,7 +491,12 @@ final class AiExtractionReview {
     required this.extractionId,
     required this.kind,
     required List<AiReviewCandidate> candidates,
-  }) : candidates = UnmodifiableListView<AiReviewCandidate>(
+    this.targetId,
+    List<AiObservationReview> observations = const <AiObservationReview>[],
+    List<AiDiscrepancyReview> discrepancies = const <AiDiscrepancyReview>[],
+  }) : observations = List<AiObservationReview>.unmodifiable(observations),
+       discrepancies = List<AiDiscrepancyReview>.unmodifiable(discrepancies),
+       candidates = UnmodifiableListView<AiReviewCandidate>(
          List<AiReviewCandidate>.of(candidates),
        ) {
     if (homeId.trim().isEmpty || extractionId.trim().isEmpty) {
@@ -430,6 +514,39 @@ final class AiExtractionReview {
   final String extractionId;
   final AiExtractionKind kind;
   final List<AiReviewCandidate> candidates;
+  final String? targetId;
+  final List<AiObservationReview> observations;
+  final List<AiDiscrepancyReview> discrepancies;
+
+  bool get hasUnresolvedEvidence =>
+      observations.any(
+        (item) => item.decision == AiObservationDecision.pending,
+      ) ||
+      discrepancies.any(
+        (item) => item.decision != AiDiscrepancyDecision.acceptedPrimary,
+      );
+
+  bool isConfirmedDuplicate(int position) => observations.any(
+    (item) =>
+        !item.exactDigest &&
+        item.decision == AiObservationDecision.confirmedDuplicate &&
+        item.rightCandidatePosition == position,
+  );
+
+  bool canAccept(int position) =>
+      !hasUnresolvedEvidence && !isConfirmedDuplicate(position);
+
+  bool get canHandoff =>
+      !hasPending &&
+      !hasUnresolvedEvidence &&
+      candidates.any(
+        (item) => item.status == AiCandidateReviewStatus.accepted,
+      ) &&
+      !candidates.any(
+        (item) =>
+            item.status == AiCandidateReviewStatus.accepted &&
+            isConfirmedDuplicate(item.position),
+      );
 
   bool get hasPending => candidates.any(
     (candidate) => candidate.status == AiCandidateReviewStatus.pending,
@@ -444,6 +561,7 @@ final class AiReviewHandoff {
     required this.extractionId,
     required this.kind,
     required List<AiReviewCandidate> acceptedCandidates,
+    this.targetId,
   }) : acceptedCandidates = UnmodifiableListView<AiReviewCandidate>(
          List<AiReviewCandidate>.of(acceptedCandidates),
        ) {
@@ -472,6 +590,7 @@ final class AiReviewHandoff {
   final String extractionId;
   final AiExtractionKind kind;
   final List<AiReviewCandidate> acceptedCandidates;
+  final String? targetId;
 
   List<int> get acceptedPositions => List<int>.unmodifiable(
     acceptedCandidates.map((candidate) => candidate.position),

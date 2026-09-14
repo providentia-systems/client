@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:providentia/core/security/intake_entity_id.dart';
+
 import 'package:flutter/foundation.dart';
 import 'package:providentia/features/ai_integration/domain/ai_models.dart';
 import 'package:providentia/features/ai_integration/domain/server_ai_models.dart';
@@ -119,6 +121,27 @@ final class ReceiptAiHandoffController extends ChangeNotifier {
     _safeMessage = null;
     _notify();
     try {
+      final recovery = _repository;
+      if (recovery is PurchaseIntakeRecoveryRepository) {
+        final prior = await recovery.findIntakeReceipt(
+          homeId: handoff.homeId,
+          sourceReference: sourceReference,
+        );
+        if (!_stillAuthorized(epoch)) return false;
+        if (prior?.status == 'committed') {
+          _receiptId = prior!.id;
+          _status = ReceiptAiHandoffStatus.readyForPurchasingReview;
+          _safeMessage =
+              'This reviewed intake is already committed. Open Purchases to inspect it; no lines or stock were added.';
+          _notify();
+          return true;
+        }
+        if (prior != null && prior.status != 'draft') {
+          throw const PurchaseCaptureException(
+            'This intake was cancelled or is unavailable. No duplicate receipt was created.',
+          );
+        }
+      }
       var capture = await _activeCapture();
       if (!_stillAuthorized(epoch)) return false;
       if (capture != null && !_isThisDraft(capture)) {
@@ -142,6 +165,11 @@ final class ReceiptAiHandoffController extends ChangeNotifier {
                     ),
               notes: _draftNotes(),
               sourceReference: sourceReference,
+              clientReceiptId: intakeEntityId(<String>[
+                'receipt',
+                handoff.homeId,
+                handoff.extractionId,
+              ]),
             ),
           );
           receiptId = created.entityId;
@@ -159,6 +187,7 @@ final class ReceiptAiHandoffController extends ChangeNotifier {
           currency: receiptCurrency,
           line: lines[index],
           desiredOccurrence: _desiredOccurrence(index),
+          position: handoff.acceptedCandidates[index].position,
         );
         if (!_stillAuthorized(epoch)) return false;
       }
@@ -189,6 +218,7 @@ final class ReceiptAiHandoffController extends ChangeNotifier {
     required String currency,
     required AiReceiptCandidatePayload line,
     required int desiredOccurrence,
+    required int position,
   }) async {
     var capture = await _activeCapture();
     if (capture != null && capture.id != receiptId) {
@@ -199,7 +229,7 @@ final class ReceiptAiHandoffController extends ChangeNotifier {
     if (_matchingLineCount(capture, line, currency) >= desiredOccurrence) {
       return;
     }
-    final request = _lineRequest(receiptId, line, currency);
+    final request = _lineRequest(receiptId, line, currency, position);
     try {
       await _repository.addReceiptLine(request);
     } catch (_) {
@@ -214,10 +244,17 @@ final class ReceiptAiHandoffController extends ChangeNotifier {
     String receiptId,
     AiReceiptCandidatePayload line,
     String currency,
+    int position,
   ) => PurchaseReceiptLineRequest(
     homeId: handoff.homeId,
     receiptId: receiptId,
-    rawDescription: line.description,
+    rawDescription: line.rawText ?? line.description,
+    clientLineId: intakeEntityId(<String>[
+      'receipt-line',
+      handoff.homeId,
+      handoff.extractionId,
+      '$position',
+    ]),
     quantity: line.quantity,
     originalPackText: line.packText,
     unitPrice: line.unitPriceMinorUnits == null
@@ -244,7 +281,8 @@ final class ReceiptAiHandoffController extends ChangeNotifier {
   ) {
     if (capture == null) return 0;
     return capture.lines.where((existing) {
-      return existing.rawDescription.trim() == line.description.trim() &&
+      return existing.rawDescription.trim() ==
+              (line.rawText ?? line.description).trim() &&
           existing.quantity == line.quantity &&
           _normalized(existing.originalPackText) ==
               _normalized(line.packText) &&
@@ -257,7 +295,8 @@ final class ReceiptAiHandoffController extends ChangeNotifier {
     AiReceiptCandidatePayload first,
     AiReceiptCandidatePayload second,
   ) =>
-      first.description.trim() == second.description.trim() &&
+      (first.rawText ?? first.description).trim() ==
+          (second.rawText ?? second.description).trim() &&
       first.quantity == second.quantity &&
       _normalized(first.packText) == _normalized(second.packText) &&
       first.unitPriceMinorUnits == second.unitPriceMinorUnits &&

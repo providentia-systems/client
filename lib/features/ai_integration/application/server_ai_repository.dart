@@ -39,11 +39,27 @@ abstract interface class ServerAiRepository {
   });
 }
 
+/// Revision-bound evidence decisions. Keeping this capability explicit prevents
+/// local-only providers from pretending to support server review.
+abstract interface class AiEvidenceReviewRepository {
+  Future<AiExtractionReview> reviewObservation({
+    required AiExtractionReview review,
+    required AiObservationReview observation,
+    required AiObservationDecision decision,
+  });
+
+  Future<AiExtractionReview> reviewDiscrepancy({
+    required AiExtractionReview review,
+    required AiDiscrepancyReview discrepancy,
+    required AiDiscrepancyDecision decision,
+  });
+}
+
 final class AiReviewHandoffBuilder {
   const AiReviewHandoffBuilder();
 
   AiReviewHandoff build(AiExtractionReview review) {
-    if (review.hasPending) {
+    if (!review.canHandoff) {
       throw const AiServerException(AiServerFailureKind.validation);
     }
     final accepted = review.candidates
@@ -58,6 +74,7 @@ final class AiReviewHandoffBuilder {
       homeId: review.homeId,
       extractionId: review.extractionId,
       kind: review.kind,
+      targetId: review.targetId,
       acceptedCandidates: accepted,
     );
   }

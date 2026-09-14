@@ -21,7 +21,16 @@ final class _DataGovernancePageState extends State<DataGovernancePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Your data')),
+      appBar: AppBar(
+        title: const Text('Your data'),
+        actions: <Widget>[
+          IconButton(
+            tooltip: 'Refresh data requests',
+            onPressed: widget.controller.load,
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
+      ),
       body: ListenableBuilder(
         listenable: widget.controller,
         builder: (context, child) {
@@ -47,6 +56,30 @@ final class _DataGovernancePageState extends State<DataGovernancePage> {
               if (controller.notice != DataGovernanceNotice.none) ...<Widget>[
                 const SizedBox(height: 16),
                 _NoticeCard(notice: controller.notice),
+              ],
+              if (controller.readyExportRequestId != null) ...<Widget>[
+                const SizedBox(height: 12),
+                const Text(
+                  'This export is held in memory, not saved by the app. '
+                  'A saved copy belongs to you and is not removed by signing out or by export expiry.',
+                ),
+                Wrap(
+                  spacing: 8,
+                  children: <Widget>[
+                    FilledButton.icon(
+                      key: const Key('save-data-export'),
+                      onPressed: controller.busy ? null : controller.saveExport,
+                      icon: const Icon(Icons.save_alt),
+                      label: const Text('Save export copy'),
+                    ),
+                    TextButton(
+                      onPressed: controller.busy
+                          ? null
+                          : controller.discardExport,
+                      child: const Text('Discard downloaded copy'),
+                    ),
+                  ],
+                ),
               ],
               const SizedBox(height: 24),
               _scopeSection(
@@ -134,6 +167,11 @@ final class _DataGovernancePageState extends State<DataGovernancePage> {
                   request.canBeCancelled &&
                   capabilities.allows(cancelCapability),
               onCancel: () => widget.controller.cancel(request),
+              canDownload:
+                  !widget.controller.busy &&
+                  capabilities.allows(exportCapability) &&
+                  request.availableAt(DateTime.now().toUtc()),
+              onDownload: () => widget.controller.download(request),
             ),
           ),
       ],
@@ -221,11 +259,15 @@ final class _RequestCard extends StatelessWidget {
     required this.request,
     required this.canCancel,
     required this.onCancel,
+    required this.canDownload,
+    required this.onDownload,
   });
 
   final DataGovernanceRequest request;
   final bool canCancel;
   final VoidCallback onCancel;
+  final bool canDownload;
+  final VoidCallback onDownload;
 
   @override
   Widget build(BuildContext context) {
@@ -238,6 +280,27 @@ final class _RequestCard extends StatelessWidget {
           children: <Widget>[
             Text(_kindLabel(request.kind)),
             Text('Status: ${request.status.name}'),
+            if (request.isExport && request.artifactExpiresAt != null)
+              Text(
+                request.artifactExpiresAt!.isAfter(DateTime.now().toUtc())
+                    ? 'Artifact expires: ${request.artifactExpiresAt!.toLocal()}'
+                    : 'Export expired. Request a new export.',
+              ),
+            if (request.isExport &&
+                request.status == DataGovernanceRequestStatus.completed &&
+                !request.downloadEligible &&
+                (request.artifactExpiresAt?.isAfter(DateTime.now().toUtc()) ??
+                    false))
+              const Text(
+                'Download is unavailable for this account. Only the requester can retrieve this export.',
+              ),
+            if (canDownload)
+              FilledButton.tonalIcon(
+                key: Key('download-export-${request.id}'),
+                onPressed: onDownload,
+                icon: const Icon(Icons.download),
+                label: const Text('Download completed export'),
+              ),
             if (request.retainedDataDisclosure.isNotEmpty) ...<Widget>[
               const SizedBox(height: 8),
               const Text('Retained-data disclosure'),
@@ -286,6 +349,14 @@ final class _NoticeCard extends StatelessWidget {
     DataGovernanceNotice.none => '',
     DataGovernanceNotice.requestQueued => 'Your request has been queued.',
     DataGovernanceNotice.requestCancelled => 'The request was cancelled.',
+    DataGovernanceNotice.exportReady =>
+      'Download complete. Choose Save export copy to keep it.',
+    DataGovernanceNotice.exportSaved =>
+      'Your export copy was saved to the selected destination.',
+    DataGovernanceNotice.exportHandedToBrowser =>
+      'The export was handed to your browser. Check its downloads for the saved copy.',
+    DataGovernanceNotice.exportDiscarded =>
+      'The temporary export was discarded. No application copy was kept.',
     DataGovernanceNotice.authenticationRequired =>
       'Sign in again to manage your data requests.',
     DataGovernanceNotice.forbidden =>
