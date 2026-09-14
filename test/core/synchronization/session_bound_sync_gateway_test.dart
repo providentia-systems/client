@@ -25,23 +25,26 @@ void main() {
     expect(remote.calls, 2);
   });
 
-  test('legacy installation-bound intent is neither rewritten nor sent', () async {
-    final remote = _Gateway();
-    final gateway = _bound(remote);
-    final operation = _operation('installation');
-    await expectLater(
-      gateway.push(
-        homeId: 'home',
-        lastPulledCursor: null,
-        operations: <PendingClientOperation>[operation],
-      ),
-      throwsA(isA<AuthenticationSyncException>()),
-    );
-    expect(operation.deviceId, 'installation');
-    expect(operation.operationId, 'operation');
-    expect(operation.payload, <String, Object?>{'name': 'saved intent'});
-    expect(remote.calls, 0);
-  });
+  test(
+    'legacy installation-bound intent is neither rewritten nor sent',
+    () async {
+      final remote = _Gateway();
+      final gateway = _bound(remote);
+      final operation = _operation('installation');
+      await expectLater(
+        gateway.push(
+          homeId: 'home',
+          lastPulledCursor: null,
+          operations: <PendingClientOperation>[operation],
+        ),
+        throwsA(isA<AuthenticationSyncException>()),
+      );
+      expect(operation.deviceId, 'installation');
+      expect(operation.operationId, 'operation');
+      expect(operation.payload, <String, Object?>{'name': 'saved intent'});
+      expect(remote.calls, 0);
+    },
+  );
 
   test('receipt lookup cannot borrow the new account device binding', () async {
     final remote = _Gateway();
@@ -91,15 +94,13 @@ void main() {
   });
 }
 
-SessionBoundSyncGateway _bound(
-  _Gateway remote, {
-  bool Function()? isCurrent,
-}) => SessionBoundSyncGateway(
-  delegate: remote,
-  homeId: 'home',
-  deviceId: 'session-device',
-  isCurrent: isCurrent ?? () => true,
-);
+SessionBoundSyncGateway _bound(_Gateway remote, {bool Function()? isCurrent}) =>
+    SessionBoundSyncGateway(
+      delegate: remote,
+      homeId: 'home',
+      deviceId: 'session-device',
+      isCurrent: isCurrent ?? () => true,
+    );
 
 PendingClientOperation _operation(String deviceId) => PendingClientOperation(
   operationId: 'operation',
