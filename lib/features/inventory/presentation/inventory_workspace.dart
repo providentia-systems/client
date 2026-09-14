@@ -483,6 +483,7 @@ class _InventoryRow extends StatelessWidget {
 
   String get _metadata => <String>[
     item.packSize,
+    if (item.hasUnresolvedCatalogPack) 'Catalog pack not selected',
     if (item.brand.isNotEmpty) item.brand,
     item.category,
     if (item.aliases.isNotEmpty) 'Aliases: ${item.aliases.join(', ')}',

@@ -17,20 +17,18 @@ final class GeneratedServerAiRepository implements ServerAiRepository {
   Future<AiServerWorkspace> loadWorkspace({required String homeId}) {
     return _run(() async {
       _requireHomeId(homeId);
-      final responses = await Future.wait<ApiResponse>(<Future<ApiResponse>>[
-        _client.getAiSettings(homeId: homeId),
-        _client.listAiProviderProfiles(homeId: homeId),
-        _client.getAiOrchestrationPolicy(homeId: homeId),
-      ]);
-      final settingsObject = responses[0].requireObject();
-      final profilesObject = responses[1].requireObject();
-      final policyObject = responses[2].requireObject();
+      // The backend resolves policy ownership and recipients from the same
+      // settings snapshot. Separate GETs can straddle a profile/policy edit.
+      final settingsObject = (await _client.getAiSettings(
+        homeId: homeId,
+      )).requireObject();
       _rejectForeignHome(settingsObject, homeId);
-      _rejectForeignHome(profilesObject, homeId);
-      _rejectForeignHome(policyObject, homeId);
-
+      final policyObject = _object(
+        settingsObject['orchestrationPolicy'],
+        'AI orchestration policy',
+      );
       final settings = _settings(settingsObject, homeId);
-      final profiles = _objectList(profilesObject, 'items')
+      final profiles = _objectList(settingsObject, 'providerProfiles')
           .map((object) => _profile(object, homeId, settings))
           .toList(growable: false);
       if (profiles.map((profile) => profile.id).toSet().length !=
@@ -38,7 +36,13 @@ final class GeneratedServerAiRepository implements ServerAiRepository {
         throw const FormatException('Duplicate AI provider profile.');
       }
       final policy = _policy(policyObject, homeId);
-      final profileIds = profiles.map((profile) => profile.id).toSet();
+      // Shared policy IDs must never refer to a person's private profile.
+      // The effective transmission plan may disclose that viewer's private
+      // override, but the shared policy always retains the shared source ID.
+      final profileIds = profiles
+          .where((profile) => profile.ownerScope == AiProfileOwnerScope.home)
+          .map((profile) => profile.id)
+          .toSet();
       if (policy.extractionProfileIds.any(
             (profileId) => !profileIds.contains(profileId),
           ) ||
@@ -357,7 +361,7 @@ AiServerSettings _settings(Map<String, Object?> object, String homeId) {
   if (mode == AiServerMode.manualOnly && (provider != null || model != null)) {
     throw const FormatException('Manual AI settings selected a provider.');
   }
-  if (mode != AiServerMode.manualOnly && (provider == null || model == null)) {
+  if (mode == AiServerMode.localDirect && (provider == null || model == null)) {
     throw const FormatException('Active AI settings omitted a provider.');
   }
   if (_boolean(object, 'cloudByokOnNativeClients') ||

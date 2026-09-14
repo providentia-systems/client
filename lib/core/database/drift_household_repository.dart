@@ -879,9 +879,10 @@ final class DriftHouseholdRepository
       };
       final hasPublicIdentity = item.productId != null && item.packId != null;
       final hasPrivateIdentity = item.productId == null && item.packId == null;
+      final hasFamilyIdentity = item.productId != null && item.packId == null;
       final shapeIsSafe = item.isHomeProduct
           ? item.currentQuantity != null &&
-                (hasPublicIdentity || hasPrivateIdentity)
+                (hasPublicIdentity || hasPrivateIdentity || hasFamilyIdentity)
           : item.currentQuantity == null &&
                 hasPublicIdentity &&
                 item.id == item.packId;
@@ -2121,9 +2122,9 @@ final class DriftHouseholdRepository
         payload['homeCategoryId'],
         'homeCategoryId',
       );
-      if ((productId == null) != (packId == null)) {
+      if (productId == null && packId != null) {
         throw const FormatException(
-          'The home product projection has an incomplete catalog identity.',
+          'The home product pack is missing its catalog product.',
         );
       }
       final originalPackText = _nullableString(payload['originalPackText']);
