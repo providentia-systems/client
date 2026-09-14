@@ -270,6 +270,31 @@ void main() {
     },
   );
 
+  test(
+    'stock extraction requires an existing open count before sending bytes',
+    () async {
+      final repository = _ServerRepository(_workspace());
+      final gateway = FakeGateway(route: AiGatewayRoute.serverProxyCloud);
+      final media = FakeMediaPreparation(
+        preparedBatch(purpose: AiExtractionKind.stockPhoto),
+      );
+      final controller = _controller(
+        repository: repository,
+        gateway: gateway,
+        media: media,
+        stockTarget: null,
+      );
+      addTearDown(controller.dispose);
+      await _loadPrepareConsentExtract(
+        controller,
+        asset: _asset(purpose: AiExtractionKind.stockPhoto),
+      );
+      expect(gateway.requests, isEmpty);
+      expect(controller.stockProposal, isNull);
+      expect(repository.inventoryOrPurchaseMutationCalls, 0);
+    },
+  );
+
   test('role loss discards prepared bytes and blocks review', () async {
     final repository = _ServerRepository(_workspace());
     final media = FakeMediaPreparation(preparedBatch());
@@ -1370,7 +1395,11 @@ void main() {
           position: 0,
           decision: AiCandidateDecision.reject,
         );
-        expect(controller.safeMessage, contains('another device'));
+        expect(
+          controller.safeMessage,
+          contains('Current evidence has been reloaded'),
+        );
+        expect(controller.status, ServerAiWorkspaceStatus.reviewRequired);
         repository.reviewError = StateError('private review detail');
         await controller.reviewCandidate(
           position: 0,
@@ -1378,7 +1407,7 @@ void main() {
         );
         expect(
           controller.safeMessage,
-          'The review decision was not saved safely.',
+          contains('Current evidence has been reloaded'),
         );
 
         repository.reviewError = null;
@@ -1387,7 +1416,12 @@ void main() {
           position: 0,
           decision: AiCandidateDecision.reject,
         );
-        expect(controller.safeMessage, contains('unsafe or unexpected'));
+        expect(
+          controller.safeMessage,
+          contains('Current evidence has been reloaded'),
+        );
+        expect(controller.review?.homeId, 'home-1');
+        expect(repository.inventoryOrPurchaseMutationCalls, 0);
       },
     );
 
@@ -2379,7 +2413,9 @@ ServerAiWorkspaceController _controller({
   AiHomeCapabilities? capabilities,
   AiMediaPreparationPort? media,
   FakeGateway? gateway,
+  String? stockTarget = 'open-count-1',
 }) => ServerAiWorkspaceController(
+  stockCountTarget: () => stockTarget,
   repository: repository,
   media: media ?? FakeMediaPreparation(preparedBatch()),
   gateway:

@@ -572,9 +572,11 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
     required int position,
     required AiCandidateDecision decision,
   }) async {
-    if (isBusy ||
-        _status != ServerAiWorkspaceStatus.reviewRequired ||
-        !_requireUse()) {
+    if (!_requireUse() || isBusy) return;
+    if (_status != ServerAiWorkspaceStatus.reviewRequired) {
+      _safeMessage =
+          'Reload the current extraction before reviewing candidates.';
+      _notify();
       return;
     }
     final review = _review;
@@ -585,8 +587,13 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
         candidate == null ||
         candidate.status == AiCandidateReviewStatus.rejected ||
         (decision == AiCandidateDecision.accept &&
-            (candidate.status != AiCandidateReviewStatus.pending ||
-                !review.canAccept(position)))) {
+            candidate.status != AiCandidateReviewStatus.pending)) {
+      _safeMessage =
+          'This candidate is unavailable or has already been reviewed. Reload the current extraction.';
+      _notify();
+      return;
+    }
+    if (decision == AiCandidateDecision.accept && !review.canAccept(position)) {
       _safeMessage =
           'Resolve all evidence first. Confirmed duplicate candidates must be rejected.';
       _notify();
@@ -603,9 +610,11 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
     String id,
     AiObservationDecision decision,
   ) async {
-    if (isBusy ||
-        _status != ServerAiWorkspaceStatus.reviewRequired ||
-        !_requireUse()) {
+    if (!_requireUse() || isBusy) return;
+    if (_status != ServerAiWorkspaceStatus.reviewRequired) {
+      _safeMessage =
+          'Reload the current extraction before reviewing candidates.';
+      _notify();
       return;
     }
     final review = _review;
@@ -634,9 +643,11 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
     int position,
     AiDiscrepancyDecision decision,
   ) async {
-    if (isBusy ||
-        _status != ServerAiWorkspaceStatus.reviewRequired ||
-        !_requireUse()) {
+    if (!_requireUse() || isBusy) return;
+    if (_status != ServerAiWorkspaceStatus.reviewRequired) {
+      _safeMessage =
+          'Reload the current extraction before reviewing candidates.';
+      _notify();
       return;
     }
     final review = _review;
@@ -796,14 +807,16 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
   }
 
   AiReviewHandoff? buildReviewHandoff() {
-    if (isBusy ||
-        _status != ServerAiWorkspaceStatus.reviewRequired ||
-        !_requireUse()) {
+    if (!_requireUse() || isBusy) return null;
+    if (_status != ServerAiWorkspaceStatus.reviewRequired) {
+      _safeMessage = 'Complete the AI candidate review first.';
+      _notify();
       return null;
     }
     final review = _review;
     if (review == null || review.homeId != _capabilities.homeId) {
-      _setFailure('Complete the AI candidate review first.');
+      _safeMessage = 'Complete the AI candidate review first.';
+      _notify();
       return null;
     }
     try {
@@ -820,7 +833,8 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
       _notify();
       return handoff;
     } on AiServerException catch (error) {
-      _setFailure(error.safeMessage);
+      _safeMessage = error.safeMessage;
+      _notify();
       return null;
     }
   }
