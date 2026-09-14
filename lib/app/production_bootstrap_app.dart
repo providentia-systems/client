@@ -23,6 +23,7 @@ import 'package:providentia/core/security/platform_session_credential_store.dart
 import 'package:providentia/core/security/uuid_v4.dart';
 import 'package:providentia/core/synchronization/generated_sync_gateway.dart';
 import 'package:providentia/core/synchronization/privacy_safe_sync_metrics.dart';
+import 'package:providentia/core/synchronization/session_bound_sync_gateway.dart';
 import 'package:providentia/core/synchronization/sync_coordinator.dart';
 import 'package:providentia/core/synchronization/sync_models.dart';
 import 'package:providentia/core/synchronization/sync_ports.dart';
@@ -295,6 +296,8 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp>
                         ..sort();
                       return _ConnectedHomeWorkspace(
                         key: ValueKey<String>(
+                          '${identitySnapshot.session!.userId}:'
+                          '${identitySnapshot.session!.deviceId}:'
                           '${home.id}:${permissionKey.join(',')}',
                         ),
                         home: home,
@@ -305,7 +308,9 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp>
                         syncRevocationGate: _homeSyncRevocationGate,
                         homeRevocationBoundary: _homeRevocationBoundary,
                         database: _database,
-                        deviceId: _deviceId,
+                        deviceId: identitySnapshot.session!.deviceId,
+                        userId: identitySnapshot.session!.userId,
+                        permissionFingerprint: permissionKey.join(','),
                         api: _authorizedApi,
                         identityController: _identityController,
                         homesController: _homesController,
@@ -562,6 +567,8 @@ final class _ConnectedHomeWorkspace extends StatefulWidget {
     required this.homeRevocationBoundary,
     required this.database,
     required this.deviceId,
+    required this.userId,
+    required this.permissionFingerprint,
     required this.api,
     required this.identityController,
     required this.homesController,
@@ -585,6 +592,8 @@ final class _ConnectedHomeWorkspace extends StatefulWidget {
   final ProductionHomeRevocationBoundary homeRevocationBoundary;
   final AppDatabase database;
   final String deviceId;
+  final String userId;
+  final String permissionFingerprint;
   final ProvidentiaApiClient api;
   final IdentityController identityController;
   final HomesController homesController;
@@ -607,6 +616,7 @@ final class _ConnectedHomeWorkspace extends StatefulWidget {
 final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
     with WidgetsBindingObserver {
   late final AppController _app;
+  late final SessionBoundSyncGateway _syncGateway;
   late final DriftHouseholdRepository _household;
   late final HouseholdFeatures _features;
   late final SyncConflictController _syncConflicts;
@@ -625,7 +635,9 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
     final household = createProductionHouseholdRepository(
       database: widget.database,
       deviceId: widget.deviceId,
-      onMutationCommitted: () => _app.refresh(),
+      onMutationCommitted: () async {
+        if (_bindingIsCurrent) await _app.refresh();
+      },
       stockPreferenceReader: GeneratedStockPreferenceReader(widget.api),
     );
     _household = household;
@@ -634,9 +646,15 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
         (snapshot) => _latestSyncMetrics = snapshot,
       ),
     );
+    _syncGateway = SessionBoundSyncGateway(
+      delegate: GeneratedSyncGateway(widget.api),
+      homeId: widget.home.id,
+      deviceId: widget.deviceId,
+      isCurrent: () => _bindingIsCurrent,
+    );
     AppSynchronization synchronization = SyncCoordinator(
       local: localSync,
-      remote: GeneratedSyncGateway(widget.api),
+      remote: _syncGateway,
       connectivity: GeneratedApiConnectivityProbe(widget.api),
       metrics: _syncMetrics,
     );
@@ -644,7 +662,13 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
       synchronization = ItemMasterRefreshingSynchronization(
         delegate: synchronization,
         source: GeneratedHomeItemMasterSource(widget.api),
-        replaceCache: household.replaceCatalogItemMaster,
+        replaceCache: ({required homeId, required items}) async {
+          _requireCurrentBinding();
+          await household.replaceCatalogItemMaster(
+            homeId: homeId,
+            items: items,
+          );
+        },
         homeId: widget.home.id,
       );
     }
@@ -1055,6 +1079,27 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
     );
   };
 
+  bool get _bindingIsCurrent {
+    final identity = widget.identityController.snapshot;
+    final homes = widget.homesController.snapshot;
+    final permissions = homes.effectivePermissions.toList(growable: false)
+      ..sort();
+    return mounted &&
+        identity.isAuthenticated &&
+        identity.session?.userId == widget.userId &&
+        identity.session?.deviceId == widget.deviceId &&
+        homes.activeHome?.id == widget.home.id &&
+        permissions.join(',') == widget.permissionFingerprint;
+  }
+
+  void _requireCurrentBinding() {
+    if (!_bindingIsCurrent) {
+      throw const AuthenticationSyncException(
+        'The synchronization workspace changed. Reopen the current home.',
+      );
+    }
+  }
+
   Future<void> _prepareLocalWorkspace(
     DriftHouseholdRepository household,
   ) async {
@@ -1065,7 +1110,9 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
     if (purge != null) {
       widget.syncRevocationGate.reauthorize(widget.home.id);
     }
+    _requireCurrentBinding();
     await _app.start();
+    _requireCurrentBinding();
     if (_app.syncSummary.availability == SyncAvailability.authorizationDenied) {
       throw StateError('The selected home is no longer authorized.');
     }
@@ -1107,6 +1154,7 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
     // controller here closes the home-switch race before any async extraction
     // can hand a reviewed candidate to the outgoing home's inventory.
     WidgetsBinding.instance.removeObserver(this);
+    _syncGateway.invalidate();
     _resumeSyncGate.dispose();
     _features.stockPhotoCount?.dispose();
     _strictLocalAi?.dispose();

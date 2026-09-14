@@ -46,10 +46,8 @@ final class SessionBoundSyncGateway implements SyncRemoteGateway {
   }
 
   @override
-  Future<PullPage> bootstrap({required String homeId}) => _bound(
-    homeId,
-    () => _delegate.bootstrap(homeId: homeId),
-  );
+  Future<PullPage> bootstrap({required String homeId}) =>
+      _bound(homeId, () => _delegate.bootstrap(homeId: homeId));
 
   @override
   Future<PullPage> pull({required String homeId, String? afterCursor}) =>
