@@ -1,0 +1,86 @@
+name: Step 2 paired client contract
+on:
+  pull_request:
+    paths:
+      - .github/workflows/step-2-contract-pair.yml
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/step-1-authoritative-sync'
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          repository: providentia-systems/backend
+          ref: c9b1d968321de106abf824faa7ea84b1a9e3312a
+          path: _step2_backend
+          persist-credentials: false
+      - name: Install pinned Flutter
+        run: |
+          bash tool/install_flutter_linux.sh "$RUNNER_TEMP/providentia-sdk"
+          echo "$RUNNER_TEMP/providentia-sdk/flutter/bin" >> "$GITHUB_PATH"
+      - name: Regenerate final backend-owned document and enforced pins
+        run: |
+          cp _step2_backend/contracts/source/providentia-v1.json.gz contracts/source/providentia-v1.json.gz
+          python3 - <<'PY'
+          from pathlib import Path
+          import gzip,hashlib
+          p=Path('contracts/source/providentia-v1.json.gz')
+          plain='d8263a996b1382a0b0742ba4b3ca232e1d6f291644a2659d966e95b2abb038fc'
+          archive='0a59942a817869b4eda7166c1a563b08f475f3d3618c7c76f741c45d121df3ee'
+          assert hashlib.sha256(p.read_bytes()).hexdigest()==archive
+          assert hashlib.sha256(gzip.decompress(p.read_bytes())).hexdigest()==plain
+          replacements={
+            '40a8477521baa6c41cf2c5d872068f5ae1bf255a8d0bbccc97a05688d705ad57':plain,
+            'b29608746e59216ef69554c346d0606ac5815e42a6e04d5f284872b608d05647':plain,
+            '5e1e3f7224b85e52e09a298d2ad4c5a82d564c35d21d90e2b872bf33b3e9db8f':archive,
+            'beba4827515c2dc63f69145fad090769fea50a031c9f88f31bf2be4ddd951e55':archive,
+          }
+          files=[Path('contracts/contract.lock.json')]
+          for root in ('tool','tools','docs'):
+            files.extend(p for p in Path(root).rglob('*') if p.suffix in ('.sh','.mjs','.md'))
+          for p in files:
+            before=p.read_text();after=before
+            for old,new in replacements.items():after=after.replace(old,new)
+            if after!=before:p.write_text(after)
+          PY
+          bash tool/materialize-openapi-contract.sh
+          node tool/generate_api_client.mjs
+          flutter pub get --enforce-lockfile
+          dart run build_runner build --delete-conflicting-outputs
+          git diff --check
+          git rm .github/workflows/step-2-contract-pair.yml
+          git add contracts tool tools docs
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(step2): synchronize canonical document, generated facade, locks and validation pins'
+          git push origin HEAD:fix/step-1-authoritative-sync
+          git rev-parse HEAD > /tmp/SOURCE_COMMIT.txt
+          git archive --format=tar.gz HEAD > /tmp/step2-client-paired-source.tar.gz
+      - name: Structural contract verification
+        run: node tool/verify_structure.mjs > /tmp/step2-client-structure.txt 2>&1
+      - name: All Flutter tests
+        if: always()
+        run: flutter test --reporter json > /tmp/step2-client-paired-tests.jsonl 2>&1
+      - name: All Flutter static analysis
+        if: always()
+        run: flutter analyze --no-pub > /tmp/step2-client-paired-analysis.txt 2>&1
+      - name: Preserve actual paired source and verification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: step2-client-paired
+          path: |
+            /tmp/SOURCE_COMMIT.txt
+            /tmp/step2-client-paired-source.tar.gz
+            /tmp/step2-client-structure.txt
+            /tmp/step2-client-paired-tests.jsonl
+            /tmp/step2-client-paired-analysis.txt
+          retention-days: 14
