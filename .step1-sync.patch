@@ -1,0 +1,216 @@
+diff --git a/lib/app/production_bootstrap_app.dart b/lib/app/production_bootstrap_app.dart
+index d717787..7c8c5b2 100644
+--- a/lib/app/production_bootstrap_app.dart
++++ b/lib/app/production_bootstrap_app.dart
+@@ -23,6 +23,7 @@ import 'package:providentia/core/security/platform_session_credential_store.dart
+ import 'package:providentia/core/security/uuid_v4.dart';
+ import 'package:providentia/core/synchronization/generated_sync_gateway.dart';
+ import 'package:providentia/core/synchronization/privacy_safe_sync_metrics.dart';
++import 'package:providentia/core/synchronization/session_bound_sync_gateway.dart';
+ import 'package:providentia/core/synchronization/sync_coordinator.dart';
+ import 'package:providentia/core/synchronization/sync_models.dart';
+ import 'package:providentia/core/synchronization/sync_ports.dart';
+@@ -295,6 +296,8 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp>
+                         ..sort();
+                       return _ConnectedHomeWorkspace(
+                         key: ValueKey<String>(
++                          '${identitySnapshot.session!.userId}:'
++                          '${identitySnapshot.session!.deviceId}:'
+                           '${home.id}:${permissionKey.join(',')}',
+                         ),
+                         home: home,
+@@ -305,7 +308,9 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp>
+                         syncRevocationGate: _homeSyncRevocationGate,
+                         homeRevocationBoundary: _homeRevocationBoundary,
+                         database: _database,
+-                        deviceId: _deviceId,
++                        deviceId: identitySnapshot.session!.deviceId,
++                        userId: identitySnapshot.session!.userId,
++                        permissionFingerprint: permissionKey.join(','),
+                         api: _authorizedApi,
+                         identityController: _identityController,
+                         homesController: _homesController,
+@@ -562,6 +567,8 @@ final class _ConnectedHomeWorkspace extends StatefulWidget {
+     required this.homeRevocationBoundary,
+     required this.database,
+     required this.deviceId,
++    required this.userId,
++    required this.permissionFingerprint,
+     required this.api,
+     required this.identityController,
+     required this.homesController,
+@@ -585,6 +592,8 @@ final class _ConnectedHomeWorkspace extends StatefulWidget {
+   final ProductionHomeRevocationBoundary homeRevocationBoundary;
+   final AppDatabase database;
+   final String deviceId;
++  final String userId;
++  final String permissionFingerprint;
+   final ProvidentiaApiClient api;
+   final IdentityController identityController;
+   final HomesController homesController;
+@@ -607,6 +616,7 @@ final class _ConnectedHomeWorkspace extends StatefulWidget {
+ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
+     with WidgetsBindingObserver {
+   late final AppController _app;
++  late final SessionBoundSyncGateway _syncGateway;
+   late final DriftHouseholdRepository _household;
+   late final HouseholdFeatures _features;
+   late final SyncConflictController _syncConflicts;
+@@ -625,7 +635,9 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
+     final household = createProductionHouseholdRepository(
+       database: widget.database,
+       deviceId: widget.deviceId,
+-      onMutationCommitted: () => _app.refresh(),
++      onMutationCommitted: () async {
++        if (_bindingIsCurrent) await _app.refresh();
++      },
+       stockPreferenceReader: GeneratedStockPreferenceReader(widget.api),
+     );
+     _household = household;
+@@ -634,9 +646,15 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
+         (snapshot) => _latestSyncMetrics = snapshot,
+       ),
+     );
++    _syncGateway = SessionBoundSyncGateway(
++      delegate: GeneratedSyncGateway(widget.api),
++      homeId: widget.home.id,
++      deviceId: widget.deviceId,
++      isCurrent: () => _bindingIsCurrent,
++    );
+     AppSynchronization synchronization = SyncCoordinator(
+       local: localSync,
+-      remote: GeneratedSyncGateway(widget.api),
++      remote: _syncGateway,
+       connectivity: GeneratedApiConnectivityProbe(widget.api),
+       metrics: _syncMetrics,
+     );
+@@ -644,7 +662,13 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
+       synchronization = ItemMasterRefreshingSynchronization(
+         delegate: synchronization,
+         source: GeneratedHomeItemMasterSource(widget.api),
+-        replaceCache: household.replaceCatalogItemMaster,
++        replaceCache: ({required homeId, required items}) async {
++          _requireCurrentBinding();
++          await household.replaceCatalogItemMaster(
++            homeId: homeId,
++            items: items,
++          );
++        },
+         homeId: widget.home.id,
+       );
+     }
+@@ -1055,6 +1079,27 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
+     );
+   };
+ 
++  bool get _bindingIsCurrent {
++    final identity = widget.identityController.snapshot;
++    final homes = widget.homesController.snapshot;
++    final permissions = homes.effectivePermissions.toList(growable: false)
++      ..sort();
++    return mounted &&
++        identity.isAuthenticated &&
++        identity.session?.userId == widget.userId &&
++        identity.session?.deviceId == widget.deviceId &&
++        homes.activeHome?.id == widget.home.id &&
++        permissions.join(',') == widget.permissionFingerprint;
++  }
++
++  void _requireCurrentBinding() {
++    if (!_bindingIsCurrent) {
++      throw const AuthenticationSyncException(
++        'The synchronization workspace changed. Reopen the current home.',
++      );
++    }
++  }
++
+   Future<void> _prepareLocalWorkspace(
+     DriftHouseholdRepository household,
+   ) async {
+@@ -1065,7 +1110,9 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
+     if (purge != null) {
+       widget.syncRevocationGate.reauthorize(widget.home.id);
+     }
++    _requireCurrentBinding();
+     await _app.start();
++    _requireCurrentBinding();
+     if (_app.syncSummary.availability == SyncAvailability.authorizationDenied) {
+       throw StateError('The selected home is no longer authorized.');
+     }
+@@ -1107,6 +1154,7 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
+     // controller here closes the home-switch race before any async extraction
+     // can hand a reviewed candidate to the outgoing home's inventory.
+     WidgetsBinding.instance.removeObserver(this);
++    _syncGateway.invalidate();
+     _resumeSyncGate.dispose();
+     _features.stockPhotoCount?.dispose();
+     _strictLocalAi?.dispose();
+diff --git a/test/integration/api11_onboarding_adapters_test.dart b/test/integration/api11_onboarding_adapters_test.dart
+index aebf9a4..1df743e 100644
+--- a/test/integration/api11_onboarding_adapters_test.dart
++++ b/test/integration/api11_onboarding_adapters_test.dart
+@@ -766,6 +766,64 @@ void main() {
+     await expectLater(response, throwsA(isA<http.RequestAbortedException>()));
+     await inner.abortObserved.future;
+   });
++
++  test('a request finalized after logout is not sent under later credentials', () async {
++    final manager = IdentitySessionManager(
++      transport: _RestoringIdentityTransport(),
++      credentialStore: _MemoryCredentialStore(),
++      pendingEmailCodeStore: _MemoryPendingStore(),
++      device: DeviceDescriptor(id: _deviceId, name: 'Test', platform: 'android'),
++      clock: () => DateTime.utc(2026, 8, 9, 12),
++    );
++    addTearDown(manager.dispose);
++    await manager.restore();
++    var sends = 0;
++    final client = SessionHttpClient(
++      inner: MockClient((_) async {
++        sends++;
++        return http.Response('{}', 200);
++      }),
++      sessions: manager,
++    );
++    addTearDown(client.close);
++    final request = http.StreamedRequest('POST', Uri.parse('https://api.example.test/home'));
++    final response = client.send(request);
++    await Future<void>.delayed(Duration.zero);
++    await manager.logout();
++    await request.sink.close();
++    expect((await response).statusCode, 401);
++    expect(sends, 0);
++  });
++
++  test('a response arriving after logout does not expose the prior home', () async {
++    final manager = IdentitySessionManager(
++      transport: _RestoringIdentityTransport(),
++      credentialStore: _MemoryCredentialStore(),
++      pendingEmailCodeStore: _MemoryPendingStore(),
++      device: DeviceDescriptor(id: _deviceId, name: 'Test', platform: 'android'),
++      clock: () => DateTime.utc(2026, 8, 9, 12),
++    );
++    addTearDown(manager.dispose);
++    await manager.restore();
++    final started = Completer<void>();
++    final reply = Completer<http.Response>();
++    final client = SessionHttpClient(
++      inner: MockClient((_) {
++        started.complete();
++        return reply.future;
++      }),
++      sessions: manager,
++    );
++    addTearDown(client.close);
++    final response = client.get(Uri.parse('https://api.example.test/home'));
++    await started.future;
++    await manager.logout();
++    reply.complete(http.Response('{"private":"prior home"}', 200));
++    final actual = await response;
++    expect(actual.statusCode, 401);
++    expect(actual.body, isNot(contains('prior home')));
++  });
++
+ }
+ 
+ const _requestId = '0198a0b1-c2d3-7e4f-8123-456789abcdef';
