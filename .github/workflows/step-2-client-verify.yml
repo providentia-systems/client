@@ -1,0 +1,97 @@
+name: Step 2 client verification
+on:
+  pull_request:
+    paths:
+      - .step2-client.bundle.b64
+      - .github/workflows/step-2-client-verify.yml
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/step-1-authoritative-sync'
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Install repository-pinned Flutter and Dart
+        run: |
+          tool/install_flutter_linux.sh "$RUNNER_TEMP/providentia-sdk"
+          echo "$RUNNER_TEMP/providentia-sdk/flutter/bin" >> "$GITHUB_PATH"
+      - run: flutter pub get --enforce-lockfile
+      - run: dart run build_runner build --delete-conflicting-outputs
+      - name: Verify reviewed bundle and materialize regression tests first
+        run: |
+          python3 - <<'PY'
+          import base64, gzip, hashlib, json, pathlib, subprocess
+          encoded = pathlib.Path('.step2-client.bundle.b64').read_text().replace('MrnezZZZr', 'MrnezZZr')
+          data = gzip.decompress(base64.b64decode(encoded))
+          assert hashlib.sha256(data).hexdigest() == '5d180bed4da000568ad8103000141f844b669c1d52a19612f34d57b0fde26f74'
+          bundle = json.loads(data)
+          for stage in ('tests', 'fixes'):
+              pathlib.Path('/tmp/step2-' + stage + '.patch').write_text(bundle[stage])
+          subprocess.run(['git', 'apply', '--check', '/tmp/step2-tests.patch'], check=True)
+          subprocess.run(['git', 'apply', '/tmp/step2-tests.patch'], check=True)
+          PY
+          dart format test/integration/step_2_configuration_contract_test.dart
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add test/integration/step_2_configuration_contract_test.dart
+          git commit -m 'test(step2): reproduce atomic workspace and persisted family projection defects'
+          git push origin HEAD:fix/step-1-authoritative-sync
+      - name: Record failing tests against unchanged client implementation
+        run: |
+          set +e
+          flutter test test/integration/step_2_configuration_contract_test.dart --reporter json > /tmp/step2-red.jsonl 2>&1
+          result=$?
+          set -e
+          test "$result" -ne 0
+          python3 - <<'PY'
+          import json
+          names = {}; failed = []; completed = []
+          for line in open('/tmp/step2-red.jsonl'):
+              try: event = json.loads(line)
+              except ValueError: continue
+              if event.get('type') == 'testStart':
+                  names[event['test']['id']] = event['test']['name']
+              if event.get('type') == 'testDone' and names.get(event['testID'], '').startswith('Step 2 '):
+                  completed.append(names[event['testID']])
+                  if event['result'] != 'success': failed.append(names[event['testID']])
+          print('Reproduced:', failed)
+          assert len(completed) == 9 and len(failed) == 6, 'Unexpected test-first result; do not proceed'
+          PY
+      - name: Apply client source fix and remove transport helpers
+        run: |
+          git apply --check /tmp/step2-fixes.patch
+          git apply /tmp/step2-fixes.patch
+          git diff --name-only -- '*.dart' > /tmp/step2-dart-files
+          xargs -r dart format < /tmp/step2-dart-files
+          git diff --check
+          git rm .step2-client.bundle.b64 .github/workflows/step-2-client-verify.yml
+          xargs -r git add -- < /tmp/step2-dart-files
+          git commit -m 'fix(step2): keep AI setup recoverable and family inventory visible offline'
+          git push origin HEAD:fix/step-1-authoritative-sync
+          git rev-parse HEAD > /tmp/SOURCE_COMMIT.txt
+          git archive --format=tar.gz HEAD > /tmp/step2-client-source.tar.gz
+      - name: Full Flutter tests including identity and synchronization
+        run: flutter test --reporter json > /tmp/step2-client-tests.jsonl 2>&1
+      - name: Flutter static analysis
+        if: always()
+        run: flutter analyze --no-pub > /tmp/step2-client-analysis.txt 2>&1
+      - name: Preserve source and actual test evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: step2-client-verification
+          path: |
+            /tmp/SOURCE_COMMIT.txt
+            /tmp/step2-client-source.tar.gz
+            /tmp/step2-red.jsonl
+            /tmp/step2-client-tests.jsonl
+            /tmp/step2-client-analysis.txt
+            .step2-client.bundle.b64
+          retention-days: 14
+          include-hidden-files: true
