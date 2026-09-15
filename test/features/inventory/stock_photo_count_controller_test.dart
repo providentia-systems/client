@@ -338,28 +338,23 @@ void main() {
     harness.dispose();
   });
 
-  test(
-    'duplicate cross-image candidates cannot create two count lines',
-    () async {
-      final harness = _Harness(duplicateCandidates: true);
-      await harness.openCount();
-      await harness.stock.selectPhotos();
-      harness.stock.confirmTransmission();
-      await harness.stock.extract();
+  test('similar candidates stay visible until explicit human review', () async {
+    final harness = _Harness(duplicateCandidates: true);
+    await harness.openCount();
+    await harness.stock.selectPhotos();
+    harness.stock.confirmTransmission();
+    await harness.stock.extract();
 
-      expect(harness.stock.state.candidates, hasLength(1));
-      expect(
-        harness.stock.state.safeMessage,
-        contains('overlapping candidate removed'),
-      );
-      harness.stock.matchCandidate('candidate-1', _item.id);
-      harness.stock.setQuantity('candidate-1', 2);
-      await harness.stock.confirmCandidate('candidate-1');
+    expect(harness.stock.state.candidates, hasLength(2));
+    expect(harness.repository.saved.last.lines, isEmpty);
+    expect(harness.repository.movements, isEmpty);
+    harness.stock.matchCandidate('candidate-1', _item.id);
+    harness.stock.setQuantity('candidate-1', 2);
+    await harness.stock.confirmCandidate('candidate-1');
 
-      expect(harness.repository.saved.last.lines, hasLength(1));
-      harness.dispose();
-    },
-  );
+    expect(harness.repository.saved.last.lines, hasLength(1));
+    harness.dispose();
+  });
 
   test(
     'home-switch disposal clears previews and blocks later candidate writes',

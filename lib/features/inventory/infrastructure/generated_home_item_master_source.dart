@@ -138,6 +138,9 @@ InventoryItem _item(Map<String, Object?> record, String homeId) {
       'The item-master home-product state is invalid.',
     );
   }
+  if (packId != null && productId == null) {
+    throw const FormatException('The item-master pack is missing its product.');
+  }
   if (homeProductId == null && packId == null) {
     throw const FormatException(
       'The item-master row has no selectable identity.',

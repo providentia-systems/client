@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
+import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:providentia/features/ai_integration/application/ai_ports.dart';
 import 'package:providentia/features/ai_integration/application/server_ai_repository.dart';
@@ -15,6 +18,17 @@ import 'package:providentia/features/ai_integration/presentation/server_ai_works
 import 'test_fixtures.dart';
 
 void main() {
+  setUpAll(() async {
+    final path = Platform.environment['PROVIDENTIA_UI_FONT'];
+    if (path != null) {
+      final loader = FontLoader('Roboto')
+        ..addFont(
+          Future.value(ByteData.sublistView(await File(path).readAsBytes())),
+        );
+      await loader.load();
+    }
+  });
+
   test(
     'removing personal AI credentials feature keeps read access and disables use',
     () {
@@ -252,6 +266,31 @@ void main() {
       expect(handoff?.homeId, 'home-1');
       expect(handoff?.acceptedPositions, <int>[0]);
       expect(handoff?.requiresOrdinaryDomainCommand, isTrue);
+      expect(repository.inventoryOrPurchaseMutationCalls, 0);
+    },
+  );
+
+  test(
+    'stock extraction requires an existing open count before sending bytes',
+    () async {
+      final repository = _ServerRepository(_workspace());
+      final gateway = FakeGateway(route: AiGatewayRoute.serverProxyCloud);
+      final media = FakeMediaPreparation(
+        preparedBatch(purpose: AiExtractionKind.stockPhoto),
+      );
+      final controller = _controller(
+        repository: repository,
+        gateway: gateway,
+        media: media,
+        stockTarget: null,
+      );
+      addTearDown(controller.dispose);
+      await _loadPrepareConsentExtract(
+        controller,
+        asset: _asset(purpose: AiExtractionKind.stockPhoto),
+      );
+      expect(gateway.requests, isEmpty);
+      expect(controller.stockProposal, isNull);
       expect(repository.inventoryOrPurchaseMutationCalls, 0);
     },
   );
@@ -1356,7 +1395,11 @@ void main() {
           position: 0,
           decision: AiCandidateDecision.reject,
         );
-        expect(controller.safeMessage, contains('another device'));
+        expect(
+          controller.safeMessage,
+          contains('Current evidence has been reloaded'),
+        );
+        expect(controller.status, ServerAiWorkspaceStatus.reviewRequired);
         repository.reviewError = StateError('private review detail');
         await controller.reviewCandidate(
           position: 0,
@@ -1364,7 +1407,7 @@ void main() {
         );
         expect(
           controller.safeMessage,
-          'The review decision was not saved safely.',
+          contains('Current evidence has been reloaded'),
         );
 
         repository.reviewError = null;
@@ -1373,7 +1416,12 @@ void main() {
           position: 0,
           decision: AiCandidateDecision.reject,
         );
-        expect(controller.safeMessage, contains('unsafe or unexpected'));
+        expect(
+          controller.safeMessage,
+          contains('Current evidence has been reloaded'),
+        );
+        expect(controller.review?.homeId, 'home-1');
+        expect(repository.inventoryOrPurchaseMutationCalls, 0);
       },
     );
 
@@ -1542,6 +1590,13 @@ void main() {
         addTearDown(emptyController.dispose);
         await emptyController.load();
         await _pumpPage(tester, emptyController);
+        expect(
+          find.byKey(const Key('ai-configuration-required')),
+          findsOneWidget,
+        );
+        await _scrollTo(tester, const Key('ai-configuration-required'));
+        await _captureStep2(tester, 'household-ai-setup-required');
+        await _scrollTo(tester, const Key('ai-add-profile'));
         expect(find.textContaining('No provider profile'), findsOneWidget);
         await _scrollTo(tester, const Key('ai-pick-receipt'));
         expect(
@@ -1553,11 +1608,20 @@ void main() {
       },
     );
 
-    testWidgets('manager controls send exact revisioned write-only requests', (
+    testWidgets('owner controls send exact revisioned write-only requests', (
       tester,
     ) async {
-      final repository = _ServerRepository(_workspace());
-      final controller = _controller(repository: repository);
+      final repository = _ServerRepository(
+        _workspace(
+          profiles: <AiProviderProfile>[
+            serverProvider(ownerScope: AiProfileOwnerScope.home),
+          ],
+        ),
+      );
+      final controller = _controller(
+        repository: repository,
+        capabilities: _ownerCapabilities(),
+      );
       addTearDown(controller.dispose);
       await controller.load();
       await _pumpPage(tester, controller);
@@ -1787,8 +1851,15 @@ void main() {
         await tester.tap(find.byKey(const Key('ai-pick-receipt')));
         await tester.pumpAndSettle();
         expect(controller.selectedProvider, isNull);
-        expect(controller.status, ServerAiWorkspaceStatus.failed);
-        expect(controller.safeMessage, contains('active primary provider'));
+        expect(controller.status, ServerAiWorkspaceStatus.ready);
+        expect(
+          tester
+              .widget<FilledButton>(find.byKey(const Key('ai-pick-receipt')))
+              .onPressed,
+          isNull,
+        );
+        // Management selection must not enable a different recipient behind consent.
+        await _captureStep2(tester, 'household-ai-recipient-selection-blocked');
         await controller.clearExtraction();
         await tester.pump();
 
@@ -2284,16 +2355,36 @@ Future<void> _pumpPage(
   AiPreparedImageReader? readPreparedImage,
   ValueChanged<AiReviewHandoff>? onReviewHandoff,
 }) => tester.pumpWidget(
-  MaterialApp(
-    home: ServerAiWorkspacePage(
-      key: UniqueKey(),
-      controller: controller,
-      pickSingleImage: picker ?? (_) async => _asset(),
-      readPreparedImage: readPreparedImage ?? (_) async => _transparentPixel,
-      onReviewHandoff: onReviewHandoff,
+  RepaintBoundary(
+    key: const Key('step2-ui-evidence'),
+    child: MaterialApp(
+      home: ServerAiWorkspacePage(
+        key: UniqueKey(),
+        controller: controller,
+        pickSingleImage: picker ?? (_) async => _asset(),
+        readPreparedImage: readPreparedImage ?? (_) async => _transparentPixel,
+        onReviewHandoff: onReviewHandoff,
+      ),
     ),
   ),
 );
+
+Future<void> _captureStep2(WidgetTester tester, String name) async {
+  final directory = Platform.environment['PROVIDENTIA_UI_EVIDENCE'];
+  if (directory == null) return;
+  await tester.pumpAndSettle();
+  final boundary = tester.renderObject<RenderRepaintBoundary>(
+    find.byKey(const Key('step2-ui-evidence')),
+  );
+  await tester.runAsync(() async {
+    final image = await boundary.toImage(pixelRatio: 1);
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+    if (bytes == null) throw StateError('UI evidence encoding failed.');
+    await Directory(directory).create(recursive: true);
+    await File('$directory/$name.png').writeAsBytes(bytes.buffer.asUint8List());
+    image.dispose();
+  });
+}
 
 Future<void> _scrollTo(WidgetTester tester, Key key) async {
   final finder = find.byKey(key);
@@ -2322,7 +2413,9 @@ ServerAiWorkspaceController _controller({
   AiHomeCapabilities? capabilities,
   AiMediaPreparationPort? media,
   FakeGateway? gateway,
+  String? stockTarget = 'open-count-1',
 }) => ServerAiWorkspaceController(
+  stockCountTarget: () => stockTarget,
   repository: repository,
   media: media ?? FakeMediaPreparation(preparedBatch()),
   gateway:

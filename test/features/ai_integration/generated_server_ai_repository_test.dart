@@ -18,6 +18,14 @@ void main() {
             return switch (request.url.path.split('/').last) {
               'settings' => _json({
                 ..._settings(),
+                'providerProfiles': [
+                  _profile(
+                    id: 'profile-1',
+                    revision: profileRevision,
+                    ownerScope: 'home',
+                  ),
+                ],
+                'orchestrationPolicy': _policy(extractionIds: ['profile-1']),
                 'transmissionPlan': {
                   'settingsRevision': 4,
                   'policyRevision': 2,
@@ -67,7 +75,18 @@ void main() {
       final repository = GeneratedServerAiRepository(
         _client((request) async {
           return switch (request.url.path) {
-            '/api/v1/homes/home-1/ai/settings' => _json(_settings()),
+            '/api/v1/homes/home-1/ai/settings' => _json({
+              ..._settings(),
+              'providerProfiles': [
+                _profile(
+                  provider: 'anthropic',
+                  id: 'profile-1',
+                  ownerScope: 'home',
+                ),
+                _profile(provider: 'gemini', id: 'profile-2'),
+              ],
+              'orchestrationPolicy': _policy(extractionIds: ['profile-1']),
+            }),
             '/api/v1/homes/home-1/ai/profiles' => _json(<String, Object?>{
               'items': <Object?>[
                 _profile(provider: 'anthropic', id: 'profile-1'),
@@ -235,7 +254,24 @@ void main() {
     final repository = GeneratedServerAiRepository(
       _client((request) async {
         return switch (request.url.path.split('/').last) {
-          'settings' => _json(_settings()),
+          'settings' => _json({
+            ..._settings(),
+            'providerProfiles': [
+              _profile(id: 'profile-1'),
+              _profile(
+                id: 'profile-2',
+                provider: 'openai-compatible',
+                ownerScope: 'home',
+                endpoint: 'https://ai.example.test/v1',
+              ),
+              _profile(
+                id: 'profile-3',
+                provider: 'ollama',
+                endpoint: 'http://192.168.1.20:11434',
+              ),
+            ],
+            'orchestrationPolicy': _policy(extractionIds: ['profile-2']),
+          }),
           'profiles' => _json(<String, Object?>{
             'items': <Object?>[
               _profile(id: 'profile-1'),
@@ -307,7 +343,10 @@ void main() {
       final repository = GeneratedServerAiRepository(
         _client((request) async {
           return switch (request.url.path.split('/').last) {
-            'settings' => _json(_settings()),
+            'settings' => _json({
+              ..._settings(),
+              'providerProfiles': [profile],
+            }),
             'profiles' => _json(<String, Object?>{
               'items': <Object?>[profile],
             }),
@@ -765,6 +804,9 @@ Map<String, Object?> _settings({int revision = 4}) => <String, Object?>{
   'mediaHandling': _mediaHandling(),
   'humanReviewRequired': true,
   'credentialEncryptionAvailable': true,
+  'providerProfiles': <Object?>[],
+  'orchestrationPolicy': _policy(),
+  'transmissionPlan': null,
 };
 
 Map<String, Object?> _mediaHandling() => <String, Object?>{
@@ -813,6 +855,9 @@ Map<String, Object?> _extraction({
   'provider': 'openai',
   'model': 'gpt-5-mini',
   'status': 'review_required',
+  'targetId': null,
+  'observationDecisions': <Object?>[],
+  'discrepancies': <Object?>[],
   'inputMimeType': 'image/jpeg',
   'inputSha256':
       'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',

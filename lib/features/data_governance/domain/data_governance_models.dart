@@ -112,6 +112,7 @@ final class DataGovernanceRequest {
     required this.revision,
     required List<RetainedDataDisclosure> retainedDataDisclosure,
     this.homeId,
+    this.downloadEligible = false,
     this.artifactExpiresAt,
     this.createdAt,
     this.updatedAt,
@@ -136,9 +137,20 @@ final class DataGovernanceRequest {
   final int revision;
   final List<RetainedDataDisclosure> retainedDataDisclosure;
   final String? homeId;
+  final bool downloadEligible;
   final DateTime? artifactExpiresAt;
   final DateTime? createdAt;
   final DateTime? updatedAt;
+
+  bool get isExport =>
+      kind == DataGovernanceRequestKind.accountExport ||
+      kind == DataGovernanceRequestKind.homeExport;
+  bool availableAt(DateTime now) =>
+      downloadEligible &&
+      isExport &&
+      status == DataGovernanceRequestStatus.completed &&
+      artifactExpiresAt != null &&
+      artifactExpiresAt!.isAfter(now);
 
   bool get canBeCancelled => status == DataGovernanceRequestStatus.queued;
 }

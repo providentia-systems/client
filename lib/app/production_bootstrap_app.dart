@@ -23,16 +23,19 @@ import 'package:providentia/core/security/platform_session_credential_store.dart
 import 'package:providentia/core/security/uuid_v4.dart';
 import 'package:providentia/core/synchronization/generated_sync_gateway.dart';
 import 'package:providentia/core/synchronization/privacy_safe_sync_metrics.dart';
+import 'package:providentia/core/synchronization/session_bound_sync_gateway.dart';
 import 'package:providentia/core/synchronization/sync_coordinator.dart';
 import 'package:providentia/core/synchronization/sync_models.dart';
 import 'package:providentia/core/synchronization/sync_ports.dart';
 import 'package:providentia/features/ai_integration/application/ai_ports.dart';
+import 'package:providentia/features/ai_integration/application/ai_review_resume_store.dart';
 import 'package:providentia/features/ai_integration/application/receipt_ai_handoff_controller.dart';
 import 'package:providentia/features/ai_integration/domain/ai_models.dart';
 import 'package:providentia/features/ai_integration/domain/ai_policy.dart';
 import 'package:providentia/features/ai_integration/domain/server_ai_models.dart';
 import 'package:providentia/features/ai_integration/infrastructure/api17_ai_gateway.dart';
 import 'package:providentia/features/ai_integration/infrastructure/captured_file_cleanup.dart';
+import 'package:providentia/features/ai_integration/infrastructure/drift_ai_review_resume_store.dart';
 import 'package:providentia/features/ai_integration/infrastructure/generated_server_ai_repository.dart';
 import 'package:providentia/features/ai_integration/infrastructure/media_acquisition_service.dart';
 import 'package:providentia/features/ai_integration/infrastructure/receipt_page_media_editor.dart';
@@ -71,6 +74,7 @@ import 'package:providentia/features/catalog_import/presentation/catalog_import_
 import 'package:providentia/features/data_governance/application/data_governance_service.dart';
 import 'package:providentia/features/data_governance/domain/data_governance_models.dart';
 import 'package:providentia/features/data_governance/infrastructure/generated_data_governance_repository.dart';
+import 'package:providentia/features/data_governance/infrastructure/platform_data_export_saver.dart';
 import 'package:providentia/features/data_governance/presentation/data_governance_controller.dart';
 import 'package:providentia/features/data_governance/presentation/data_governance_page.dart';
 import 'package:providentia/features/homes/application/home_session_manager.dart';
@@ -295,6 +299,8 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp>
                         ..sort();
                       return _ConnectedHomeWorkspace(
                         key: ValueKey<String>(
+                          '${identitySnapshot.session!.userId}:'
+                          '${identitySnapshot.session!.deviceId}:'
                           '${home.id}:${permissionKey.join(',')}',
                         ),
                         home: home,
@@ -305,7 +311,9 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp>
                         syncRevocationGate: _homeSyncRevocationGate,
                         homeRevocationBoundary: _homeRevocationBoundary,
                         database: _database,
-                        deviceId: _deviceId,
+                        deviceId: identitySnapshot.session!.deviceId,
+                        userId: identitySnapshot.session!.userId,
+                        permissionFingerprint: permissionKey.join(','),
                         api: _authorizedApi,
                         identityController: _identityController,
                         homesController: _homesController,
@@ -562,6 +570,8 @@ final class _ConnectedHomeWorkspace extends StatefulWidget {
     required this.homeRevocationBoundary,
     required this.database,
     required this.deviceId,
+    required this.userId,
+    required this.permissionFingerprint,
     required this.api,
     required this.identityController,
     required this.homesController,
@@ -585,6 +595,8 @@ final class _ConnectedHomeWorkspace extends StatefulWidget {
   final ProductionHomeRevocationBoundary homeRevocationBoundary;
   final AppDatabase database;
   final String deviceId;
+  final String userId;
+  final String permissionFingerprint;
   final ProvidentiaApiClient api;
   final IdentityController identityController;
   final HomesController homesController;
@@ -607,6 +619,7 @@ final class _ConnectedHomeWorkspace extends StatefulWidget {
 final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
     with WidgetsBindingObserver {
   late final AppController _app;
+  late final SessionBoundSyncGateway _syncGateway;
   late final DriftHouseholdRepository _household;
   late final HouseholdFeatures _features;
   late final SyncConflictController _syncConflicts;
@@ -625,7 +638,9 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
     final household = createProductionHouseholdRepository(
       database: widget.database,
       deviceId: widget.deviceId,
-      onMutationCommitted: () => _app.refresh(),
+      onMutationCommitted: () async {
+        if (_bindingIsCurrent) await _app.refresh();
+      },
       stockPreferenceReader: GeneratedStockPreferenceReader(widget.api),
     );
     _household = household;
@@ -634,9 +649,15 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
         (snapshot) => _latestSyncMetrics = snapshot,
       ),
     );
+    _syncGateway = SessionBoundSyncGateway(
+      delegate: GeneratedSyncGateway(widget.api),
+      homeId: widget.home.id,
+      deviceId: widget.deviceId,
+      isCurrent: () => _bindingIsCurrent,
+    );
     AppSynchronization synchronization = SyncCoordinator(
       local: localSync,
-      remote: GeneratedSyncGateway(widget.api),
+      remote: _syncGateway,
       connectivity: GeneratedApiConnectivityProbe(widget.api),
       metrics: _syncMetrics,
     );
@@ -644,7 +665,13 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
       synchronization = ItemMasterRefreshingSynchronization(
         delegate: synchronization,
         source: GeneratedHomeItemMasterSource(widget.api),
-        replaceCache: household.replaceCatalogItemMaster,
+        replaceCache: ({required homeId, required items}) async {
+          _requireCurrentBinding();
+          await household.replaceCatalogItemMaster(
+            homeId: homeId,
+            items: items,
+          );
+        },
         homeId: widget.home.id,
       );
     }
@@ -733,7 +760,7 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
         final plan = workspace.settings.transmissionPlan;
         final profile = plan == null
             ? null
-            : workspace.profile(plan.primary.profileId ?? '');
+            : workspace.profile(plan.primary.profileId);
         if (profile != null && profile.enabled) {
           return StockPhotoAiRoute(
             profile: profile,
@@ -851,6 +878,7 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
         loadRoute: loadPreferredRoute,
         idGenerator: UuidV4Generator().call,
         onAuthorizationDenied: _handleHomeAuthorizationLost,
+        onServerReviewRequired: _openStockEvidenceReview,
       );
       stockPhotoAcquisition = StockPhotoAcquisitionActions(
         takePhoto: takeStockPhoto,
@@ -1021,6 +1049,37 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
     return false;
   }
 
+  Future<void> _openStockEvidenceReview(String extractionId) async {
+    if (!_bindingIsCurrent) return;
+    final navigator = widget.workspaceNavigatorKey.currentState;
+    if (navigator == null) return;
+    await navigator.push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => ProductionServerAiRoute(
+          api: widget.api,
+          homeId: widget.home.id,
+          capabilities: AiHomeCapabilities.fromPermissions(
+            homeId: widget.home.id,
+            permissions: widget.homesController.snapshot.effectivePermissions,
+          ),
+          protectedRouteRegistry: widget.protectedRouteRegistry,
+          onAuthorizationLost: _handleHomeAuthorizationLost,
+          stockPhotoController: _features.stockPhotoCount,
+          initialExtractionId: extractionId,
+          reviewResumeStore: DriftAiReviewResumeStore(
+            widget.database,
+            homeId: widget.home.id,
+            accountId: widget.userId,
+          ),
+          onStockReviewReady: () {
+            navigator.popUntil((route) => route.isFirst);
+            _app.selectSection(AppSection.stock);
+          },
+        ),
+      ),
+    );
+  }
+
   WidgetBuilder get _connectedHouseholdAiPageBuilder => (_) {
     final permissions = widget.homesController.snapshot.effectivePermissions;
     final capabilities = AiHomeCapabilities.fromPermissions(
@@ -1042,6 +1101,18 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
         capabilities: capabilities,
         protectedRouteRegistry: widget.protectedRouteRegistry,
         onAuthorizationLost: _handleHomeAuthorizationLost,
+        stockPhotoController: _features.stockPhotoCount,
+        reviewResumeStore: DriftAiReviewResumeStore(
+          widget.database,
+          homeId: widget.home.id,
+          accountId: widget.userId,
+        ),
+        onStockReviewReady: () {
+          widget.workspaceNavigatorKey.currentState?.popUntil(
+            (route) => route.isFirst,
+          );
+          _app.selectSection(AppSection.stock);
+        },
         purchaseRepository: _household,
         mayWritePurchases:
             widget.access.purchasesRead && widget.access.purchasesWrite,
@@ -1055,6 +1126,27 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
     );
   };
 
+  bool get _bindingIsCurrent {
+    final identity = widget.identityController.snapshot;
+    final homes = widget.homesController.snapshot;
+    final permissions = homes.effectivePermissions.toList(growable: false)
+      ..sort();
+    return mounted &&
+        identity.isAuthenticated &&
+        identity.session?.userId == widget.userId &&
+        identity.session?.deviceId == widget.deviceId &&
+        homes.activeHome?.id == widget.home.id &&
+        permissions.join(',') == widget.permissionFingerprint;
+  }
+
+  void _requireCurrentBinding() {
+    if (!_bindingIsCurrent) {
+      throw const AuthenticationSyncException(
+        'The synchronization workspace changed. Reopen the current home.',
+      );
+    }
+  }
+
   Future<void> _prepareLocalWorkspace(
     DriftHouseholdRepository household,
   ) async {
@@ -1065,7 +1157,9 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
     if (purge != null) {
       widget.syncRevocationGate.reauthorize(widget.home.id);
     }
+    _requireCurrentBinding();
     await _app.start();
+    _requireCurrentBinding();
     if (_app.syncSummary.availability == SyncAvailability.authorizationDenied) {
       throw StateError('The selected home is no longer authorized.');
     }
@@ -1107,6 +1201,7 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
     // controller here closes the home-switch race before any async extraction
     // can hand a reviewed candidate to the outgoing home's inventory.
     WidgetsBinding.instance.removeObserver(this);
+    _syncGateway.invalidate();
     _resumeSyncGate.dispose();
     _features.stockPhotoCount?.dispose();
     _strictLocalAi?.dispose();
@@ -1636,6 +1731,7 @@ final class _ProductionDataGovernanceRouteState
         capabilities: widget.capabilities,
         activeHomeId: widget.activeHomeId,
       ),
+      exportSaver: createPlatformDataExportSaver(),
     )..addListener(_handleControllerState);
     _clearSensitiveState = _controller.clearSensitiveState;
     widget.protectedRouteRegistry.register(_clearSensitiveState);
@@ -1682,6 +1778,10 @@ final class ProductionServerAiRoute extends StatefulWidget {
     this.purchaseRepository,
     this.mayWritePurchases = false,
     this.onReceiptDraftReady,
+    this.stockPhotoController,
+    this.onStockReviewReady,
+    this.initialExtractionId,
+    this.reviewResumeStore,
     super.key,
   });
 
@@ -1693,6 +1793,10 @@ final class ProductionServerAiRoute extends StatefulWidget {
   final PurchaseCaptureRepository? purchaseRepository;
   final bool mayWritePurchases;
   final ValueChanged<String>? onReceiptDraftReady;
+  final StockPhotoCountController? stockPhotoController;
+  final VoidCallback? onStockReviewReady;
+  final String? initialExtractionId;
+  final AiReviewResumeStore? reviewResumeStore;
 
   @override
   State<ProductionServerAiRoute> createState() =>
@@ -1711,6 +1815,7 @@ final class _ProductionServerAiRouteState
   bool _handlingAuthorizationLoss = false;
   bool _sensitiveStateCleared = false;
   bool _picking = false;
+  bool _resumedInitial = false;
   ReceiptAiHandoffController? _receiptHandoff;
 
   @override
@@ -1740,6 +1845,8 @@ final class _ProductionServerAiRouteState
       gateway: Api17AiGateway(client: widget.api, mediaReader: _prepared),
       identifiers: ProductionAiIdentifierFactory(),
       capabilities: capabilities,
+      stockCountTarget: () => widget.stockPhotoController?.activeCountId,
+      resumeStore: widget.reviewResumeStore,
     )..addListener(_handleControllerState);
     _clearSensitiveStateCallback = _clearSensitiveState;
     widget.protectedRouteRegistry.register(_clearSensitiveStateCallback);
@@ -1943,6 +2050,31 @@ final class _ProductionServerAiRouteState
         !handoff.requiresOrdinaryDomainCommand) {
       return;
     }
+    if (handoff.kind == AiExtractionKind.stockPhoto &&
+        widget.stockPhotoController != null &&
+        widget.onStockReviewReady != null) {
+      unawaited(
+        widget.stockPhotoController!
+            .acceptReviewedHandoff(handoff)
+            .then((_) {
+              if (mounted && !_sensitiveStateCleared) {
+                widget.onStockReviewReady!();
+              }
+            })
+            .catchError((Object _) {
+              if (mounted && !_sensitiveStateCleared) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Reopen the original stock count and refresh its evidence before continuing.',
+                    ),
+                  ),
+                );
+              }
+            }),
+      );
+      return;
+    }
     final purchaseRepository = widget.purchaseRepository;
     if (handoff.kind == AiExtractionKind.receipt &&
         purchaseRepository != null &&
@@ -1984,6 +2116,13 @@ final class _ProductionServerAiRouteState
   }
 
   void _handleControllerState() {
+    if (!_resumedInitial &&
+        !_sensitiveStateCleared &&
+        widget.initialExtractionId != null &&
+        _controller.status == ServerAiWorkspaceStatus.ready) {
+      _resumedInitial = true;
+      unawaited(_controller.resumeReview(widget.initialExtractionId!));
+    }
     if (_controller.status == ServerAiWorkspaceStatus.failed ||
         _controller.status == ServerAiWorkspaceStatus.accessDenied) {
       _clearRegisteredSources();

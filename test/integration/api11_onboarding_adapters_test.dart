@@ -766,6 +766,80 @@ void main() {
     await expectLater(response, throwsA(isA<http.RequestAbortedException>()));
     await inner.abortObserved.future;
   });
+
+  test(
+    'a request finalized after logout is not sent under later credentials',
+    () async {
+      final manager = IdentitySessionManager(
+        transport: _RestoringIdentityTransport(),
+        credentialStore: _MemoryCredentialStore(),
+        pendingEmailCodeStore: _MemoryPendingStore(),
+        device: DeviceDescriptor(
+          id: _deviceId,
+          name: 'Test',
+          platform: 'android',
+        ),
+        clock: () => DateTime.utc(2026, 8, 9, 12),
+      );
+      addTearDown(manager.dispose);
+      await manager.restore();
+      var sends = 0;
+      final client = SessionHttpClient(
+        inner: MockClient((_) async {
+          sends++;
+          return http.Response('{}', 200);
+        }),
+        sessions: manager,
+      );
+      addTearDown(client.close);
+      final request = http.StreamedRequest(
+        'POST',
+        Uri.parse('https://api.example.test/home'),
+      );
+      final response = client.send(request);
+      await Future<void>.delayed(Duration.zero);
+      await manager.logout();
+      await request.sink.close();
+      expect((await response).statusCode, 401);
+      expect(sends, 0);
+    },
+  );
+
+  test(
+    'a response arriving after logout does not expose the prior home',
+    () async {
+      final manager = IdentitySessionManager(
+        transport: _RestoringIdentityTransport(),
+        credentialStore: _MemoryCredentialStore(),
+        pendingEmailCodeStore: _MemoryPendingStore(),
+        device: DeviceDescriptor(
+          id: _deviceId,
+          name: 'Test',
+          platform: 'android',
+        ),
+        clock: () => DateTime.utc(2026, 8, 9, 12),
+      );
+      addTearDown(manager.dispose);
+      await manager.restore();
+      final started = Completer<void>();
+      final reply = Completer<http.Response>();
+      final client = SessionHttpClient(
+        inner: MockClient((_) {
+          started.complete();
+          return reply.future;
+        }),
+        sessions: manager,
+      );
+      addTearDown(client.close);
+      final response = client.get(Uri.parse('https://api.example.test/home'));
+      await started.future;
+      await manager.logout();
+      reply.complete(http.Response('{"private":"prior home"}', 200));
+      final actual = await response;
+      expect(actual.statusCode, 401);
+      expect(actual.body, isNot(contains('prior home')));
+    },
+  );
 }
 
 const _requestId = '0198a0b1-c2d3-7e4f-8123-456789abcdef';

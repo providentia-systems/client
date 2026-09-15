@@ -473,24 +473,60 @@ bool? _optionalBoolean(Object? value) {
   };
 }
 
-DateTime _dateTime(Map<String, Object?> object, String key) {
-  final value = DateTime.tryParse(_string(object, key));
-  if (value == null) {
-    throw FormatException('Invalid $key date-time.');
-  }
-  return value.toUtc();
-}
+DateTime _dateTime(Map<String, Object?> object, String key) =>
+    _reportInstant(_string(object, key));
 
-DateTime? _optionalDateTime(Object? value) {
-  if (value == null) {
-    return null;
-  }
+DateTime? _optionalDateTime(Object? value) =>
+    value == null ? null : _reportInstant(value);
+
+/// Report-only compatibility for confirmed persisted UTC instant columns.
+/// Calendar dates use [_optionalDate], never this function. Unzoned ISO input
+/// remains invalid; only the legacy SQL wire format has a defined UTC meaning.
+DateTime _reportInstant(Object? value) {
   if (value is! String) {
-    throw const FormatException('Invalid optional date-time.');
+    throw const FormatException('Invalid report instant.');
   }
-  final parsed = DateTime.tryParse(value);
+  final sql = RegExp(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d{1,6})?$');
+  final normalized = sql.hasMatch(value)
+      ? '${value.replaceFirst(' ', 'T')}Z'
+      : value;
+  final match = RegExp(
+    r'^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?(Z|[+-]\d{2}:\d{2})$',
+  ).firstMatch(normalized);
+  if (match == null) {
+    throw const FormatException('Invalid report instant.');
+  }
+  final parts = <int>[for (var i = 1; i <= 6; i++) int.parse(match.group(i)!)];
+  final civil = DateTime.utc(
+    parts[0],
+    parts[1],
+    parts[2],
+    parts[3],
+    parts[4],
+    parts[5],
+  );
+  final actual = <int>[
+    civil.year,
+    civil.month,
+    civil.day,
+    civil.hour,
+    civil.minute,
+    civil.second,
+  ];
+  for (var i = 0; i < parts.length; i++) {
+    if (parts[i] != actual[i]) {
+      throw const FormatException('Invalid report instant.');
+    }
+  }
+  final offset = match.group(7)!;
+  if (offset != 'Z' &&
+      (int.parse(offset.substring(1, 3)) > 23 ||
+          int.parse(offset.substring(4)) > 59)) {
+    throw const FormatException('Invalid report instant.');
+  }
+  final parsed = DateTime.tryParse(normalized);
   if (parsed == null) {
-    throw const FormatException('Invalid optional date-time.');
+    throw const FormatException('Invalid report instant.');
   }
   return parsed.toUtc();
 }

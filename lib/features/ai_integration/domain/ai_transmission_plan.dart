@@ -79,9 +79,9 @@ final class AiTransmissionRecipient {
     if (json.length != 5 ||
         !json.containsKey('profileId') ||
         !json.containsKey('endpoint') ||
-        (id != null && (id is! String || id.isEmpty)) ||
+        (id is! String || !RegExp(r'^[A-Za-z0-9-]{1,36}$').hasMatch(id)) ||
         revision is! int ||
-        revision < 0 ||
+        revision < 1 ||
         provider is! String ||
         provider.trim().isEmpty ||
         model is! String ||
@@ -90,7 +90,7 @@ final class AiTransmissionRecipient {
       throw const FormatException('Invalid AI transmission recipient.');
     }
     return AiTransmissionRecipient(
-      profileId: id as String?,
+      profileId: id,
       revision: revision,
       provider: provider,
       model: model,
@@ -98,7 +98,7 @@ final class AiTransmissionRecipient {
     );
   }
 
-  final String? profileId;
+  final String profileId;
   final int revision;
   final String provider;
   final String model;

@@ -151,6 +151,25 @@ final class _ServerAiWorkspacePageState extends State<ServerAiWorkspacePage> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: <Widget>[
+        if (controller.recentReviews.isNotEmpty) ...<Widget>[
+          const Text('Recent reviews on this device'),
+          const Text(
+            'Only references are saved here. Resume reloads authorized current evidence from the server.',
+          ),
+          for (final reference in controller.recentReviews)
+            ListTile(
+              title: Text(
+                '${reference.kind.name} · ${reference.extractionId.substring(0, 8)}',
+              ),
+              trailing: OutlinedButton(
+                key: Key('ai-resume-${reference.extractionId}'),
+                onPressed: controller.isBusy
+                    ? null
+                    : () => controller.resumeReview(reference.extractionId),
+                child: const Text('Resume review'),
+              ),
+            ),
+        ],
         if (controller.safeMessage != null)
           Card(
             color: Theme.of(context).colorScheme.errorContainer,
@@ -160,6 +179,21 @@ final class _ServerAiWorkspacePageState extends State<ServerAiWorkspacePage> {
             ),
           ),
         _PrivacyBoundaryCard(settings: workspace.settings),
+        if (workspace.settings.mode == AiServerMode.serverProxy &&
+            workspace.settings.transmissionPlan == null)
+          const Card(
+            key: Key('ai-configuration-required'),
+            child: ListTile(
+              leading: Icon(Icons.settings_outlined),
+              title: Text('AI setup needs attention'),
+              subtitle: Text(
+                'Add or repair a shared provider profile and save a household '
+                'policy. Check that its provider and credential vault are '
+                'available. Settings remain editable; images cannot be sent '
+                'until the exact recipients can be confirmed.',
+              ),
+            ),
+          ),
         const SizedBox(height: 12),
         Text(
           'Provider profiles',
@@ -268,6 +302,7 @@ final class _ServerAiWorkspacePageState extends State<ServerAiWorkspacePage> {
                 key: const Key('ai-single-profile-policy'),
                 onPressed:
                     selected == null ||
+                        selected.ownerScope != AiProfileOwnerScope.home ||
                         controller.isBusy ||
                         selected.availability !=
                             AiProviderAvailability.available
@@ -284,11 +319,19 @@ final class _ServerAiWorkspacePageState extends State<ServerAiWorkspacePage> {
                         ),
                       ),
                 icon: const Icon(Icons.account_tree_outlined),
-                label: const Text('Use single-profile policy'),
+                label: const Text('Use shared profile in policy'),
               ),
             ],
           ),
         ],
+        const Padding(
+          padding: EdgeInsets.only(top: 8),
+          child: Text(
+            'Household policies use shared profiles only. Your private profile '
+            'may override the same provider for you; the confirmation shows '
+            'the exact effective recipients before anything is sent.',
+          ),
+        ),
         const Divider(height: 32),
         Text(
           'Extract receipt pages or a stock image',
@@ -410,9 +453,18 @@ final class _ServerAiWorkspacePageState extends State<ServerAiWorkspacePage> {
   }
 
   bool _canExtract(AiProviderProfile? selected) {
+    final workspace = widget.controller.workspace;
     return selected != null &&
+        workspace?.settings.mode == AiServerMode.serverProxy &&
+        workspace?.settings.transmissionPlan?.primary.profileId ==
+            selected.id &&
         selected.enabled &&
-        selected.credentialConfigured &&
+        (selected.credentialConfigured ||
+            workspace!.settings.availableProviders.any(
+              (provider) =>
+                  provider.id == selected.providerWireId &&
+                  !provider.requiresCredential,
+            )) &&
         selected.availability == AiProviderAvailability.available &&
         widget.controller.capabilities.mayUse &&
         !widget.controller.isBusy;
@@ -1394,6 +1446,140 @@ final class _CandidateReviewSection extends StatelessWidget {
           'Accepting here records a review decision only. An ordinary authorized household command is still required to change data.',
         ),
         const SizedBox(height: 8),
+        OutlinedButton.icon(
+          key: const Key('ai-refresh-review'),
+          onPressed: controller.isBusy ? null : controller.refreshReview,
+          icon: const Icon(Icons.refresh),
+          label: const Text('Refresh current review'),
+        ),
+        if (review.hasUnresolvedEvidence)
+          const Text(
+            'Resolve every overlap and validator discrepancy before accepting candidates. Rejected extraction evidence remains blocking.',
+          ),
+        for (final observation in review.observations)
+          Card(
+            key: Key('ai-observation-${observation.id}'),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    observation.exactDigest
+                        ? 'Identical image excluded automatically'
+                        : 'Possible cross-image duplicate',
+                  ),
+                  Text(
+                    '${observation.leftReference} ↔ ${observation.rightReference}',
+                  ),
+                  if (!observation.exactDigest)
+                    Text(
+                      'Candidates ${observation.leftCandidatePosition} and ${observation.rightCandidatePosition}. Confirming duplicate excludes the second candidate; reject that candidate below.',
+                    ),
+                  Text(
+                    '${observation.decision.name} · revision ${observation.revision}',
+                  ),
+                  if (!observation.exactDigest)
+                    Wrap(
+                      spacing: 8,
+                      children: <Widget>[
+                        OutlinedButton(
+                          key: Key('ai-duplicate-${observation.id}'),
+                          onPressed:
+                              controller.isBusy ||
+                                  review.candidates.any(
+                                    (c) =>
+                                        c.status ==
+                                        AiCandidateReviewStatus.accepted,
+                                  )
+                              ? null
+                              : () => controller.reviewObservation(
+                                  observation.id,
+                                  AiObservationDecision.confirmedDuplicate,
+                                ),
+                          child: const Text('Same items — duplicate'),
+                        ),
+                        OutlinedButton(
+                          key: Key('ai-distinct-${observation.id}'),
+                          onPressed:
+                              controller.isBusy ||
+                                  review.candidates.any(
+                                    (c) =>
+                                        c.status ==
+                                        AiCandidateReviewStatus.accepted,
+                                  )
+                              ? null
+                              : () => controller.reviewObservation(
+                                  observation.id,
+                                  AiObservationDecision.distinct,
+                                ),
+                          child: const Text('Separate items — distinct'),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+            ),
+          ),
+        for (final discrepancy in review.discrepancies)
+          Card(
+            key: Key('ai-discrepancy-${discrepancy.position}'),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'Validator disagreement · image ${discrepancy.observationIndex + 1} · ${discrepancy.field ?? discrepancy.type}',
+                  ),
+                  Text('Primary: ${discrepancy.primary ?? "not present"}'),
+                  Text('Validator: ${discrepancy.validation ?? "not present"}'),
+                  Text(
+                    '${discrepancy.decision.name} · revision ${discrepancy.revision}',
+                  ),
+                  Wrap(
+                    spacing: 8,
+                    children: <Widget>[
+                      OutlinedButton(
+                        key: Key('ai-primary-${discrepancy.position}'),
+                        onPressed:
+                            controller.isBusy ||
+                                review.candidates.any(
+                                  (c) =>
+                                      c.status ==
+                                      AiCandidateReviewStatus.accepted,
+                                )
+                            ? null
+                            : () => controller.reviewDiscrepancy(
+                                discrepancy.position,
+                                AiDiscrepancyDecision.acceptedPrimary,
+                              ),
+                        child: const Text('Use primary evidence'),
+                      ),
+                      OutlinedButton(
+                        key: Key(
+                          'ai-reject-extraction-${discrepancy.position}',
+                        ),
+                        onPressed:
+                            controller.isBusy ||
+                                review.candidates.any(
+                                  (c) =>
+                                      c.status ==
+                                      AiCandidateReviewStatus.accepted,
+                                )
+                            ? null
+                            : () => controller.reviewDiscrepancy(
+                                discrepancy.position,
+                                AiDiscrepancyDecision.rejectedExtraction,
+                              ),
+                        child: const Text('Reject extraction'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
         if (review.candidates.isEmpty)
           const Text('The extraction produced no candidates.')
         else
@@ -1405,7 +1591,7 @@ final class _CandidateReviewSection extends StatelessWidget {
                 subtitle: Text(
                   '${candidate.type.name} · ${candidate.status.name} · revision ${candidate.revision}',
                 ),
-                trailing: candidate.status == AiCandidateReviewStatus.pending
+                trailing: candidate.status != AiCandidateReviewStatus.rejected
                     ? Wrap(
                         spacing: 4,
                         children: <Widget>[
@@ -1422,8 +1608,15 @@ final class _CandidateReviewSection extends StatelessWidget {
                           ),
                           IconButton(
                             key: Key('ai-accept-${candidate.position}'),
-                            tooltip: 'Accept candidate',
-                            onPressed: controller.isBusy
+                            tooltip:
+                                review.isConfirmedDuplicate(candidate.position)
+                                ? 'Confirmed duplicate — reject this candidate'
+                                : 'Accept candidate',
+                            onPressed:
+                                controller.isBusy ||
+                                    !review.canAccept(candidate.position) ||
+                                    candidate.status !=
+                                        AiCandidateReviewStatus.pending
                                 ? null
                                 : () => controller.reviewCandidate(
                                     position: candidate.position,
@@ -1444,11 +1637,9 @@ final class _CandidateReviewSection extends StatelessWidget {
         FilledButton.icon(
           key: const Key('ai-build-review-handoff'),
           onPressed:
-              !review.hasPending &&
-                  review.candidates.any(
-                    (candidate) =>
-                        candidate.status == AiCandidateReviewStatus.accepted,
-                  )
+              !controller.isBusy &&
+                  review.canHandoff &&
+                  controller.status == ServerAiWorkspaceStatus.reviewRequired
               ? onHandoff
               : null,
           icon: const Icon(Icons.outbox_outlined),

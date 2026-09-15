@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:providentia/features/ai_integration/application/ai_ports.dart';
+import 'package:providentia/features/ai_integration/application/ai_review_resume_store.dart';
 import 'package:providentia/features/ai_integration/application/ai_use_cases.dart';
 import 'package:providentia/features/ai_integration/application/server_ai_repository.dart';
 import 'package:providentia/features/ai_integration/domain/ai_models.dart';
@@ -33,6 +34,8 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
     required AiHomeCapabilities capabilities,
     AiPrivacyPolicy policy = const AiPrivacyPolicy(),
     DateTime Function()? clock,
+    String? Function()? stockCountTarget,
+    AiReviewResumeStore? resumeStore,
   }) => ServerAiWorkspaceController._(
     repository,
     media,
@@ -41,6 +44,8 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
     capabilities,
     policy,
     clock ?? DateTime.now,
+    stockCountTarget,
+    resumeStore,
   );
 
   ServerAiWorkspaceController._(
@@ -51,6 +56,8 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
     this._capabilities,
     this._policy,
     this._clock,
+    this._stockCountTarget,
+    this._resumeStore,
   ) : _status = _capabilities.mayRead
           ? ServerAiWorkspaceStatus.idle
           : ServerAiWorkspaceStatus.accessDenied;
@@ -61,6 +68,12 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
   final AiIdentifierFactory _identifiers;
   final AiPrivacyPolicy _policy;
   final DateTime Function() _clock;
+  final String? Function()? _stockCountTarget;
+  final AiReviewResumeStore? _resumeStore;
+  List<AiReviewResumeReference> _recentReviews =
+      const <AiReviewResumeReference>[];
+  List<AiReviewResumeReference> get recentReviews => _recentReviews;
+  String? _preparedStockTarget;
 
   AiHomeCapabilities _capabilities;
   ServerAiWorkspaceStatus _status;
@@ -99,6 +112,7 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
     _capabilities = capabilities;
     if (scopeChanged || lostRead || lostUse) {
       _accessEpoch++;
+      _recentReviews = const <AiReviewResumeReference>[];
       await _discardPrepared();
       _clearExtractionState();
     }
@@ -132,6 +146,10 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
       if (loaded.homeId != homeId) {
         throw const AiServerException(AiServerFailureKind.invalidResponse);
       }
+      final recent =
+          await _resumeStore?.list() ?? const <AiReviewResumeReference>[];
+      if (!_stillAuthorized(epoch, homeId)) return;
+      _recentReviews = recent;
       _workspace = loaded;
       _status = ServerAiWorkspaceStatus.ready;
     } on AiServerException catch (error) {
@@ -288,11 +306,12 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
     }
     if ((purpose == AiExtractionKind.receipt &&
             (assets.isEmpty || assets.length > 8)) ||
-        (purpose == AiExtractionKind.stockPhoto && assets.length != 1)) {
+        (purpose == AiExtractionKind.stockPhoto &&
+            (assets.isEmpty || assets.length > 8))) {
       _setFailure(
         purpose == AiExtractionKind.receipt
             ? 'Select between 1 and 8 receipt images.'
-            : 'Select one stock image.',
+            : 'Select between 1 and 8 stock images.',
       );
       return;
     }
@@ -301,12 +320,22 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
       _setFailure('This provider cannot safely process multiple images.');
       return;
     }
+    final stockTarget = purpose == AiExtractionKind.stockPhoto
+        ? _stockCountTarget?.call()
+        : null;
+    if (purpose == AiExtractionKind.stockPhoto && stockTarget == null) {
+      _setFailure(
+        'Start an ordinary stock count in Inventory before selecting stock images.',
+      );
+      return;
+    }
     final epoch = _accessEpoch;
     final homeId = _capabilities.homeId;
     _status = ServerAiWorkspaceStatus.preparing;
     _safeMessage = null;
     await _discardPrepared();
     _clearExtractionState();
+    _preparedStockTarget = stockTarget;
     _notify();
     try {
       final prepared = await PrepareAiMedia(
@@ -426,6 +455,15 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
         );
       }
       if (!_stillAuthorized(epoch, homeId, use: true)) return;
+      if (prepared.purpose == AiExtractionKind.stockPhoto &&
+          (_preparedStockTarget == null ||
+              _stockCountTarget?.call() != _preparedStockTarget)) {
+        throw const AiPolicyViolation(
+          code: 'count_changed',
+          safeMessage:
+              'The stock count changed. Select images again for the current open count.',
+        );
+      }
       final request = AiExtractionRequest(
         runId: _identifiers.nextId(),
         homeId: homeId,
@@ -440,6 +478,7 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
             ? 'receipt-extraction-v1'
             : 'stock-photo-extraction-v1',
         timeout: const Duration(seconds: 45),
+        targetId: _preparedStockTarget,
         transmissionPlan: _workspace?.settings.transmissionPlan,
       );
       if (prepared.purpose == AiExtractionKind.receipt) {
@@ -533,72 +572,275 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
     required int position,
     required AiCandidateDecision decision,
   }) async {
-    if (!_requireUse()) return;
+    if (!_requireUse() || isBusy) return;
+    if (_status != ServerAiWorkspaceStatus.reviewRequired) {
+      _safeMessage =
+          'Reload the current extraction before reviewing candidates.';
+      _notify();
+      return;
+    }
     final review = _review;
-    if (review == null || review.homeId != _capabilities.homeId) {
-      _setFailure('Reload the AI extraction before reviewing candidates.');
+    final candidate = review?.candidates
+        .where((item) => item.position == position)
+        .firstOrNull;
+    if (review == null ||
+        candidate == null ||
+        candidate.status == AiCandidateReviewStatus.rejected ||
+        (decision == AiCandidateDecision.accept &&
+            candidate.status != AiCandidateReviewStatus.pending)) {
+      _safeMessage =
+          'This candidate is unavailable or has already been reviewed. Reload the current extraction.';
+      _notify();
       return;
     }
-    AiReviewCandidate? candidate;
-    for (final item in review.candidates) {
-      if (item.position == position) {
-        candidate = item;
-        break;
-      }
-    }
-    if (candidate == null ||
-        candidate.status != AiCandidateReviewStatus.pending) {
-      _setFailure('This AI candidate has already been reviewed.');
+    if (decision == AiCandidateDecision.accept && !review.canAccept(position)) {
+      _safeMessage =
+          'Resolve all evidence first. Confirmed duplicate candidates must be rejected.';
+      _notify();
       return;
     }
+    await _changeReview(
+      review,
+      () =>
+          _repository.reviewCandidate(candidate: candidate, decision: decision),
+    );
+  }
+
+  Future<void> reviewObservation(
+    String id,
+    AiObservationDecision decision,
+  ) async {
+    if (!_requireUse() || isBusy) return;
+    if (_status != ServerAiWorkspaceStatus.reviewRequired) {
+      _safeMessage =
+          'Reload the current extraction before reviewing candidates.';
+      _notify();
+      return;
+    }
+    final review = _review;
+    final repository = _repository;
+    final observation = review?.observations
+        .where((item) => item.id == id)
+        .firstOrNull;
+    if (review == null ||
+        observation == null ||
+        repository is! AiEvidenceReviewRepository ||
+        observation.exactDigest ||
+        decision == AiObservationDecision.pending) {
+      return;
+    }
+    await _changeReview(
+      review,
+      () => (repository as AiEvidenceReviewRepository).reviewObservation(
+        review: review,
+        observation: observation,
+        decision: decision,
+      ),
+    );
+  }
+
+  Future<void> reviewDiscrepancy(
+    int position,
+    AiDiscrepancyDecision decision,
+  ) async {
+    if (!_requireUse() || isBusy) return;
+    if (_status != ServerAiWorkspaceStatus.reviewRequired) {
+      _safeMessage =
+          'Reload the current extraction before reviewing candidates.';
+      _notify();
+      return;
+    }
+    final review = _review;
+    final repository = _repository;
+    final discrepancy = review?.discrepancies
+        .where((item) => item.position == position)
+        .firstOrNull;
+    if (review == null ||
+        discrepancy == null ||
+        repository is! AiEvidenceReviewRepository ||
+        decision == AiDiscrepancyDecision.pending) {
+      return;
+    }
+    await _changeReview(
+      review,
+      () => (repository as AiEvidenceReviewRepository).reviewDiscrepancy(
+        review: review,
+        discrepancy: discrepancy,
+        decision: decision,
+      ),
+    );
+  }
+
+  /// A lost mutation response is never retried blindly. Read the same extraction
+  /// again, preserving unresolved evidence and its current revisions.
+  Future<void> _changeReview(
+    AiExtractionReview original,
+    Future<AiExtractionReview> Function() change,
+  ) async {
     final epoch = _accessEpoch;
     final homeId = _capabilities.homeId;
+    if (original.homeId != homeId) return;
     _status = ServerAiWorkspaceStatus.processing;
     _safeMessage = null;
     _notify();
     try {
-      final updated = await _repository.reviewCandidate(
-        candidate: candidate,
-        decision: decision,
+      final updated = await change();
+      if (!_stillAuthorized(epoch, homeId, use: true)) return;
+      _installReview(updated, original.extractionId);
+    } on AiServerException catch (error) {
+      if (!_stillAuthorized(epoch, homeId, use: true)) return;
+      if (error.kind == AiServerFailureKind.authenticationRequired ||
+          error.kind == AiServerFailureKind.authorizationDenied) {
+        await _handleServerExceptionIfCurrent(epoch, homeId, error);
+      } else {
+        await _recoverReview(epoch, homeId, original.extractionId);
+      }
+    } catch (_) {
+      if (_stillAuthorized(epoch, homeId, use: true)) {
+        await _recoverReview(epoch, homeId, original.extractionId);
+      }
+    }
+    _notify();
+  }
+
+  void _installReview(AiExtractionReview updated, String extractionId) {
+    if (updated.homeId != _capabilities.homeId ||
+        updated.extractionId != extractionId) {
+      throw const AiServerException(AiServerFailureKind.invalidResponse);
+    }
+    _review = updated;
+    _status = ServerAiWorkspaceStatus.reviewRequired;
+  }
+
+  Future<void> _recoverReview(
+    int epoch,
+    String homeId,
+    String extractionId,
+  ) async {
+    try {
+      final current = await _repository.loadExtractionReview(
+        homeId: homeId,
+        extractionId: extractionId,
       );
       if (!_stillAuthorized(epoch, homeId, use: true)) return;
-      if (updated.homeId != homeId ||
-          updated.extractionId != review.extractionId) {
-        throw const AiServerException(AiServerFailureKind.invalidResponse);
+      _installReview(current, extractionId);
+      _safeMessage =
+          'The review changed or its response was lost. Current evidence has been reloaded; review it before continuing.';
+    } on AiServerException catch (error) {
+      if (!_stillAuthorized(epoch, homeId, use: true)) return;
+      if (error.kind == AiServerFailureKind.authenticationRequired ||
+          error.kind == AiServerFailureKind.authorizationDenied) {
+        await _handleServerExceptionIfCurrent(epoch, homeId, error);
+      } else {
+        _status = ServerAiWorkspaceStatus.failed;
+        _safeMessage =
+            'The current review could not be reloaded. Refresh this extraction before continuing.';
       }
-      _review = updated;
-      _status = ServerAiWorkspaceStatus.reviewRequired;
+    } catch (_) {
+      if (!_stillAuthorized(epoch, homeId, use: true)) return;
+      _status = ServerAiWorkspaceStatus.failed;
+      _safeMessage =
+          'The current review could not be reloaded. Refresh this extraction before continuing.';
+    }
+  }
+
+  Future<void> resumeReview(String extractionId) async {
+    if (isBusy || !_requireUse()) return;
+    final epoch = ++_accessEpoch;
+    final homeId = _capabilities.homeId;
+    await _discardPrepared();
+    _clearExtractionState();
+    _status = ServerAiWorkspaceStatus.processing;
+    _safeMessage = null;
+    _notify();
+    try {
+      final loaded = await _repository.loadExtractionReview(
+        homeId: homeId,
+        extractionId: extractionId,
+      );
+      if (!_stillAuthorized(epoch, homeId, use: true)) return;
+      _installReview(loaded, extractionId);
+      await _rememberReview(loaded, epoch);
+      if (!_stillAuthorized(epoch, homeId, use: true)) return;
+      _safeMessage =
+          'Current structured review restored. Images are not downloaded or sent to a provider.';
     } on AiServerException catch (error) {
       await _handleServerExceptionIfCurrent(epoch, homeId, error);
     } catch (_) {
       _failIfCurrent(
         epoch,
         homeId,
-        'The review decision was not saved safely.',
+        'This extraction could not be restored safely.',
       );
     }
     _notify();
   }
 
+  Future<void> _rememberReview(AiExtractionReview review, int epoch) async {
+    final store = _resumeStore;
+    if (store == null) return;
+    final reference = AiReviewResumeReference(
+      extractionId: review.extractionId,
+      kind: review.kind,
+    );
+    await store.remember(reference);
+    if (!_stillAuthorized(epoch, review.homeId, use: true)) return;
+    _recentReviews =
+        List<AiReviewResumeReference>.unmodifiable(<AiReviewResumeReference>[
+          reference,
+          ..._recentReviews
+              .where((item) => item.extractionId != reference.extractionId)
+              .take(19),
+        ]);
+  }
+
+  Future<void> refreshReview() async {
+    final review = _review;
+    if (review == null || isBusy || !_requireUse()) return;
+    await _changeReview(
+      review,
+      () => _repository.loadExtractionReview(
+        homeId: review.homeId,
+        extractionId: review.extractionId,
+      ),
+    );
+  }
+
   AiReviewHandoff? buildReviewHandoff() {
-    if (!_requireUse()) return null;
+    if (!_requireUse() || isBusy) return null;
+    if (_status != ServerAiWorkspaceStatus.reviewRequired) {
+      _safeMessage = 'Complete the AI candidate review first.';
+      _notify();
+      return null;
+    }
     final review = _review;
     if (review == null || review.homeId != _capabilities.homeId) {
-      _setFailure('Complete the AI candidate review first.');
+      _safeMessage = 'Complete the AI candidate review first.';
+      _notify();
       return null;
     }
     try {
+      if (review.kind == AiExtractionKind.stockPhoto &&
+          (review.targetId == null ||
+              review.targetId != _stockCountTarget?.call())) {
+        _safeMessage =
+            'Reopen the original stock count before preparing its reviewed handoff.';
+        _notify();
+        return null;
+      }
       final handoff = const AiReviewHandoffBuilder().build(review);
       _safeMessage = null;
       _notify();
       return handoff;
     } on AiServerException catch (error) {
-      _setFailure(error.safeMessage);
+      _safeMessage = error.safeMessage;
+      _notify();
       return null;
     }
   }
 
   Future<void> clearExtraction() async {
+    _accessEpoch++;
     await _discardPrepared();
     _clearExtractionState();
     _status = _capabilities.mayRead
@@ -634,6 +876,8 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
         review.kind != kind) {
       throw const AiServerException(AiServerFailureKind.invalidResponse);
     }
+    await _rememberReview(review, epoch);
+    if (!_stillAuthorized(epoch, homeId, use: true)) return;
     _review = review;
     _status = ServerAiWorkspaceStatus.reviewRequired;
   }
@@ -724,6 +968,7 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
   }
 
   void _clearExtractionState() {
+    _preparedStockTarget = null;
     _selectedProvider = null;
     _prepared = null;
     _consent = null;

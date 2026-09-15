@@ -1,14 +1,20 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:http/http.dart' as http;
 import 'package:providentia/features/data_governance/application/data_governance_service.dart';
 import 'package:providentia/features/data_governance/domain/data_governance_models.dart';
 import 'package:providentia_api_client/providentia_api_client.dart';
+
+import '../application/data_export_ports.dart';
+import '../domain/data_export_artifact.dart';
 
 /// Current-contract adapter for account and home data-governance requests.
 ///
 /// It maps only allowlisted fields, drops backend diagnostic failure details,
 /// and rejects any unexpected home attribution before returning domain values.
 final class GeneratedDataGovernanceRepository
-    implements DataGovernanceRepository {
+    implements DataGovernanceRepository, DataExportRepository {
   const GeneratedDataGovernanceRepository(this._client);
 
   final ProvidentiaApiClient _client;
@@ -106,6 +112,143 @@ final class GeneratedDataGovernanceRepository
     });
   }
 
+  @override
+  Future<DataExportArtifact> retrieveExport(
+    DataGovernanceRequest request, {
+    required bool Function() isCurrent,
+  }) => _run(() async {
+    void requireCurrent() {
+      if (!isCurrent()) {
+        throw const DataGovernanceRepositoryException(
+          DataGovernanceFailureKind.forbidden,
+        );
+      }
+    }
+
+    if (!_uuidPattern.hasMatch(request.id) || !request.isExport) {
+      throw const FormatException('Invalid export request.');
+    }
+    for (var attempt = 0; attempt < 2; attempt++) {
+      requireCurrent();
+      final current = await _currentExportRequest(request, isCurrent);
+      requireCurrent();
+      if (!current.availableAt(DateTime.now().toUtc())) {
+        throw const DataGovernanceRepositoryException(
+          DataGovernanceFailureKind.conflict,
+        );
+      }
+      try {
+        final issued = await _client.issueDataExportDownloadToken(
+          requestId: current.id,
+          body: <String, Object?>{'expectedRevision': current.revision},
+          headers: const <String, String>{'Cache-Control': 'no-store'},
+        );
+        requireCurrent();
+        _requireNoStore(issued);
+        final token = issued.requireObject();
+        final expiresAt = _optionalDateTime(token['expiresAt']);
+        if (expiresAt == null ||
+            !expiresAt.isAfter(DateTime.now().toUtc()) ||
+            _positiveInteger(token, 'revision') != current.revision + 1) {
+          throw const FormatException('Invalid export token response.');
+        }
+        // The secret exists only in this request body and is never placed in a
+        // URL, repository field, exception, telemetry, or presentation state.
+        final response = await _client.downloadDataExport(
+          requestId: current.id,
+          body: <String, Object?>{'token': _requiredString(token, 'token')},
+          headers: const <String, String>{'Cache-Control': 'no-store'},
+        );
+        requireCurrent();
+        _requireNoStore(response);
+        final object = response.requireObject();
+        if (object['format'] != 'providentia-data-export-v1' ||
+            object['requestId'] != current.id ||
+            object['scope'] != current.scope.name ||
+            object['data'] is! Map<String, Object?> ||
+            !current.artifactExpiresAt!.isAfter(DateTime.now().toUtc())) {
+          throw const FormatException('Export scope or format mismatch.');
+        }
+        if (current.scope == DataGovernanceScope.home) {
+          final data = object['data']! as Map<String, Object?>;
+          final home = data['home'];
+          if (home is! List<Object?> ||
+              home.length != 1 ||
+              home.single is! Map<String, Object?> ||
+              (home.single! as Map<String, Object?>)['id'] != current.homeId) {
+            throw const FormatException('Export home mismatch.');
+          }
+        }
+        return DataExportArtifact(
+          requestId: current.id,
+          scope: current.scope,
+          expiresAt: current.artifactExpiresAt!,
+          bytes: Uint8List.fromList(utf8.encode(jsonEncode(object))),
+        );
+      } on ProvidentiaApiException catch (error) {
+        // Refreshing a concurrently replaced/consumed token requires the new
+        // request revision. Never replay a single-use token or loop endlessly.
+        if (attempt == 0 &&
+            (error.statusCode == 409 || error.statusCode == 410)) {
+          continue;
+        }
+        rethrow;
+      }
+    }
+    throw const DataGovernanceRepositoryException(
+      DataGovernanceFailureKind.conflict,
+    );
+  });
+
+  Future<DataGovernanceRequest> _currentExportRequest(
+    DataGovernanceRequest request,
+    bool Function() isCurrent,
+  ) async {
+    // Narrow prerequisite for token refresh: locate this request through the
+    // existing authorized list operation, without inventing a public URL.
+    for (var offset = 0; offset < 10000; offset += 100) {
+      if (!isCurrent()) {
+        throw const DataGovernanceRepositoryException(
+          DataGovernanceFailureKind.forbidden,
+        );
+      }
+      final query = <String, String>{'limit': '100', 'offset': '$offset'};
+      final response = request.scope == DataGovernanceScope.account
+          ? await _client.listAccountDataGovernanceRequests(query: query)
+          : await _client.listHomeDataGovernanceRequests(
+              homeId: request.homeId!,
+              query: query,
+            );
+      final page = _requestList(
+        response.requireObject(),
+        expectedScope: request.scope,
+        expectedHomeId: request.homeId,
+      );
+      for (final item in page) {
+        if (item.id == request.id) {
+          if (item.kind != request.kind) {
+            throw const FormatException('Export kind changed.');
+          }
+          return item;
+        }
+      }
+      if (page.length < 100) break;
+    }
+    throw const DataGovernanceRepositoryException(
+      DataGovernanceFailureKind.conflict,
+    );
+  }
+
+  static void _requireNoStore(ApiResponse response) {
+    final directives = response.headers.entries
+        .where((entry) => entry.key.toLowerCase() == 'cache-control')
+        .expand((entry) => entry.value.toLowerCase().split(','))
+        .map((value) => value.trim());
+    if (!directives.contains('no-store')) {
+      throw const FormatException('Unsafe export cache policy.');
+    }
+  }
+
   Future<T> _run<T>(Future<T> Function() action) async {
     try {
       return await action();
@@ -116,7 +259,7 @@ final class GeneratedDataGovernanceRepository
         400 || 422 => DataGovernanceFailureKind.invalidRequest,
         401 => DataGovernanceFailureKind.authenticationRequired,
         403 || 404 => DataGovernanceFailureKind.forbidden,
-        409 => DataGovernanceFailureKind.conflict,
+        409 || 410 => DataGovernanceFailureKind.conflict,
         _ => DataGovernanceFailureKind.unavailable,
       });
     } on FormatException {
@@ -217,7 +360,12 @@ DataGovernanceRequest _request(
   // Validate the optional diagnostic field but intentionally do not retain it.
   _optionalString(object['failureReason'], allowEmpty: true);
 
+  final downloadEligible = object['downloadEligible'] ?? false;
+  if (downloadEligible is! bool) {
+    throw const FormatException('Invalid export eligibility.');
+  }
   return DataGovernanceRequest(
+    downloadEligible: downloadEligible,
     id: _requiredUuid(object, 'id'),
     kind: kind,
     scope: scope,

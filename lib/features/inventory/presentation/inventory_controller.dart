@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:providentia/core/security/intake_entity_id.dart';
 import 'package:providentia/core/security/uuid_v4.dart';
 import 'package:providentia/features/inventory/application/home_location_repository.dart';
 import 'package:providentia/features/inventory/application/inventory_repository.dart';
@@ -518,6 +519,21 @@ final class InventoryController extends ChangeNotifier {
     if (photoId.isEmpty) {
       throw ArgumentError.value(proposalId, 'proposalId', 'must not be empty');
     }
+    final lineId = intakeEntityId(<String>[
+      'stock-line',
+      homeId,
+      session.id,
+      photoId,
+    ]);
+    final prior = session.lines.where((line) => line.id == lineId).firstOrNull;
+    if (prior != null) {
+      if (prior.itemId != item.id) {
+        throw StateError(
+          'This reviewed candidate was already matched differently.',
+        );
+      }
+      return;
+    }
     final withPhoto = session.attachPhoto(
       StockPhotoReference(
         id: photoId,
@@ -527,7 +543,7 @@ final class InventoryController extends ChangeNotifier {
     );
     final updated = withPhoto.recordLine(
       StockCountLine(
-        id: _idGenerator(),
+        id: lineId,
         itemId: item.id,
         status: CountLineStatus.confirmed,
         source: CountSource.photo,

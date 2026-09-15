@@ -15,7 +15,7 @@ local `providentia_api_client` Dart package.
 
 - Client OpenAPI version: `2.1.0`
 - Contract SHA-256:
-  `40a8477521baa6c41cf2c5d872068f5ae1bf255a8d0bbccc97a05688d705ad57`
+  `d8263a996b1382a0b0742ba4b3ca232e1d6f291644a2659d966e95b2abb038fc`
 - Canonical backend operations: 235
 - Generated homeowner operations: 167
 
