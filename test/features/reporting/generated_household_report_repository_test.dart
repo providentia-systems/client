@@ -92,6 +92,84 @@ void main() {
     },
   );
 
+  for (final instant in <String, String>{
+    '2026-08-01 00:00:00': '2026-08-01T00:00:00Z',
+    '2026-03-08 01:59:59': '2026-03-08T01:59:59Z',
+    '2026-11-01 01:30:00': '2026-11-01T01:30:00Z',
+    '2026-09-15 23:59:59.123456': '2026-09-15T23:59:59.123456Z',
+    '2026-08-01T00:00:00+02:00': '2026-07-31T22:00:00Z',
+    '2026-08-01T00:00:00-07:00': '2026-08-01T07:00:00Z',
+  }.entries) {
+    test('report instant ${instant.key} preserves the UTC instant', () async {
+      final repository = GeneratedHouseholdReportRepository(
+        _client((request) async {
+          final body = _reportForPath(request.url.path);
+          if (request.url.path.endsWith('/inventory')) {
+            final rows = body['data']! as List<Object?>;
+            (rows.single! as Map<String, Object?>)['balanceUpdatedAt'] =
+                instant.key;
+          }
+          return _json(body);
+        }),
+      );
+      final report = await repository.load(homeId: _homeId);
+      expect(
+        report.inventoryFacts.single.balanceUpdatedAt,
+        DateTime.parse(instant.value),
+      );
+      expect(report.purchaseTotals.single.month, '2026-08');
+    });
+  }
+
+  test('null report instants remain absent rather than becoming now', () async {
+    final repository = GeneratedHouseholdReportRepository(
+      _client((request) async {
+        final body = _reportForPath(request.url.path);
+        if (request.url.path.endsWith('/inventory')) {
+          final rows = body['data']! as List<Object?>;
+          (rows.single! as Map<String, Object?>)['balanceUpdatedAt'] = null;
+        }
+        return _json(body);
+      }),
+    );
+    final report = await repository.load(homeId: _homeId);
+    expect(report.inventoryFacts.single.balanceUpdatedAt, isNull);
+  });
+
+  for (final invalid in <Object?>[
+    '2026-02-30 00:00:00',
+    '2026-08-01T00:00:00',
+    'tomorrow',
+    42,
+  ]) {
+    test(
+      'invalid or ambiguous report instant $invalid is not accepted',
+      () async {
+        final repository = GeneratedHouseholdReportRepository(
+          _client((request) async {
+            final body = _reportForPath(request.url.path);
+            if (request.url.path.endsWith('/inventory')) {
+              final rows = body['data']! as List<Object?>;
+              (rows.single! as Map<String, Object?>)['balanceUpdatedAt'] =
+                  invalid;
+            }
+            return _json(body);
+          }),
+        );
+        await expectLater(
+          repository.load(homeId: _homeId),
+          throwsA(
+            isA<ReportRepositoryException>().having(
+              (error) => error.kind,
+              'kind',
+              ReportRepositoryFailureKind.invalidResponse,
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   test('rejects a cross-home ID at any nested response depth', () async {
     final repository = GeneratedHouseholdReportRepository(
       _client((request) async {
