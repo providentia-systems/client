@@ -25,7 +25,8 @@ jobs:
           import gzip, hashlib
           data = Path('contracts/providentia-v1.json').read_bytes()
           assert hashlib.sha256(data).hexdigest() == 'f6591ae866efbcc9e661528c7f595da0d7093d959d64c66c09b0c5be1dcb7c58'
-          archive = gzip.compress(data, compresslevel=9, mtime=0)
+          archive = bytearray(gzip.compress(data, compresslevel=9, mtime=0))
+          archive[9] = 255
           assert hashlib.sha256(archive).hexdigest() == '9550a7278a8231eb7b90ca338e8b157d2e63058dafbc1bc9b05c1e553d82af11'
           Path('contracts/source/providentia-v1.json.gz').write_bytes(archive)
           p = Path('.github/workflows/ci.yml')
