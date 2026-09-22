@@ -1163,7 +1163,7 @@ void main() {
       final operations =
           await (database.select(database.clientOperations)
                 ..orderBy(<OrderingTerm Function(ClientOperations)>[
-                  (row) => OrderingTerm.asc(row.clientTimestamp),
+                  (row) => OrderingTerm.asc(row.enqueueSequence),
                   (row) => OrderingTerm.asc(row.operationId),
                 ]))
               .get();
@@ -1181,9 +1181,8 @@ void main() {
       ]);
       for (var index = 1; index < operations.length; index++) {
         expect(
-          operations[index].clientTimestamp.isAfter(
-            operations[index - 1].clientTimestamp,
-          ),
+          operations[index].enqueueSequence! >
+              operations[index - 1].enqueueSequence!,
           isTrue,
           reason: 'dependent commands must not be ordered by random UUIDv4',
         );
@@ -1246,7 +1245,7 @@ void main() {
       final operations =
           await (database.select(database.clientOperations)
                 ..orderBy(<OrderingTerm Function(ClientOperations)>[
-                  (row) => OrderingTerm.asc(row.clientTimestamp),
+                  (row) => OrderingTerm.asc(row.enqueueSequence),
                 ]))
               .get();
       expect(operations.map((operation) => operation.operationType), <String>[
@@ -1524,7 +1523,7 @@ void main() {
       final operations =
           await (database.select(database.clientOperations)
                 ..orderBy(<OrderingTerm Function(ClientOperations)>[
-                  (row) => OrderingTerm.asc(row.clientTimestamp),
+                  (row) => OrderingTerm.asc(row.enqueueSequence),
                   (row) => OrderingTerm.asc(row.operationId),
                 ]))
               .get();
@@ -1549,9 +1548,8 @@ void main() {
       ]);
       for (var index = 1; index < operations.length; index++) {
         expect(
-          operations[index].clientTimestamp.isAfter(
-            operations[index - 1].clientTimestamp,
-          ),
+          operations[index].enqueueSequence! >
+              operations[index - 1].enqueueSequence!,
           isTrue,
         );
       }

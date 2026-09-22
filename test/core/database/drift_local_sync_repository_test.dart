@@ -618,40 +618,60 @@ void main() {
     },
   );
 
-  test('resync replays multiple intents in deterministic order', () async {
-    await repository.commitLocalMutation(
-      _mutation(
-        operationId: 'operation-z',
-        clientTimestamp: DateTime.utc(2026, 7, 29, 13),
-        payload: const <String, Object?>{'quantity': 13},
-      ),
-    );
-    await repository.commitLocalMutation(
-      _mutation(
-        operationId: 'operation-a',
-        clientTimestamp: DateTime.utc(2026, 7, 29, 12),
-        payload: const <String, Object?>{'quantity': 12},
-      ),
-    );
+  test(
+    'resync replays enqueue order even when the clock moves backwards',
+    () async {
+      await repository.commitLocalMutation(
+        _mutation(
+          operationId: 'operation-z',
+          clientTimestamp: DateTime.utc(2026, 7, 29, 13),
+          payload: const <String, Object?>{'quantity': 13},
+        ),
+      );
+      await repository.commitLocalMutation(
+        _mutation(
+          operationId: 'operation-a',
+          clientTimestamp: DateTime.utc(2026, 7, 29, 12),
+          payload: const <String, Object?>{'quantity': 12},
+        ),
+      );
 
-    await repository.replaceWithBootstrap(
-      homeId: 'home-1',
-      page: _page(
-        fromCursor: 'snapshot-cursor',
-        changes: const <RemoteChange>[],
-        pageCursor: 'snapshot-cursor',
-      ),
-    );
+      await repository.replaceWithBootstrap(
+        homeId: 'home-1',
+        page: _page(
+          fromCursor: 'snapshot-cursor',
+          changes: const <RemoteChange>[],
+          pageCursor: 'snapshot-cursor',
+        ),
+      );
 
-    final record = await database.select(database.localRecords).getSingle();
-    expect(jsonDecode(record.payload), <String, Object?>{'quantity': 13});
-    expect(
-      (await database.select(database.clientOperations).get()).map(
-        (operation) => operation.operationId,
-      ),
-      containsAll(<String>['operation-a', 'operation-z']),
-    );
-  });
+      final replayed = await repository.pendingOperations(
+        homeId: 'home-1',
+        now: clock,
+      );
+      expect(replayed.map((row) => row.operationId), [
+        'operation-z',
+        'operation-a',
+      ]);
+      expect(replayed.map((row) => row.enqueueSequence), [1, 2]);
+      expect(
+        replayed.first.clientTimestamp.toUtc(),
+        DateTime.utc(2026, 7, 29, 13),
+      );
+      expect(
+        replayed.last.clientTimestamp.toUtc(),
+        DateTime.utc(2026, 7, 29, 12),
+      );
+      final record = await database.select(database.localRecords).getSingle();
+      expect(jsonDecode(record.payload), <String, Object?>{'quantity': 12});
+      expect(
+        (await database.select(database.clientOperations).get()).map(
+          (operation) => operation.operationId,
+        ),
+        containsAll(<String>['operation-a', 'operation-z']),
+      );
+    },
+  );
 
   test(
     'bootstrap replaces an acknowledged v2 projection with server truth',

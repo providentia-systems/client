@@ -235,7 +235,7 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
           entityId: row.entityId,
           operationType: row.operationType,
           baseRevision: row.baseRevision,
-          clientTimestamp: row.clientTimestamp,
+          clientTimestamp: row.clientTimestamp.toUtc(),
           payloadSchemaVersion: row.payloadSchemaVersion,
           payload: _decodePayload(row.payload),
           retryCount: row.retryCount,
