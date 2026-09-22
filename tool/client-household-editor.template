@@ -1,0 +1,190 @@
+Future<void> showInventoryProductEditor(
+  BuildContext context,
+  InventoryController controller,
+  InventoryItem item, {
+  bool archived = false,
+}) async {
+  var categoryId = item.homeCategoryId;
+  var globalCategoryId = item.globalCategoryId;
+  var unit = item.unit;
+  var busy = false;
+  String? error;
+  await showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (context) => _OwnedTextControllers(
+      initialValues: {
+        'name': item.canonicalName,
+        'pack': item.packSize == 'Unspecified pack' ? '' : item.packSize,
+      },
+      builder: (context, fields) {
+        final name = fields['name']!;
+        final pack = fields['pack']!;
+        return StatefulBuilder(
+          builder: (context, setState) => ListenableBuilder(
+            listenable: controller,
+            builder: (context, _) => PopScope(
+              canPop: !busy,
+              child: AlertDialog(
+                title: Text('Edit ${item.canonicalName}'),
+                scrollable: true,
+                content: SizedBox(
+                  width: 420,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(item.productId == null
+                          ? 'Edit this product for your home. Stock and history are retained.'
+                          : 'These changes apply only to your home. The shared global product is not changed.'),
+                      const SizedBox(height: 20),
+                      TextField(
+                        key: const Key('inventory-product-name'),
+                        controller: name,
+                        enabled: !busy,
+                        maxLength: 191,
+                        decoration: const InputDecoration(labelText: 'Product name'),
+                      ),
+                      const SizedBox(height: 20),
+                      TextField(
+                        key: const Key('inventory-product-pack'),
+                        controller: pack,
+                        enabled: !busy,
+                        maxLength: 191,
+                        decoration: const InputDecoration(labelText: 'Pack and measure'),
+                      ),
+                      const SizedBox(height: 20),
+                      DropdownButtonFormField<String>(
+                        key: const Key('inventory-product-unit'),
+                        initialValue: unit,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Stock unit',
+                          helperText: 'A unit correction keeps the existing numbers; it does not convert stock quantities.',
+                          helperMaxLines: 4,
+                        ),
+                        items: [
+                          for (final value in {...householdStockUnits, unit})
+                            DropdownMenuItem(value: value, child: Text(value)),
+                        ],
+                        onChanged: busy ? null : (value) {
+                          if (value != null) setState(() => unit = value);
+                        },
+                      ),
+                      const SizedBox(height: 20),
+                      InventoryCategoryField(
+                        localCategories: controller.homeCategories,
+                        globalCategories: controller.publishedCategories,
+                        localId: categoryId,
+                        globalId: globalCategoryId,
+                        inheritedName: item.productId == null ? null : item.catalogCategoryName ?? 'Uncategorized',
+                        enabled: !busy,
+                        onChanged: (local, global) => setState(() {
+                          categoryId = local;
+                          globalCategoryId = global;
+                        }),
+                      ),
+                      if (item.catalogName != null) ...[
+                        const SizedBox(height: 12),
+                        TextButton.icon(
+                          onPressed: busy ? null : () => setState(() {
+                            name.text = item.catalogName!;
+                            pack.text = item.catalogPackText ?? '';
+                            categoryId = null;
+                            globalCategoryId = null;
+                          }),
+                          icon: const Icon(Icons.restore),
+                          label: const Text('Use global product details'),
+                        ),
+                      ],
+                      if (!archived && controller.canManageStockPreferences) ...[
+                        const SizedBox(height: 20),
+                        OutlinedButton(
+                          onPressed: busy ? null : () => showStockPreferenceEditor(context, controller, item),
+                          child: const Text('Stock limits and recommendations'),
+                        ),
+                      ],
+                      const SizedBox(height: 20),
+                      const Text('Changes are saved locally and queued for synchronization. Removing a product requires zero stock and no active count or receipt references.'),
+                      if (error != null) ...[
+                        const SizedBox(height: 12),
+                        Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                      ],
+                    ],
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: busy ? null : () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                  if (!archived)
+                    TextButton(
+                      onPressed: busy ? null : () async {
+                        final confirmed = await showDialog<bool>(
+                          context: context,
+                          builder: (dialog) => AlertDialog(
+                            title: const Text('Remove product?'),
+                            content: const Text('The product will be archived after synchronization. Its history is retained.'),
+                            actions: [
+                              TextButton(onPressed: () => Navigator.pop(dialog, false), child: const Text('Cancel')),
+                              FilledButton(onPressed: () => Navigator.pop(dialog, true), child: const Text('Remove')),
+                            ],
+                          ),
+                        );
+                        if (confirmed != true || !context.mounted) return;
+                        setState(() => busy = true);
+                        final saved = await controller.editProduct(
+                          item: item,
+                          name: item.canonicalName,
+                          pack: item.packSize == 'Unspecified pack' ? null : item.packSize,
+                          categoryId: item.homeCategoryId,
+                          globalCategoryId: item.globalCategoryId,
+                          unit: item.unit,
+                          archived: true,
+                        );
+                        if (!context.mounted) return;
+                        setState(() => busy = false);
+                        if (saved) {
+                          Navigator.pop(context);
+                        } else {
+                          setState(() => error = 'The product could not be removed.');
+                        }
+                      },
+                      child: const Text('Remove product'),
+                    ),
+                  FilledButton(
+                    onPressed: busy ? null : () async {
+                      if (name.text.trim().isEmpty || name.text.trim().length > 191 || pack.text.trim().length > 191) {
+                        setState(() => error = 'Enter a product name; name and pack must be at most 191 characters.');
+                        return;
+                      }
+                      setState(() => busy = true);
+                      final saved = await controller.editProduct(
+                        item: item,
+                        name: name.text.trim(),
+                        pack: pack.text.trim(),
+                        categoryId: categoryId,
+                        globalCategoryId: globalCategoryId,
+                        unit: unit,
+                      );
+                      if (!context.mounted) return;
+                      setState(() => busy = false);
+                      if (saved) {
+                        Navigator.pop(context);
+                      } else {
+                        setState(() => error = 'The product could not be saved. Refresh and try again.');
+                      }
+                    },
+                    child: Text(archived ? 'Restore product' : 'Save locally'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    ),
+  );
+}
+
