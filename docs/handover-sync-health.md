@@ -18,3 +18,5 @@ The generated adapter now retains result codes and protocol-v2 command result
 projections rather than dropping them. Existing scoped operation receipts and
 exact retries remain the only automatic ambiguous-outcome recovery path. This
 change does not establish authorship or repair a historical schema-2 queue.
+
+The later API 2.2.0 household feature completion is documented in [Household workflows](household-workflows.md). Category-refresh failures retain completed-pull evidence, pending/blocked upload status and the unresolved upload count; they never turn a blocked queue into full synchronization success.

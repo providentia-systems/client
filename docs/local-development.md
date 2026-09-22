@@ -48,7 +48,7 @@ delivered message is not a successful onboarding test.
 
 Before requesting a code, confirm that the running backend contract contains
 `requestEmailCode` and `verifyEmailCode`. Compare the running image revision and
-API artifact with the Client's pinned API 2.1.0 lock. Health alone does not prove
+API artifact with the Client's pinned API 2.2.0 lock. Health alone does not prove
 the image has the category, product or synchronization operations in this branch.
 
 ## 2. Prepare the client
@@ -339,7 +339,7 @@ provider keys, mailbox passwords or private household data.
 
 Email-code onboarding, session/device management, current-user bootstrap,
 multiple homes, invitations, home governance, and editable home settings are
-composed against API `2.1.0`. Household
+composed against API `2.2.0`. Household
 inventory, purchase, and shopping-list screens still include local Drift
 projections; those screens alone are not proof of cross-device convergence for
 every backend resource. Catalog consent and homeowner contributions, household

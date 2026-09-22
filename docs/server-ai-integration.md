@@ -60,7 +60,7 @@ still requires a separate explicit, allowlisted contribution and moderation.
 
 The server AI workspace uses `GeneratedServerAiRepository` and
 `Api17AiGateway` (the historical class name remains, but the enforced contract
-pin is API `2.1.0`). Cloud media goes through the authenticated server proxy.
+pin is API `2.2.0`). Cloud media goes through the authenticated server proxy.
 OpenAI credentials remain server-owned and write-only.
 
 The production stock-photo workflow uses an active, verified direct-local

@@ -13,7 +13,7 @@ architecture tests, and a full CI build matrix.
 Phases 5–8 add household inventory, count sessions, purchase history, shopping
 lists, AI review policies, private catalog data, explainable suggestions, price
 intelligence, reporting, and evaluation. The client pins the backend's API
-`2.1.0` contract. The exact operation set is pinned in the contract lock;
+`2.2.0` contract. The exact operation set is pinned in the contract lock;
 the default-deny homeowner generator exposes only authorized household operations. Admin,
 operator, billing-operator, catalog-moderation, and platform-administrator
 operations are excluded from the generated homeowner package and runtime. The
@@ -213,3 +213,5 @@ Viewing or forking this repository on GitHub does not grant a licence. See the
 [LICENSE](LICENSE) file for the complete terms.
 
 See [Product lifecycle integration](docs/product-lifecycle-integration.md) for the coordinated API 2.1 implementation and outstanding acceptance gates.
+
+Household product editing, global/local category selection, adjustment reasons and upgrade requirements: [Household workflows](docs/household-workflows.md).
