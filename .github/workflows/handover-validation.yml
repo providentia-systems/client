@@ -1,0 +1,65 @@
+name: Handover client validation
+on:
+  push:
+    branches: [fix/handover-2026-09-22]
+    paths: [tool/handover-next.py]
+permissions:
+  contents: write
+concurrency:
+  group: handover-client-edit
+  cancel-in-progress: false
+jobs:
+  validate:
+    if: github.repository == 'providentia-systems/client' && github.ref == 'refs/heads/fix/handover-2026-09-22'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ github.sha }}
+      - name: Install pinned toolchains
+        run: |
+          bash tool/install_node_linux.sh "$RUNNER_TEMP/providentia-node"
+          echo "$RUNNER_TEMP/providentia-node/node/bin" >> "$GITHUB_PATH"
+          bash tool/install_flutter_linux.sh "$RUNNER_TEMP/providentia-sdk"
+          echo "$RUNNER_TEMP/providentia-sdk/flutter/bin" >> "$GITHUB_PATH"
+      - name: Resolve locked dependencies
+        run: flutter pub get --enforce-lockfile
+      - name: Apply reviewed edits and generate artifacts
+        run: |
+          set -euo pipefail
+          python3 tool/handover-next.py
+          bash tool/materialize-openapi-contract.sh
+          node tool/generate_api_client.mjs
+          dart run build_runner build --delete-conflicting-outputs
+          dart run drift_dev schema dump lib/core/database/app_database.dart drift_schemas/
+          dart compile js -O4 -o web/drift_worker.dart.js web/drift_worker.dart
+          rm -f web/drift_worker.dart.js.deps web/drift_worker.dart.js.map
+          dart format lib test
+      - name: Preserve source and generated edits
+        run: |
+          set -euo pipefail
+          git diff --check
+          git add lib test docs tool contracts drift_schemas web/drift_worker.dart.js
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'fix: preserve sync provenance and report blocked uploads accurately'
+            git push origin HEAD:refs/heads/fix/handover-2026-09-22
+          fi
+          git rev-parse HEAD >> "$GITHUB_STEP_SUMMARY"
+      - name: Verify unchanged source and contract gates
+        run: |
+          node tool/verify_toolchain.mjs
+          node tool/generate_api_client.mjs --check
+          node tool/verify_structure.mjs
+          node --test tool/*.test.mjs
+      - name: Analyze
+        run: flutter analyze --fatal-infos --fatal-warnings
+      - name: Test
+        run: |
+          set -euo pipefail
+          flutter test --coverage > "$RUNNER_TEMP/tests.log" 2>&1 || { tail -n 180 "$RUNNER_TEMP/tests.log"; exit 1; }
+          tail -n 8 "$RUNNER_TEMP/tests.log"
+      - name: Enforce existing coverage gate
+        run: node tool/check_coverage.mjs coverage/lcov.info 80
