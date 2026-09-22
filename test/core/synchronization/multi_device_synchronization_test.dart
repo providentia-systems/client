@@ -93,7 +93,10 @@ void main() {
         .select(deviceB.database.syncConflictRecords)
         .getSingle();
 
-    expect(deviceBOutcome.completed, isTrue);
+    expect(deviceBOutcome.completed, isFalse);
+    expect(deviceBOutcome.pullCompleted, isTrue);
+    expect(deviceBOutcome.status, SyncRunStatus.uploadsBlocked);
+    expect(deviceBOutcome.remainingUploads, 1);
     expect(jsonDecode(localRecord.payload), <String, Object?>{'quantity': 3});
     expect(operation.state, ClientOperationState.blockedConflict.storageValue);
     expect(jsonDecode(conflict.localPayload), <String, Object?>{'quantity': 3});

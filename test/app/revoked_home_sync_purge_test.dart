@@ -107,7 +107,7 @@ void main() {
   );
 
   test(
-    'real HTTP 404 quiesces production sync, purges caches, and routes away',
+    'verified home-denial HTTP 404 quiesces sync, purges caches, and routes away',
     () async {
       const homeId = '0198a0b1-c2d3-7e4f-8123-456789abcdef';
       final database = AppDatabase(NativeDatabase.memory());
@@ -123,7 +123,8 @@ void main() {
           transportRequests++;
           return http.Response(
             jsonEncode(<String, Object?>{
-              'type': 'about:blank',
+              'type':
+                  'https://providentia.invalid/problems/sync_home_access_denied',
               'title': 'Not Found',
               'status': 404,
               'detail': 'The requested resource was not found.',
