@@ -185,8 +185,9 @@ final class LocalMutation {
   }) {
     _requireNonEmpty(operationId, 'operationId');
     _requireNonEmpty(deviceId, 'deviceId');
-    if (originatingAccountId != null)
+    if (originatingAccountId != null) {
       _requireNonEmpty(originatingAccountId, 'originatingAccountId');
+    }
     _requireNonEmpty(homeId, 'homeId');
     _requireNonEmpty(entityType, 'entityType');
     _requireNonEmpty(entityId, 'entityId');

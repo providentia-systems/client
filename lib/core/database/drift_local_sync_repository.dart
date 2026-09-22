@@ -8,8 +8,14 @@ import 'package:providentia/core/synchronization/sync_models.dart';
 import 'package:providentia/core/synchronization/sync_ports.dart';
 
 final class DriftLocalSyncRepository implements LocalSyncRepository {
-  DriftLocalSyncRepository(this._database, {DateTime Function()? clock})
-    : _clock = clock ?? DateTime.now;
+  DriftLocalSyncRepository(
+    this._database, {
+    DateTime Function()? clock,
+    String? accountId,
+    bool Function()? isCurrent,
+  }) : _clock = clock ?? DateTime.now,
+       _accountId = accountId,
+       _isCurrent = isCurrent;
 
   static final List<String> _unacknowledgedOperationStates =
       <ClientOperationState>[
@@ -127,6 +133,15 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
   @override
   Future<void> commitLocalMutation(LocalMutation mutation) {
     return _transaction(() async {
+      if (_accountId != null &&
+          mutation.originatingAccountId != null &&
+          mutation.originatingAccountId != _accountId) {
+        throw const BindingSyncException(
+          'The command belongs to another account.',
+          code: 'account_binding_mismatch',
+        );
+      }
+      final sequence = await _database.allocateOperationSequence();
       await _database
           .into(_database.localRecords)
           .insertOnConflictUpdate(
@@ -228,14 +243,16 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
     if (operationIds.isEmpty) {
       return;
     }
-    await (_database.update(
-      _database.clientOperations,
-    )..where((row) => row.operationId.isIn(operationIds))).write(
-      ClientOperationsCompanion(
-        state: Value<String>(ClientOperationState.syncing.storageValue),
-        lastSafeError: const Value<String?>(null),
-      ),
-    );
+    await _transaction(() async {
+      await (_database.update(
+        _database.clientOperations,
+      )..where((row) => row.operationId.isIn(operationIds))).write(
+        ClientOperationsCompanion(
+          state: Value<String>(ClientOperationState.syncing.storageValue),
+          lastSafeError: const Value<String?>(null),
+        ),
+      );
+    });
   }
 
   @override
@@ -309,6 +326,12 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
             retryCount: Value<int>(nextRetryCount),
             nextAttemptAt: Value<DateTime?>(nextAttemptAt),
             lastSafeError: Value<String?>(result.safeMessage),
+            safeFailureCode: Value(sanitizedSyncFailureCode(result.code)),
+            requestCorrelationId: Value(
+              result.requestId != null && isUuid(result.requestId!)
+                  ? result.requestId
+                  : null,
+            ),
             serverCursor: Value<String?>(result.changeCursor),
             acknowledgedAt: Value<DateTime?>(
               result.kind == PushResultKind.acknowledged ? now.toUtc() : null,
