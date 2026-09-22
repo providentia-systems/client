@@ -180,39 +180,54 @@ void main() {
     },
   );
 
-  for (final statusCode in <int>[403, 404]) {
-    test(
-      'maps HTTP $statusCode to authorization denied at the adapter boundary',
-      () async {
-        final source = GeneratedHomeItemMasterSource(
-          _client(
-            (_) async => http.Response(
-              jsonEncode(<String, Object?>{
-                'type': 'about:blank',
-                'title': statusCode == 403 ? 'Forbidden' : 'Not Found',
-                'status': statusCode,
-                'requestId': 'request-1',
-              }),
-              statusCode,
-              headers: <String, String>{
-                'content-type': 'application/problem+json',
-              },
+  const homeAccessDenied =
+      'https://providentia.invalid/problems/sync_home_access_denied';
+  for (final statusCode in <int>[401, 403, 404, 500]) {
+    for (final problemType in <String>[
+      'about:blank',
+      homeAccessDenied,
+      'https://providentia.invalid/problems/sync_permission_denied',
+      'https://example.test/problems/sync_home_access_denied',
+    ]) {
+      test(
+        'classifies HTTP $statusCode / $problemType without guessing home loss',
+        () async {
+          final source = GeneratedHomeItemMasterSource(
+            _client(
+              (_) async => http.Response(
+                jsonEncode(<String, Object?>{
+                  'type': problemType,
+                  'title': 'Request failed',
+                  'status': statusCode,
+                  'requestId': 'request-1',
+                }),
+                statusCode,
+                headers: <String, String>{
+                  'content-type': 'application/problem+json',
+                },
+              ),
             ),
-          ),
-        );
-
-        await expectLater(
-          source.loadAll(homeId: _homeId),
-          throwsA(
-            isA<HomeItemMasterSourceException>().having(
-              (error) => error.failure,
-              'failure',
-              HomeItemMasterSourceFailure.authorizationDenied,
+          );
+          var expected = HomeItemMasterSourceFailure.unavailable;
+          if (statusCode == 401) {
+            expected = HomeItemMasterSourceFailure.authenticationRequired;
+          } else if ((statusCode == 403 || statusCode == 404) &&
+              problemType == homeAccessDenied) {
+            expected = HomeItemMasterSourceFailure.authorizationDenied;
+          }
+          await expectLater(
+            source.loadAll(homeId: _homeId),
+            throwsA(
+              isA<HomeItemMasterSourceException>().having(
+                (error) => error.failure,
+                'failure',
+                expected,
+              ),
             ),
-          ),
-        );
-      },
-    );
+          );
+        },
+      );
+    }
   }
 
   test(
