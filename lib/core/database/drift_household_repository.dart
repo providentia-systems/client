@@ -683,8 +683,9 @@ final class DriftHouseholdRepository
     _requireHomeUuid(homeId);
     _requireUuid(productId, 'home product');
     if (homeCategoryId != null) _requireUuid(homeCategoryId, 'home category');
-    if (globalCategoryId != null)
+    if (globalCategoryId != null) {
       _requireUuid(globalCategoryId, 'global category');
+    }
     final at = _clock().toUtc();
     await _transaction(() async {
       final previous = await _record(
@@ -722,7 +723,7 @@ final class DriftHouseholdRepository
         'originalPackText': _trimToNull(draft.originalPackText),
         'homeCategoryId': draft.homeCategoryId,
         'globalCategoryId': draft.globalCategoryId,
-        if (unit != null) 'unit': unit,
+        'unit': ?unit,
         'status': archived ? 'archived' : 'active',
       };
       await _writeProjection(
@@ -759,8 +760,9 @@ final class DriftHouseholdRepository
     if (draft.homeCategoryId != null) {
       _requireUuid(draft.homeCategoryId!, 'home category');
     }
-    if (draft.globalCategoryId != null)
+    if (draft.globalCategoryId != null) {
       _requireUuid(draft.globalCategoryId!, 'global category');
+    }
     final privateName = draft.privateName.trim();
     final originalPackText = _trimToNull(draft.originalPackText);
     final at = _clock().toUtc();
@@ -980,8 +982,9 @@ final class DriftHouseholdRepository
         );
       }
       if (item.productId != null && item.catalogName != null) {
-        if (item.catalogCategoryId != null)
+        if (item.catalogCategoryId != null) {
           _requireUuid(item.catalogCategoryId!, 'catalog category');
+        }
         final base = <String, Object?>{
           'homeId': homeId,
           'name': item.catalogName,

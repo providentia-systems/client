@@ -175,6 +175,11 @@ void main() {
         addTearDown(tester.view.resetDevicePixelRatio);
         final repository = _Repository();
         await _workspace(tester, repository, scale: scale);
+        await tester.scrollUntilVisible(
+          find.text('Apple'),
+          180,
+          scrollable: find.byType(Scrollable).first,
+        );
         await tester.ensureVisible(find.text('Apple'));
         await tester.tap(find.text('Apple'));
         await tester.pumpAndSettle();

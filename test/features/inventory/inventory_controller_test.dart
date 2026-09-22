@@ -82,7 +82,9 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Add private product'), findsOneWidget);
       expect(
-        find.text('This name and pack text stay private to the active home.'),
+        find.text(
+          'This product stays private to your home, even when you select a global category.',
+        ),
         findsOneWidget,
       );
       await tester.tap(find.byKey(const Key('inventory-save-private-product')));

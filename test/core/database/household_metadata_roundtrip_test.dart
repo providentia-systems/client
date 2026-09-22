@@ -242,7 +242,12 @@ Future<void> _seed(
         homeId: home,
         entityType: type,
         entityId: id,
-        payload: jsonEncode({...data, 'id': id, 'revision': 1}),
+        payload: jsonEncode({
+          ...data,
+          if (type == 'inventory-balance') 'homeProductId': id,
+          'id': id,
+          'revision': 1,
+        }),
         revision: const Value(1),
         updatedAt: DateTime.utc(2026, 9, 22),
       ),
