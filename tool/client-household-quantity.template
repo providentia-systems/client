@@ -1,0 +1,98 @@
+class _InventoryQuantityDialog extends StatefulWidget {
+  const _InventoryQuantityDialog({required this.item, required this.countSessionActive});
+  final InventoryItem item;
+  final bool countSessionActive;
+  @override
+  State<_InventoryQuantityDialog> createState() => _InventoryQuantityDialogState();
+}
+
+class _InventoryQuantityDialogState extends State<_InventoryQuantityDialog> {
+  late final TextEditingController _quantity;
+  final _explanation = TextEditingController();
+  String _reason = 'Stock count correction';
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _quantity = TextEditingController(text: widget.item.currentQuantity?.toString() ?? '');
+  }
+  @override
+  void dispose() {
+    _quantity.dispose();
+    _explanation.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(widget.countSessionActive ? 'Record count' : 'Adjust ${widget.item.canonicalName}'),
+    scrollable: true,
+    content: SizedBox(
+      width: 420,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          TextField(
+            key: const Key('inventory-quantity-input'),
+            controller: _quantity,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(labelText: 'Observed quantity', suffixText: widget.item.unit),
+          ),
+          if (!widget.countSessionActive) ...<Widget>[
+            const SizedBox(height: 20),
+            DropdownButtonFormField<String>(
+              key: const Key('inventory-adjustment-reason'),
+              initialValue: _reason,
+              isExpanded: true,
+              menuMaxHeight: 360,
+              decoration: const InputDecoration(labelText: 'Reason for adjustment'),
+              items: [
+                for (final reason in const [
+                  'Stock count correction', 'Stock received', 'Used or consumed',
+                  'Spoiled or expired', 'Damaged or lost', 'Given away', 'Other',
+                ]) DropdownMenuItem(value: reason, child: Text(reason, overflow: TextOverflow.ellipsis)),
+              ],
+              onChanged: (value) { if (value != null) setState(() { _reason = value; _error = null; }); },
+            ),
+            if (_reason == 'Other') ...[
+              const SizedBox(height: 20),
+              TextField(
+                key: const Key('inventory-adjustment-explanation'),
+                controller: _explanation,
+                maxLength: 191,
+                minLines: 2,
+                maxLines: 4,
+                decoration: const InputDecoration(labelText: 'Explanation for Other'),
+              ),
+            ],
+          ],
+          if (_error != null) ...[
+            const SizedBox(height: 12),
+            Text(_error!, key: const Key('inventory-adjustment-validation'),
+              style: TextStyle(color: Theme.of(context).colorScheme.error)),
+          ],
+        ],
+      ),
+    ),
+    actions: <Widget>[
+      TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+      FilledButton(onPressed: _save, child: const Text('Save')),
+    ],
+  );
+
+  void _save() {
+    final parsed = double.tryParse(_quantity.text.trim());
+    if (parsed == null || !parsed.isFinite || parsed < 0) {
+      setState(() => _error = 'Enter a finite quantity of zero or more.');
+      return;
+    }
+    final explanation = _explanation.text.trim();
+    if (!widget.countSessionActive && _reason == 'Other' && (explanation.isEmpty || explanation.length > 191)) {
+      setState(() => _error = 'Explain Other in 1 to 191 characters.');
+      return;
+    }
+    Navigator.pop(context, (parsed, widget.countSessionActive ? '' : _reason == 'Other' ? explanation : _reason));
+  }
+}
