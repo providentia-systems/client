@@ -2,7 +2,7 @@ name: Handover client validation
 on:
   push:
     branches: [fix/handover-2026-09-22]
-    paths: [tool/handover-next.py]
+    paths: [tool/handover-next.py, .github/workflows/handover-validation.yml]
 permissions:
   contents: write
 concurrency:
@@ -17,12 +17,12 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           ref: ${{ github.sha }}
-      - name: Install pinned toolchains
+      - name: Install pinned Flutter SDK
         run: |
-          bash tool/install_node_linux.sh "$RUNNER_TEMP/providentia-node"
-          echo "$RUNNER_TEMP/providentia-node/node/bin" >> "$GITHUB_PATH"
+          set -euo pipefail
           bash tool/install_flutter_linux.sh "$RUNNER_TEMP/providentia-sdk"
           echo "$RUNNER_TEMP/providentia-sdk/flutter/bin" >> "$GITHUB_PATH"
+          node --version
       - name: Resolve locked dependencies
         run: flutter pub get --enforce-lockfile
       - name: Apply reviewed edits and generate artifacts
@@ -44,7 +44,7 @@ jobs:
           if ! git diff --cached --quiet; then
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git commit -m 'fix: preserve sync provenance and report blocked uploads accurately'
+            git commit -m 'fix: preserve sync failure classifications and report blocked uploads accurately'
             git push origin HEAD:refs/heads/fix/handover-2026-09-22
           fi
           git rev-parse HEAD >> "$GITHUB_STEP_SUMMARY"
@@ -59,7 +59,7 @@ jobs:
       - name: Test
         run: |
           set -euo pipefail
-          flutter test --coverage > "$RUNNER_TEMP/tests.log" 2>&1 || { tail -n 180 "$RUNNER_TEMP/tests.log"; exit 1; }
+          flutter test --coverage --reporter expanded > "$RUNNER_TEMP/tests.log" 2>&1 || { tail -n 180 "$RUNNER_TEMP/tests.log"; exit 1; }
           tail -n 8 "$RUNNER_TEMP/tests.log"
       - name: Enforce existing coverage gate
         run: node tool/check_coverage.mjs coverage/lcov.info 80
