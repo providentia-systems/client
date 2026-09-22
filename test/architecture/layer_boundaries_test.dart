@@ -115,6 +115,7 @@ void main() {
       'lib/features/identity/infrastructure/api11_identity_transport.dart',
       'lib/features/profile/infrastructure/generated_profile_port.dart',
       'lib/features/inventory/infrastructure/generated_home_item_master_source.dart',
+      'lib/features/inventory/infrastructure/generated_published_category_source.dart',
       'lib/features/reporting/infrastructure/generated_household_report_repository.dart',
       'lib/features/shopping/infrastructure/generated_online_shopping_suggestion_repository.dart',
     };

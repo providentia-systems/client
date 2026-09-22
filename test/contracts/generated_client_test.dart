@@ -133,7 +133,7 @@ void main() {
       );
     });
 
-    test('publishes only the API 2.1.0 homeowner operation registry', () {
+    test('publishes only the API 2.2.0 homeowner operation registry', () {
       expect(ProvidentiaApiClient.operations, hasLength(167));
       expect(
         ProvidentiaApiClient.operations['createAiExtraction'],
@@ -188,7 +188,7 @@ void main() {
           'submitCatalogProposal',
         ]),
       );
-      // API 2.1.0 uses email codes; password and approval-link operations
+      // API 2.2.0 uses email codes; password and approval-link operations
       // must remain absent from the homeowner transport.
       for (final forbiddenOperation in <String>[
         'proveLoginLinkApproval',

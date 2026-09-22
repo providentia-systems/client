@@ -166,6 +166,10 @@ InventoryItem _item(Map<String, Object?> record, String homeId) {
   if (quantity == null || !quantity.isFinite) {
     throw const FormatException('The item-master quantity is invalid.');
   }
+  final unit = _nullableString(record, 'unit') ?? 'units';
+  if (!householdStockUnits.contains(unit)) {
+    throw const FormatException('The stock unit is unsupported.');
+  }
   final packText = _string(record, 'packText').trim();
   final categoryName = _nullableString(record, 'categoryName')?.trim();
   return InventoryItem(
@@ -184,6 +188,12 @@ InventoryItem _item(Map<String, Object?> record, String homeId) {
     isHomeProduct: homeProductId != null,
     categoryId: categoryId,
     homeCategoryId: homeCategoryId,
+    globalCategoryId: _nullableIdentifier(record, 'globalCategoryId'),
+    unit: unit,
+    catalogName: _nullableString(record, 'catalogName'),
+    catalogPackText: _nullableString(record, 'catalogPackText'),
+    catalogCategoryId: _nullableIdentifier(record, 'catalogCategoryId'),
+    catalogCategoryName: _nullableString(record, 'catalogCategoryName'),
     categorySource: categorySource,
   );
 }

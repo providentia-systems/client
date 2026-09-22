@@ -10,14 +10,43 @@ enum InventoryProductCreationDisposition { queued, synchronized }
 
 enum InventoryCategorySource { global, home }
 
+/// Stock-unit labels do not implicitly convert existing quantities or history.
+const householdStockUnits = <String>['units', 'g', 'kg', 'ml', 'l'];
+
+final class PublishedInventoryCategory {
+  PublishedInventoryCategory({
+    required this.id,
+    required this.name,
+    required this.revision,
+  }) {
+    _requireText(id, 'id');
+    _requireText(name, 'name');
+    if (name.length > 191 || revision < 1) {
+      throw ArgumentError('The published category is invalid.');
+    }
+  }
+  final String id;
+  final String name;
+  final int revision;
+}
+
 final class PrivateHomeProductDraft {
   PrivateHomeProductDraft({
     required this.homeId,
     required this.privateName,
     this.originalPackText,
     this.homeCategoryId,
+    this.globalCategoryId,
+    this.unit = 'units',
   }) {
     _requireText(homeId, 'homeId');
+    if (!householdStockUnits.contains(unit)) {
+      throw ArgumentError.value(unit, 'unit', 'Choose a supported stock unit.');
+    }
+    if (globalCategoryId != null &&
+        (globalCategoryId!.trim().isEmpty || homeCategoryId != null)) {
+      throw ArgumentError('Choose a global or a local category, not both.');
+    }
     final name = privateName.trim();
     if (name.isEmpty || name.length > 191) {
       throw ArgumentError.value(
@@ -46,6 +75,8 @@ final class PrivateHomeProductDraft {
   final String privateName;
   final String? originalPackText;
   final String? homeCategoryId;
+  final String? globalCategoryId;
+  final String unit;
 }
 
 final class CatalogHomeProductDraft {
@@ -148,6 +179,11 @@ final class InventoryItem {
     this.packId,
     this.categoryId,
     this.homeCategoryId,
+    this.globalCategoryId,
+    this.catalogName,
+    this.catalogPackText,
+    this.catalogCategoryId,
+    this.catalogCategoryName,
     this.categorySource,
     this.revision,
   }) : aliases = List<String>.unmodifiable(aliases) {
@@ -174,6 +210,11 @@ final class InventoryItem {
   final String? packId;
   final String? categoryId;
   final String? homeCategoryId;
+  final String? globalCategoryId;
+  final String? catalogName;
+  final String? catalogPackText;
+  final String? catalogCategoryId;
+  final String? catalogCategoryName;
   final InventoryCategorySource? categorySource;
   final int? revision;
 
@@ -204,6 +245,11 @@ final class InventoryItem {
       packId: packId,
       categoryId: categoryId,
       homeCategoryId: homeCategoryId,
+      globalCategoryId: globalCategoryId,
+      catalogName: catalogName,
+      catalogPackText: catalogPackText,
+      catalogCategoryId: catalogCategoryId,
+      catalogCategoryName: catalogCategoryName,
       categorySource: categorySource,
       revision: revision,
     );

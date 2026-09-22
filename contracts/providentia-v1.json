@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Providentia API",
-    "version": "2.1.0",
+    "version": "2.2.0",
     "summary": "Authoritative Providentia backend contract through the production-readiness programme",
     "description": "Providentia pre-release API: email-code authentication, account/home/administrator groups, household stock, operator access, profiles and country onboarding. Billing collection remains a future capability."
   },
@@ -15398,8 +15398,29 @@
               "null"
             ],
             "format": "uuid"
+          },
+          "globalCategoryId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Explicit household selection of a published global category. Mutually exclusive with homeCategoryId. Setting this clears the household-local category; clearing both inherits the canonical category for linked products, otherwise leaves the product uncategorized. Selecting a category never publishes private data."
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "units",
+              "g",
+              "kg",
+              "ml",
+              "l"
+            ],
+            "default": "units",
+            "description": "Household stock-unit label. Changing this metadata does not convert balances, stock movements, count quantities or historical receipts. Use a separate stock count or adjustment to correct quantities."
           }
-        }
+        },
+        "description": " Household name, pack text, category and unit are private metadata. Shared canonical identities and stock history are unchanged. globalCategoryId and homeCategoryId cannot both be nonnull."
       },
       "SyncInventoryAdjustmentPayload": {
         "type": "object",
@@ -16127,6 +16148,33 @@
           "revision": {
             "type": "integer",
             "minimum": 1
+          },
+          "globalCategoryId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Explicit household selection of a published global category. Mutually exclusive with homeCategoryId. Setting this clears the household-local category; clearing both inherits the canonical category for linked products, otherwise leaves the product uncategorized. Selecting a category never publishes private data."
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "units",
+              "g",
+              "kg",
+              "ml",
+              "l"
+            ],
+            "default": "units",
+            "description": "Household stock-unit label. Changing this metadata does not convert balances, stock movements, count quantities or historical receipts. Use a separate stock count or adjustment to correct quantities."
+          },
+          "homeCategoryId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
           }
         },
         "description": "Supported identities: private (productId and packId null), product family awaiting pack resolution (productId set, packId null), or an explicitly selected catalog pack (both set). Pack-only creation resolves the exact pack parent in persistence; response and sync always contain the normalized parent. Never select the first or infer a pack from an ambiguous family. Family records retain homeProductId, raw wording, balances and history.",
@@ -16172,7 +16220,13 @@
           "aliases",
           "homeProductId",
           "homeProductStatus",
-          "quantity"
+          "quantity",
+          "globalCategoryId",
+          "unit",
+          "catalogName",
+          "catalogPackText",
+          "catalogCategoryId",
+          "catalogCategoryName"
         ],
         "properties": {
           "productId": {
@@ -16192,7 +16246,8 @@
           "canonicalName": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 191
+            "maxLength": 191,
+            "description": "Effective household display name. catalogName retains the unmodified canonical name."
           },
           "brand": {
             "type": "string",
@@ -16214,7 +16269,8 @@
           },
           "packText": {
             "type": "string",
-            "maxLength": 191
+            "maxLength": 191,
+            "description": "Effective household pack description. catalogPackText retains the unmodified canonical pack description."
           },
           "packStatus": {
             "type": [
@@ -16274,6 +16330,58 @@
               "home",
               null
             ]
+          },
+          "globalCategoryId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Explicit household selection of a published global category. Mutually exclusive with homeCategoryId. Setting this clears the household-local category; clearing both inherits the canonical category for linked products, otherwise leaves the product uncategorized. Selecting a category never publishes private data."
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "units",
+              "g",
+              "kg",
+              "ml",
+              "l"
+            ],
+            "default": "units",
+            "description": "Household stock-unit label. Changing this metadata does not convert balances, stock movements, count quantities or historical receipts. Use a separate stock count or adjustment to correct quantities."
+          },
+          "catalogName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 191,
+            "description": "Unmodified canonical catalog metadata, separate from the effective household display. Null for a wholly private identity."
+          },
+          "catalogPackText": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 191,
+            "description": "Unmodified canonical catalog metadata, separate from the effective household display. Null for a wholly private identity."
+          },
+          "catalogCategoryName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 191,
+            "description": "Unmodified canonical catalog metadata, separate from the effective household display. Null for a wholly private identity."
+          },
+          "catalogCategoryId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Unmodified canonical category identity, separate from the household category selection."
           }
         },
         "description": "Supported identities: private (productId and packId null), product family awaiting pack resolution (productId set, packId null), or an explicitly selected catalog pack (both set). Pack-only creation resolves the exact pack parent in persistence; response and sync always contain the normalized parent. Never select the first or infer a pack from an ambiguous family. Family records retain homeProductId, raw wording, balances and history.",
@@ -16978,9 +17086,29 @@
             ],
             "format": "uuid",
             "description": "Optional category within this household for either a private or catalog-backed home product. It does not change the global catalog category or identity."
+          },
+          "globalCategoryId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Explicit household selection of a published global category. Mutually exclusive with homeCategoryId. Setting this clears the household-local category; clearing both inherits the canonical category for linked products, otherwise leaves the product uncategorized. Selecting a category never publishes private data."
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "units",
+              "g",
+              "kg",
+              "ml",
+              "l"
+            ],
+            "default": "units",
+            "description": "Household stock-unit label. Changing this metadata does not convert balances, stock movements, count quantities or historical receipts. Use a separate stock count or adjustment to correct quantities."
           }
         },
-        "description": "Supported identities: private (productId and packId null), product family awaiting pack resolution (productId set, packId null), or an explicitly selected catalog pack (both set). Pack-only creation resolves the exact pack parent in persistence; response and sync always contain the normalized parent. Never select the first or infer a pack from an ambiguous family. Family records retain homeProductId, raw wording, balances and history."
+        "description": "Supported identities: private (productId and packId null), product family awaiting pack resolution (productId set, packId null), or an explicitly selected catalog pack (both set). Pack-only creation resolves the exact pack parent in persistence; response and sync always contain the normalized parent. Never select the first or infer a pack from an ambiguous family. Family records retain homeProductId, raw wording, balances and history. Household name, pack text, category and unit are private metadata. Shared canonical identities and stock history are unchanged. globalCategoryId and homeCategoryId cannot both be nonnull."
       },
       "StockAdjustmentRequest": {
         "type": "object",
@@ -20676,13 +20804,27 @@
             "required": [
               "status"
             ]
+          },
+          {
+            "required": [
+              "globalCategoryId"
+            ]
+          },
+          {
+            "required": [
+              "unit"
+            ]
           }
         ],
         "properties": {
           "privateName": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "minLength": 1,
-            "maxLength": 191
+            "maxLength": 191,
+            "description": "Household-only display-name override, including for a linked canonical product. Null removes a linked-product override; a wholly private product must retain a nonempty name."
           },
           "originalPackText": {
             "type": [
@@ -20704,9 +20846,29 @@
           "expectedRevision": {
             "type": "integer",
             "minimum": 1
+          },
+          "globalCategoryId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Explicit household selection of a published global category. Mutually exclusive with homeCategoryId. Setting this clears the household-local category; clearing both inherits the canonical category for linked products, otherwise leaves the product uncategorized. Selecting a category never publishes private data."
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "units",
+              "g",
+              "kg",
+              "ml",
+              "l"
+            ],
+            "default": "units",
+            "description": "Household stock-unit label. Changing this metadata does not convert balances, stock movements, count quantities or historical receipts. Use a separate stock count or adjustment to correct quantities."
           }
         },
-        "description": "Updates home metadata. Catalog-backed products permit home category and status changes; global identity changes require catalog curation."
+        "description": "Updates revision-bound household metadata, including name and pack overrides on linked products. No canonical catalog identity or stock quantity is rewritten. globalCategoryId and homeCategoryId cannot both be nonnull. Null name/pack clears a linked override; a wholly private product must retain a name."
       },
       "HomeProductMutationResult": {
         "type": "object",
@@ -20720,7 +20882,9 @@
           "homeCategoryId",
           "status",
           "revision",
-          "updatedAt"
+          "updatedAt",
+          "globalCategoryId",
+          "unit"
         ],
         "properties": {
           "id": {
@@ -20742,9 +20906,13 @@
             "format": "uuid"
           },
           "privateName": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "minLength": 1,
-            "maxLength": 191
+            "maxLength": 191,
+            "description": "Household-only display-name override, including for a linked canonical product. Null removes a linked-product override; a wholly private product must retain a nonempty name."
           },
           "originalPackText": {
             "type": [
@@ -20770,6 +20938,26 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "globalCategoryId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Explicit household selection of a published global category. Mutually exclusive with homeCategoryId. Setting this clears the household-local category; clearing both inherits the canonical category for linked products, otherwise leaves the product uncategorized. Selecting a category never publishes private data."
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "units",
+              "g",
+              "kg",
+              "ml",
+              "l"
+            ],
+            "default": "units",
+            "description": "Household stock-unit label. Changing this metadata does not convert balances, stock movements, count quantities or historical receipts. Use a separate stock count or adjustment to correct quantities."
           }
         }
       },
@@ -20794,7 +20982,9 @@
           "alwaysKeep",
           "neverSuggest",
           "revision",
-          "updatedAt"
+          "updatedAt",
+          "globalCategoryId",
+          "unit"
         ],
         "properties": {
           "homeProductId": {
@@ -20895,6 +21085,26 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "globalCategoryId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Explicit household selection of a published global category. Mutually exclusive with homeCategoryId. Setting this clears the household-local category; clearing both inherits the canonical category for linked products, otherwise leaves the product uncategorized. Selecting a category never publishes private data."
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "units",
+              "g",
+              "kg",
+              "ml",
+              "l"
+            ],
+            "default": "units",
+            "description": "Household stock-unit label. Changing this metadata does not convert balances, stock movements, count quantities or historical receipts. Use a separate stock count or adjustment to correct quantities."
           }
         }
       },
@@ -21250,9 +21460,13 @@
         "required": [],
         "properties": {
           "privateName": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "minLength": 1,
-            "maxLength": 191
+            "maxLength": 191,
+            "description": "Household-only display-name override, including for a linked canonical product. Null removes a linked-product override; a wholly private product must retain a nonempty name."
           },
           "originalPackText": {
             "type": [
@@ -21270,8 +21484,29 @@
           },
           "status": {
             "$ref": "#/components/schemas/HomeCategoryStatus"
+          },
+          "globalCategoryId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Explicit household selection of a published global category. Mutually exclusive with homeCategoryId. Setting this clears the household-local category; clearing both inherits the canonical category for linked products, otherwise leaves the product uncategorized. Selecting a category never publishes private data."
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "units",
+              "g",
+              "kg",
+              "ml",
+              "l"
+            ],
+            "default": "units",
+            "description": "Household stock-unit label. Changing this metadata does not convert balances, stock movements, count quantities or historical receipts. Use a separate stock count or adjustment to correct quantities."
           }
-        }
+        },
+        "description": " Household name, pack text, category and unit are private metadata. Shared canonical identities and stock history are unchanged. globalCategoryId and homeCategoryId cannot both be nonnull."
       },
       "EmailCodeRequest": {
         "type": "object",
@@ -22730,6 +22965,26 @@
           "id": {
             "type": "string",
             "format": "uuid"
+          },
+          "globalCategoryId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Explicit household selection of a published global category. Mutually exclusive with homeCategoryId. Setting this clears the household-local category; clearing both inherits the canonical category for linked products, otherwise leaves the product uncategorized. Selecting a category never publishes private data."
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "units",
+              "g",
+              "kg",
+              "ml",
+              "l"
+            ],
+            "default": "units",
+            "description": "Household stock-unit label. Changing this metadata does not convert balances, stock movements, count quantities or historical receipts. Use a separate stock count or adjustment to correct quantities."
           }
         },
         "required": [
@@ -22766,13 +23021,27 @@
             "required": [
               "status"
             ]
+          },
+          {
+            "required": [
+              "globalCategoryId"
+            ]
+          },
+          {
+            "required": [
+              "unit"
+            ]
           }
         ],
         "properties": {
           "privateName": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "minLength": 1,
-            "maxLength": 191
+            "maxLength": 191,
+            "description": "Household-only display-name override, including for a linked canonical product. Null removes a linked-product override; a wholly private product must retain a nonempty name."
           },
           "originalPackText": {
             "type": [
@@ -22799,6 +23068,26 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 500
+          },
+          "globalCategoryId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Explicit household selection of a published global category. Mutually exclusive with homeCategoryId. Setting this clears the household-local category; clearing both inherits the canonical category for linked products, otherwise leaves the product uncategorized. Selecting a category never publishes private data."
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "units",
+              "g",
+              "kg",
+              "ml",
+              "l"
+            ],
+            "default": "units",
+            "description": "Household stock-unit label. Changing this metadata does not convert balances, stock movements, count quantities or historical receipts. Use a separate stock count or adjustment to correct quantities."
           }
         },
         "description": "Requires homes.manage. The audit reason, prior record, and result are persisted atomically with the household mutation and change feed. Household ownership and public contribution consent are independent of operator access."

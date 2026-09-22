@@ -26,7 +26,9 @@ class InventoryCategoryField extends StatelessWidget {
   Widget build(BuildContext context) {
     final selected = localId != null
         ? 'home:$localId'
-        : globalId != null ? 'global:$globalId' : '';
+        : globalId != null
+        ? 'global:$globalId'
+        : '';
     final options = <String, String>{
       '': inheritedName == null
           ? 'Uncategorized'
@@ -35,11 +37,16 @@ class InventoryCategoryField extends StatelessWidget {
         'global:${category.id}': '${category.name} · Global',
       for (final category in localCategories)
         if (!category.archived || category.id == localId)
-          'home:${category.id}': '${category.name} · Local${category.archived ? ' (archived)' : ''}',
+          'home:${category.id}':
+              '${category.name} · Local${category.archived ? ' (archived)' : ''}',
     };
     // Retain retired selections until deliberately changed by the household.
-    options.putIfAbsent(selected, () =>
-        globalId != null ? 'Unavailable global category' : 'Unavailable local category');
+    options.putIfAbsent(
+      selected,
+      () => globalId != null
+          ? 'Unavailable global category'
+          : 'Unavailable local category',
+    );
     return DropdownButtonFormField<String>(
       key: ValueKey('inventory-category-selection-$selected'),
       initialValue: selected,
@@ -47,7 +54,8 @@ class InventoryCategoryField extends StatelessWidget {
       menuMaxHeight: 360,
       decoration: const InputDecoration(
         labelText: 'Category',
-        helperText: 'Global categories are shared. Local categories stay in your home.',
+        helperText:
+            'Global categories are shared. Local categories stay in your home.',
         helperMaxLines: 3,
       ),
       items: [
@@ -57,13 +65,15 @@ class InventoryCategoryField extends StatelessWidget {
             child: Text(entry.value, overflow: TextOverflow.ellipsis),
           ),
       ],
-      onChanged: !enabled ? null : (value) {
-        if (value == null) return;
-        onChanged(
-          value.startsWith('home:') ? value.substring(5) : null,
-          value.startsWith('global:') ? value.substring(7) : null,
-        );
-      },
+      onChanged: !enabled
+          ? null
+          : (value) {
+              if (value == null) return;
+              onChanged(
+                value.startsWith('home:') ? value.substring(5) : null,
+                value.startsWith('global:') ? value.substring(7) : null,
+              );
+            },
     );
   }
 }

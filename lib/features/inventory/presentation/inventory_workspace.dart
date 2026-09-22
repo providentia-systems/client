@@ -3,6 +3,7 @@ import 'package:providentia/core/presentation/place_management_dialog.dart';
 import 'package:providentia/features/inventory/application/home_location_repository.dart';
 import 'package:providentia/features/inventory/application/stock_photo_count_controller.dart';
 import 'package:providentia/features/inventory/domain/inventory_models.dart';
+import 'package:providentia/features/inventory/presentation/inventory_category_field.dart';
 import 'package:providentia/features/inventory/presentation/inventory_controller.dart';
 import 'package:providentia/features/inventory/presentation/inventory_metadata_dialogs.dart';
 import 'package:providentia/features/inventory/presentation/stock_photo_count_panel.dart';
@@ -49,13 +50,14 @@ class _InventoryWorkspaceState extends State<InventoryWorkspace> {
               padding: const EdgeInsets.all(20),
               sliver: SliverList.list(
                 children: <Widget>[
-                  Row(
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: <Widget>[
-                      Expanded(
-                        child: Text(
-                          'Stock',
-                          style: Theme.of(context).textTheme.headlineLarge,
-                        ),
+                      Text(
+                        'Stock',
+                        style: Theme.of(context).textTheme.headlineLarge,
                       ),
                       if (widget.controller.canEditMetadata)
                         IconButton(
@@ -154,21 +156,40 @@ class _InventoryWorkspaceState extends State<InventoryWorkspace> {
                     ),
                   ],
                   const SizedBox(height: 12),
-                  SegmentedButton<InventoryView>(
-                    segments: const <ButtonSegment<InventoryView>>[
-                      ButtonSegment(
-                        value: InventoryView.counted,
-                        label: Text('Counted'),
-                      ),
-                      ButtonSegment(
-                        value: InventoryView.itemMaster,
-                        label: Text('Item master'),
-                      ),
-                    ],
-                    selected: <InventoryView>{state.criteria.view},
-                    onSelectionChanged: (selection) =>
-                        widget.controller.selectView(selection.single),
-                  ),
+                  if (MediaQuery.textScalerOf(context).scale(14) > 20)
+                    DropdownButtonFormField<InventoryView>(
+                      initialValue: state.criteria.view,
+                      isExpanded: true,
+                      items: const [
+                        DropdownMenuItem(
+                          value: InventoryView.counted,
+                          child: Text('Counted'),
+                        ),
+                        DropdownMenuItem(
+                          value: InventoryView.itemMaster,
+                          child: Text('Item master'),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        if (value != null) widget.controller.selectView(value);
+                      },
+                    )
+                  else
+                    SegmentedButton<InventoryView>(
+                      segments: const <ButtonSegment<InventoryView>>[
+                        ButtonSegment(
+                          value: InventoryView.counted,
+                          label: Text('Counted'),
+                        ),
+                        ButtonSegment(
+                          value: InventoryView.itemMaster,
+                          label: Text('Item master'),
+                        ),
+                      ],
+                      selected: <InventoryView>{state.criteria.view},
+                      onSelectionChanged: (selection) =>
+                          widget.controller.selectView(selection.single),
+                    ),
                   const SizedBox(height: 12),
                   TextField(
                     key: const Key('inventory-search'),
@@ -182,11 +203,15 @@ class _InventoryWorkspaceState extends State<InventoryWorkspace> {
                   DropdownButtonFormField<String>(
                     key: const Key('inventory-category'),
                     initialValue: state.criteria.category ?? 'All',
+                    isExpanded: true,
                     items: categories
                         .map(
                           (category) => DropdownMenuItem<String>(
                             value: category,
-                            child: Text(category),
+                            child: Text(
+                              category,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                         )
                         .toList(growable: false),
@@ -234,25 +259,25 @@ class _InventoryWorkspaceState extends State<InventoryWorkspace> {
   }
 
   Future<void> _showAddPrivateProduct() async {
-    final draft = await showDialog<(String, String?, String?)>(
+    final draft = await showDialog<PrivateHomeProductDraft>(
       context: context,
-      builder: (_) => _PrivateHomeProductDialog(
-        categories: widget.controller.homeCategories,
-      ),
+      barrierDismissible: false,
+      builder: (_) => _PrivateHomeProductDialog(controller: widget.controller),
     );
     if (draft == null || !mounted) return;
     await widget.controller.createPrivateProduct(
-      privateName: draft.$1,
-      originalPackText: draft.$2,
-      homeCategoryId: draft.$3,
+      privateName: draft.privateName,
+      originalPackText: draft.originalPackText,
+      homeCategoryId: draft.homeCategoryId,
+      globalCategoryId: draft.globalCategoryId,
+      unit: draft.unit,
     );
   }
 }
 
 class _PrivateHomeProductDialog extends StatefulWidget {
-  const _PrivateHomeProductDialog({required this.categories});
-  final List<HomeInventoryCategory> categories;
-
+  const _PrivateHomeProductDialog({required this.controller});
+  final InventoryController controller;
   @override
   State<_PrivateHomeProductDialog> createState() =>
       _PrivateHomeProductDialogState();
@@ -263,6 +288,8 @@ class _PrivateHomeProductDialogState extends State<_PrivateHomeProductDialog> {
   final _pack = TextEditingController();
   String? _safeError;
   String? _categoryId;
+  String? _globalCategoryId;
+  String _unit = 'units';
 
   @override
   void dispose() {
@@ -272,51 +299,71 @@ class _PrivateHomeProductDialogState extends State<_PrivateHomeProductDialog> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: widget.controller,
+    builder: (context, _) => AlertDialog(
       title: const Text('Add private product'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          const Text(
-            'This name and pack text stay private to the active home.',
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            key: const Key('inventory-private-product-name'),
-            controller: _name,
-            maxLength: 191,
-            decoration: const InputDecoration(labelText: 'Private name'),
-          ),
-          TextField(
-            key: const Key('inventory-private-product-pack'),
-            controller: _pack,
-            maxLength: 191,
-            decoration: const InputDecoration(
-              labelText: 'Original pack text (optional)',
+      scrollable: true,
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            const Text(
+              'This product stays private to your home, even when you select a global category.',
             ),
-          ),
-          DropdownButtonFormField<String>(
-            initialValue: '',
-            decoration: const InputDecoration(labelText: 'Home category'),
-            items: [
-              const DropdownMenuItem(value: '', child: Text('Uncategorized')),
-              for (final category in widget.categories)
-                if (!category.archived)
-                  DropdownMenuItem(
-                    value: category.id,
-                    child: Text(category.name),
-                  ),
+            const SizedBox(height: 20),
+            TextField(
+              key: const Key('inventory-private-product-name'),
+              controller: _name,
+              maxLength: 191,
+              decoration: const InputDecoration(labelText: 'Private name'),
+            ),
+            const SizedBox(height: 20),
+            TextField(
+              key: const Key('inventory-private-product-pack'),
+              controller: _pack,
+              maxLength: 191,
+              decoration: const InputDecoration(
+                labelText: 'Original pack text (optional)',
+              ),
+            ),
+            const SizedBox(height: 20),
+            DropdownButtonFormField<String>(
+              key: const Key('inventory-private-product-unit'),
+              initialValue: _unit,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'Stock unit'),
+              items: [
+                for (final unit in householdStockUnits)
+                  DropdownMenuItem(value: unit, child: Text(unit)),
+              ],
+              onChanged: (value) {
+                if (value != null) setState(() => _unit = value);
+              },
+            ),
+            const SizedBox(height: 20),
+            InventoryCategoryField(
+              localCategories: widget.controller.homeCategories,
+              globalCategories: widget.controller.publishedCategories,
+              localId: _categoryId,
+              globalId: _globalCategoryId,
+              onChanged: (local, global) => setState(() {
+                _categoryId = local;
+                _globalCategoryId = global;
+              }),
+            ),
+            if (_safeError != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                _safeError!,
+                key: const Key('inventory-private-product-validation'),
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
             ],
-            onChanged: (value) => _categoryId = value == '' ? null : value,
-          ),
-          if (_safeError != null)
-            Text(
-              _safeError!,
-              key: const Key('inventory-private-product-validation'),
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
-        ],
+          ],
+        ),
       ),
       actions: <Widget>[
         TextButton(
@@ -329,19 +376,27 @@ class _PrivateHomeProductDialogState extends State<_PrivateHomeProductDialog> {
           child: const Text('Save locally'),
         ),
       ],
-    );
-  }
+    ),
+  );
 
   void _save() {
-    final name = _name.text.trim();
-    final pack = _pack.text.trim();
-    if (name.isEmpty || name.length > 191 || pack.length > 191) {
-      setState(() {
-        _safeError = 'Enter a private product name of at most 191 characters.';
-      });
-      return;
+    try {
+      final pack = _pack.text.trim();
+      final draft = PrivateHomeProductDraft(
+        homeId: widget.controller.homeId,
+        privateName: _name.text.trim(),
+        originalPackText: pack.isEmpty ? null : pack,
+        homeCategoryId: _categoryId,
+        globalCategoryId: _globalCategoryId,
+        unit: _unit,
+      );
+      Navigator.pop(context, draft);
+    } on ArgumentError {
+      setState(
+        () => _safeError =
+            'Enter a private product name of at most 191 characters.',
+      );
     }
-    Navigator.pop(context, (name, pack.isEmpty ? null : pack, _categoryId));
   }
 }
 
@@ -436,47 +491,71 @@ class _InventoryRow extends StatelessWidget {
     // isHomeProduct flag, but a counted balance is necessarily home-scoped.
     final belongsToHome = item.isHomeProduct || item.isCounted;
     return Card(
-      child: ListTile(
+      child: InkWell(
         onTap: belongsToHome ? () => _editQuantity(context) : null,
-        title: Text(item.canonicalName),
-        leading: belongsToHome && controller.canEditMetadata
-            ? IconButton(
-                tooltip: 'Edit product',
-                icon: const Icon(Icons.edit_outlined),
-                onPressed: () =>
-                    showInventoryProductEditor(context, controller, item),
-              )
-            : null,
-        subtitle: Text(_metadata),
-        trailing: belongsToHome
-            ? Row(
-                mainAxisSize: MainAxisSize.min,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
                 children: [
-                  Text(
-                    item.currentQuantity == null
-                        ? 'Not counted'
-                        : '${item.currentQuantity!.toStringAsFixed(_decimals(item.currentQuantity!))} ${item.unit}',
+                  Expanded(
+                    child: Text(
+                      item.canonicalName,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
                   ),
-                  if (countSessionActive &&
-                      controller.state.activeSession!.lines.any(
-                        (line) => line.itemId == item.id,
-                      ))
+                  if (belongsToHome && controller.canEditMetadata)
                     IconButton(
-                      tooltip: 'Remove from this count',
-                      icon: const Icon(Icons.undo),
-                      onPressed: () => _removeCount(context),
+                      tooltip: 'Edit product',
+                      icon: const Icon(Icons.edit_outlined),
+                      onPressed: () =>
+                          showInventoryProductEditor(context, controller, item),
                     ),
                 ],
-              )
-            : OutlinedButton(
-                key: Key('inventory-add-catalog-${item.packId ?? item.id}'),
-                onPressed:
-                    controller.canAddCatalogProduct &&
-                        !controller.state.productCreationBusy
-                    ? () => controller.addCatalogProduct(item)
-                    : null,
-                child: const Text('Add to home'),
               ),
+              const SizedBox(height: 8),
+              Text(_metadata),
+              const SizedBox(height: 8),
+              if (belongsToHome)
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      item.currentQuantity == null
+                          ? 'Not counted'
+                          : '${item.currentQuantity!.toStringAsFixed(_decimals(item.currentQuantity!))} ${item.unit}',
+                    ),
+                    if (countSessionActive &&
+                        controller.state.activeSession!.lines.any(
+                          (line) => line.itemId == item.id,
+                        ))
+                      IconButton(
+                        tooltip: 'Remove from this count',
+                        icon: const Icon(Icons.undo),
+                        onPressed: () => _removeCount(context),
+                      ),
+                  ],
+                )
+              else
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: OutlinedButton(
+                    key: Key('inventory-add-catalog-${item.packId ?? item.id}'),
+                    onPressed:
+                        controller.canAddCatalogProduct &&
+                            !controller.state.productCreationBusy
+                        ? () => controller.addCatalogProduct(item)
+                        : null,
+                    child: const Text('Add to home'),
+                  ),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -544,10 +623,8 @@ class _InventoryQuantityDialog extends StatefulWidget {
     required this.item,
     required this.countSessionActive,
   });
-
   final InventoryItem item;
   final bool countSessionActive;
-
   @override
   State<_InventoryQuantityDialog> createState() =>
       _InventoryQuantityDialogState();
@@ -555,7 +632,9 @@ class _InventoryQuantityDialog extends StatefulWidget {
 
 class _InventoryQuantityDialogState extends State<_InventoryQuantityDialog> {
   late final TextEditingController _quantity;
-  late final TextEditingController _reason;
+  final _explanation = TextEditingController();
+  String _reason = 'Stock count correction';
+  String? _error;
 
   @override
   void initState() {
@@ -563,64 +642,125 @@ class _InventoryQuantityDialogState extends State<_InventoryQuantityDialog> {
     _quantity = TextEditingController(
       text: widget.item.currentQuantity?.toString() ?? '',
     );
-    _reason = TextEditingController();
   }
 
   @override
   void dispose() {
     _quantity.dispose();
-    _reason.dispose();
+    _explanation.dispose();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(
-        widget.countSessionActive
-            ? 'Record count'
-            : 'Adjust ${widget.item.canonicalName}',
-      ),
-      content: Column(
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(
+      widget.countSessionActive
+          ? 'Record count'
+          : 'Adjust ${widget.item.canonicalName}',
+    ),
+    scrollable: true,
+    content: SizedBox(
+      width: 420,
+      child: Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           TextField(
             key: const Key('inventory-quantity-input'),
             controller: _quantity,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(labelText: 'Observed quantity'),
+            decoration: InputDecoration(
+              labelText: 'Observed quantity',
+              suffixText: widget.item.unit,
+            ),
           ),
           if (!widget.countSessionActive) ...<Widget>[
-            const SizedBox(height: 12),
-            TextField(
+            const SizedBox(height: 20),
+            DropdownButtonFormField<String>(
               key: const Key('inventory-adjustment-reason'),
-              controller: _reason,
+              initialValue: _reason,
+              isExpanded: true,
+              menuMaxHeight: 360,
               decoration: const InputDecoration(
                 labelText: 'Reason for adjustment',
               ),
+              items: [
+                for (final reason in const [
+                  'Stock count correction',
+                  'Stock received',
+                  'Used or consumed',
+                  'Spoiled or expired',
+                  'Damaged or lost',
+                  'Given away',
+                  'Other',
+                ])
+                  DropdownMenuItem(
+                    value: reason,
+                    child: Text(reason, overflow: TextOverflow.ellipsis),
+                  ),
+              ],
+              onChanged: (value) {
+                if (value != null)
+                  setState(() {
+                    _reason = value;
+                    _error = null;
+                  });
+              },
+            ),
+            if (_reason == 'Other') ...[
+              const SizedBox(height: 20),
+              TextField(
+                key: const Key('inventory-adjustment-explanation'),
+                controller: _explanation,
+                maxLength: 191,
+                minLines: 2,
+                maxLines: 4,
+                decoration: const InputDecoration(
+                  labelText: 'Explanation for Other',
+                ),
+              ),
+            ],
+          ],
+          if (_error != null) ...[
+            const SizedBox(height: 12),
+            Text(
+              _error!,
+              key: const Key('inventory-adjustment-validation'),
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
           ],
         ],
       ),
-      actions: <Widget>[
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(onPressed: _save, child: const Text('Save')),
-      ],
-    );
-  }
+    ),
+    actions: <Widget>[
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(onPressed: _save, child: const Text('Save')),
+    ],
+  );
 
   void _save() {
     final parsed = double.tryParse(_quantity.text.trim());
-    final explanation = _reason.text.trim();
-    if (parsed == null ||
-        !parsed.isFinite ||
-        parsed < 0 ||
-        (!widget.countSessionActive && explanation.isEmpty)) {
+    if (parsed == null || !parsed.isFinite || parsed < 0) {
+      setState(() => _error = 'Enter a finite quantity of zero or more.');
       return;
     }
-    Navigator.pop(context, (parsed, explanation));
+    final explanation = _explanation.text.trim();
+    if (!widget.countSessionActive &&
+        _reason == 'Other' &&
+        (explanation.isEmpty || explanation.length > 191)) {
+      setState(() => _error = 'Explain Other in 1 to 191 characters.');
+      return;
+    }
+    Navigator.pop(context, (
+      parsed,
+      widget.countSessionActive
+          ? ''
+          : _reason == 'Other'
+          ? explanation
+          : _reason,
+    ));
   }
 }

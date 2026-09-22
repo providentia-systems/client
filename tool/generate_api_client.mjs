@@ -131,7 +131,7 @@ function validateContract(document) {
   }
   if (
     document.info?.title !== 'Providentia API' ||
-    document.info?.version !== '2.1.0'
+    document.info?.version !== '2.2.0'
   ) {
     throw new Error('Unexpected API identity or version.');
   }

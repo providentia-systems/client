@@ -94,6 +94,7 @@ import 'package:providentia/features/inventory/application/stock_camera_capture_
 import 'package:providentia/features/inventory/application/stock_photo_count_controller.dart';
 import 'package:providentia/features/inventory/application/stock_preference_repository.dart';
 import 'package:providentia/features/inventory/infrastructure/generated_home_item_master_source.dart';
+import 'package:providentia/features/inventory/infrastructure/generated_published_category_source.dart';
 import 'package:providentia/features/inventory/infrastructure/item_master_refreshing_synchronization.dart';
 import 'package:providentia/features/inventory/presentation/inventory_controller.dart';
 import 'package:providentia/features/profile/account_profile_page.dart';
@@ -672,11 +673,13 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
       synchronization = ItemMasterRefreshingSynchronization(
         delegate: synchronization,
         source: GeneratedHomeItemMasterSource(widget.api),
-        replaceCache: ({required homeId, required items}) async {
+        categorySource: GeneratedPublishedCategorySource(widget.api),
+        replaceCache: ({required homeId, required items, categories}) async {
           _requireCurrentBinding();
           await household.replaceCatalogItemMaster(
             homeId: homeId,
             items: items,
+            categories: categories,
           );
         },
         homeId: widget.home.id,

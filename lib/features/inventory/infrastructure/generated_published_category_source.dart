@@ -1,13 +1,15 @@
 import 'package:providentia/features/inventory/domain/inventory_models.dart';
 import 'package:providentia/features/inventory/infrastructure/generated_home_item_master_source.dart';
-import 'package:providentia_api_client/providentia_api_client.dart' as generated;
+import 'package:providentia_api_client/providentia_api_client.dart'
+    as generated;
 
 abstract interface class PublishedCategorySource {
   Future<List<PublishedInventoryCategory>> loadAll();
 }
 
 /// A failed or malformed page never becomes a partially successful snapshot.
-final class GeneratedPublishedCategorySource implements PublishedCategorySource {
+final class GeneratedPublishedCategorySource
+    implements PublishedCategorySource {
   const GeneratedPublishedCategorySource(this._client);
   final generated.ProvidentiaApiClient _client;
 
@@ -48,19 +50,32 @@ final class GeneratedPublishedCategorySource implements PublishedCategorySource 
         final id = row['id'];
         final name = row['canonicalName'];
         final revision = row['revision'];
-        if (id is! String || !uuid.hasMatch(id) ||
-            name is! String || name.trim().isEmpty || name.length > 191 ||
-            revision is! int || revision < 1 || !identifiers.add(id)) {
-          throw const FormatException('The published category is invalid or duplicated.');
+        if (id is! String ||
+            !uuid.hasMatch(id) ||
+            name is! String ||
+            name.trim().isEmpty ||
+            name.length > 191 ||
+            revision is! int ||
+            revision < 1 ||
+            !identifiers.add(id)) {
+          throw const FormatException(
+            'The published category is invalid or duplicated.',
+          );
         }
-        categories.add(PublishedInventoryCategory(
-          id: id, name: name.trim(), revision: revision,
-        ));
+        categories.add(
+          PublishedInventoryCategory(
+            id: id,
+            name: name.trim(),
+            revision: revision,
+          ),
+        );
       }
       if (data.length < limit) {
         return List<PublishedInventoryCategory>.unmodifiable(categories);
       }
     }
-    throw const FormatException('The published category list did not terminate.');
+    throw const FormatException(
+      'The published category list did not terminate.',
+    );
   }
 }
