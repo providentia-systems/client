@@ -126,6 +126,8 @@ final class SyncCoordinator implements AppSynchronization {
             OperationStatusItem? recovered;
             try {
               recovered = await _statusFor(operation);
+            } on BindingSyncException {
+              rethrow;
             } on AuthenticationSyncException {
               rethrow;
             } on AuthorizationSyncException {
@@ -153,6 +155,8 @@ final class SyncCoordinator implements AppSynchronization {
               OperationStatusItem recovered;
               try {
                 recovered = await _statusFor(operation);
+              } on BindingSyncException {
+                rethrow;
               } on AuthenticationSyncException {
                 rethrow;
               } on AuthorizationSyncException {
@@ -183,6 +187,22 @@ final class SyncCoordinator implements AppSynchronization {
           // Commands are dependency ordered. Never submit a later command
           // after its predecessor was rejected or deferred.
           break;
+        } on BindingSyncException catch (error) {
+          await _local.applyPushResults(
+            results: <PushOperationResult>[
+              PushOperationResult(
+                operationId: operation.operationId,
+                kind: PushResultKind.authorizationFailure,
+                code: error.code,
+                safeMessage: error.safeMessage,
+              ),
+            ],
+            now: _clock().toUtc(),
+            retryPolicy: _retryPolicy,
+          );
+          // Keep pulling authorized remote changes, but do not skip the blocked
+          // predecessor or report the upload queue as successfully synchronized.
+          break;
         } on AuthenticationSyncException catch (error) {
           // Expired credentials do not mean that the user lost permission.
           // Keep intent retryable and surface authentication-required state.
@@ -202,7 +222,7 @@ final class SyncCoordinator implements AppSynchronization {
           rethrow;
         } on AuthorizationSyncException {
           // The app lifecycle owns revoked-home purge. Keep the command
-          // untouched so this generic denial is not misreported as a
+          // untouched so this verified home denial is not misreported as a
           // transport retry or a command-level validation error.
           rethrow;
         } on Exception {
@@ -280,12 +300,39 @@ final class SyncCoordinator implements AppSynchronization {
         cursor = page.pageCursor;
         hasMore = page.hasMore;
       }
+      final remaining = await _local.watchSummary(homeId: homeId).first;
+      if (remaining.blocked > 0) {
+        _metrics.recordFailure(classification: 'uploads_blocked');
+        return SyncRunOutcome(
+          status: SyncRunStatus.uploadsBlocked,
+          pullCompleted: true,
+          remainingUploads: remaining.unresolved,
+          acknowledgedCount: acknowledged,
+          pulledChangeCount: pulled,
+          safeMessage:
+              'Downloads are current, but ${remaining.unresolved} saved upload(s) need attention. '
+              '${remaining.lastSafeError ?? 'Review the first blocked operation before retrying.'}',
+        );
+      }
+      if (remaining.unresolved > 0) {
+        _metrics.recordFailure(classification: 'uploads_pending');
+        return SyncRunOutcome(
+          status: SyncRunStatus.uploadsPending,
+          pullCompleted: true,
+          remainingUploads: remaining.unresolved,
+          acknowledgedCount: acknowledged,
+          pulledChangeCount: pulled,
+          safeMessage:
+              'Downloads are current; ${remaining.unresolved} saved upload(s) are still queued.',
+        );
+      }
       _metrics.recordSuccess(
         acknowledgedCount: acknowledged,
         pulledChangeCount: pulled,
       );
       return SyncRunOutcome(
         status: SyncRunStatus.completed,
+        pullCompleted: true,
         acknowledgedCount: acknowledged,
         pulledChangeCount: pulled,
       );
@@ -354,6 +401,8 @@ final class SyncCoordinator implements AppSynchronization {
     PushResponse response;
     try {
       response = await send();
+    } on BindingSyncException {
+      rethrow;
     } on AuthenticationSyncException {
       final recovered = await _authenticationRecovery.tryRecover();
       if (!recovered) {
@@ -382,6 +431,8 @@ final class SyncCoordinator implements AppSynchronization {
     OperationStatusResponse response;
     try {
       response = await lookup();
+    } on BindingSyncException {
+      rethrow;
     } on AuthenticationSyncException {
       final recovered = await _authenticationRecovery.tryRecover();
       if (!recovered) {

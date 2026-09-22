@@ -43,7 +43,7 @@ final class ItemMasterRefreshingSynchronization implements AppSynchronization {
   Future<SyncRunOutcome> synchronize(String homeId) async {
     _requireBoundHome(homeId);
     final outcome = await _delegate.synchronize(homeId);
-    if (!outcome.completed) return outcome;
+    if (!outcome.completed && !outcome.pullCompleted) return outcome;
 
     late final List<InventoryItem> items;
     try {

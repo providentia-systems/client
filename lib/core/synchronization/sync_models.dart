@@ -35,6 +35,8 @@ enum SyncAvailability {
 
 enum SyncRunStatus {
   completed,
+  uploadsPending,
+  uploadsBlocked,
   alreadyRunning,
   offline,
   authenticationRequired,
@@ -48,12 +50,16 @@ final class SyncRunOutcome {
     this.safeMessage,
     this.acknowledgedCount = 0,
     this.pulledChangeCount = 0,
+    this.pullCompleted = false,
+    this.remainingUploads = 0,
   });
 
   final SyncRunStatus status;
   final String? safeMessage;
   final int acknowledgedCount;
   final int pulledChangeCount;
+  final bool pullCompleted;
+  final int remainingUploads;
 
   bool get completed => status == SyncRunStatus.completed;
 }
@@ -278,6 +284,8 @@ final class PushOperationResult {
     this.acceptedRevision,
     this.changeCursor,
     this.safeMessage,
+    this.code,
+    this.requestId,
     Map<String, Object?>? remotePayload,
   }) : remotePayload = remotePayload == null
            ? null
@@ -288,6 +296,8 @@ final class PushOperationResult {
   final int? acceptedRevision;
   final String? changeCursor;
   final String? safeMessage;
+  final String? code;
+  final String? requestId;
   final Map<String, Object?>? remotePayload;
 }
 
@@ -396,6 +406,9 @@ final class SyncSummary {
   final String? lastSafeError;
 
   int get waiting => pending + syncing + retryWaiting;
+  int get blocked =>
+      blockedConflicts + blockedValidation + blockedAuthorization;
+  int get unresolved => waiting + blocked;
 
   SyncSummary copyWith({
     int? pending,
@@ -464,4 +477,36 @@ final class ResyncRequiredSyncException implements Exception {
   const ResyncRequiredSyncException(this.safeMessage);
 
   final String safeMessage;
+}
+
+/// A saved command does not belong to this dispatch binding. This is not an
+/// expired login, and must never trigger credential refresh or intent rebinding.
+final class BindingSyncException implements Exception {
+  const BindingSyncException(this.safeMessage, {required this.code});
+
+  final String safeMessage;
+  final String code;
+}
+
+/// Only documented classifications enter diagnostics. Server prose is not a code.
+String? sanitizedSyncFailureCode(String? code) {
+  if (code == null) return null;
+  return const <String>{
+        'device_binding_mismatch',
+        'account_binding_mismatch',
+        'origin_account_unknown',
+        'home_access_denied',
+        'permission_denied',
+        'resource_unavailable',
+        'revision_conflict',
+        'revision_mismatch',
+        'operation_id_reuse',
+        'invalid_command',
+        'service_unavailable',
+        'concurrent_write',
+        'unclassified_http_denial',
+        'unclassified_failure',
+      }.contains(code)
+      ? code
+      : 'unclassified_failure';
 }

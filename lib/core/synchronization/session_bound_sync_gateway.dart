@@ -37,9 +37,10 @@ final class SessionBoundSyncGateway implements SyncRemoteGateway {
 
   void _requireDevice(String requestedDevice) {
     if (requestedDevice != deviceId) {
-      throw const AuthenticationSyncException(
+      throw const BindingSyncException(
         'Saved work has a different device binding and needs recovery. '
         'It has not been reassigned or sent.',
+        code: 'device_binding_mismatch',
       );
     }
   }
