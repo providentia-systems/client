@@ -14,7 +14,7 @@ separately with TZ=UTC, TZ=Africa/Windhoek and TZ=America/New_York.
 Commands: vendor/bin/phpunit tests/Unit/Reporting/HomeReportServiceTest.php;
 flutter test --no-pub test/features/reporting/generated_household_report_repository_test.dart.
 
-This repair preserves the API 2.1.0 shape and generated contract digest.
+This repair preserves the API 2.2.0 shape and generated contract digest.
 Deploy backend before the paired client. The new client remains compatible
 with the old report SQL timestamp representation. No migration or data rewrite.
 Reverting the client is safe with the corrected backend; reverting only the

@@ -69,7 +69,7 @@ quantity edit, cross-device suggestion provenance, general sanitized catalog
 proposal creation, and global alias publication remain deferred. Operation-
 status response-loss recovery now applies known immutable results once,
 exact-retries unknown operations with their existing IDs, defers unavailable or
-malformed status safely, and treats HTTP 403/404 as authorization loss. A
+malformed status safely, and treats only explicit backend home-access denial as revoked membership. Generic HTTP 403/404 and public category endpoint failures preserve saved work. A
 composed workspace and simulated convergence still do not prove live deployment
 acceptance.
 
@@ -84,3 +84,5 @@ No bearer token or home ID is accepted as runtime bootstrap configuration.
 Database credentials, tokens, AI provider keys, server encryption keys, and
 queue credentials must never be compiled into Flutter. See
 [local development](local-development.md) for the supported launch topology.
+
+Current household metadata projection, category-cache and unit-label boundaries are documented in [Household workflows](household-workflows.md).

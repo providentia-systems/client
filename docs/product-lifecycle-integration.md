@@ -1,10 +1,10 @@
-# Product lifecycle integration — API 2.1.0
+# Product lifecycle integration — API 2.2.0
 
 This implementation coordinates `providentia-systems/backend`,
 `providentia-systems/client` and `providentia-systems/admin`. Backend PR #22 uses
 `feat/product-lifecycle-integration`; Client PR #18 and Admin PR #10 use
 `feat/complete-lifecycle-integration` after the earlier client branches merged.
-The product name is Providentia.
+The product name is Providentia. The PR references above describe the original lifecycle baseline. Current household product editing, unit semantics and global-category selection are documented in [Household workflows](household-workflows.md).
 
 This is a source contract and acceptance guide, not evidence about a particular
 running deployment. A healthy older image does not prove the new operations exist.
@@ -29,7 +29,7 @@ synchronization, even when its household has never consented to public sharing.
 
 | Record | Implemented lifecycle |
 | --- | --- |
-| Private products | Client and Admin create/edit/archive/restore; editable private name, pack description and home category; revisions prevent stale overwrites. |
+| Private products | Client and Admin retain create/edit/archive/restore. The household Client additionally edits linked-product household overrides, stock-unit labels and published global/local category selections. Revisions prevent stale overwrites; quantity/history are retained. |
 | Home categories | Client and Admin create/edit/archive/restore, with active-reference and quota checks. |
 | Home locations and stores | Client and Admin create/edit/archive/restore; selectors retain real IDs and prevent use of inactive records. |
 | Stock preferences | Client and Admin edit/reset minimum quantity, always-keep/never-suggest, lead time, expiry handling and published preferred pack. Existing revisions and exact decimal quantities are retained. |

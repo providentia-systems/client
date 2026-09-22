@@ -87,11 +87,18 @@ final class ItemMasterRefreshingSynchronization implements AppSynchronization {
   }
 
   SyncRunOutcome _staleCatalog(SyncRunOutcome outcome) => SyncRunOutcome(
-    status: SyncRunStatus.retryableFailure,
+    status:
+        outcome.status == SyncRunStatus.uploadsBlocked ||
+            outcome.status == SyncRunStatus.uploadsPending
+        ? outcome.status
+        : SyncRunStatus.retryableFailure,
     acknowledgedCount: outcome.acknowledgedCount,
     pulledChangeCount: outcome.pulledChangeCount,
-    safeMessage:
-        'Home changes synchronized, but the catalog could not be refreshed. The last verified catalog is shown; retry synchronization.',
+    pullCompleted: outcome.pullCompleted,
+    remainingUploads: outcome.remainingUploads,
+    safeMessage: outcome.completed
+        ? 'Home changes synchronized, but the catalog could not be refreshed. The last verified catalog is shown; retry synchronization.'
+        : 'The catalog could not be refreshed. Queued or blocked uploads remain unresolved; the last verified catalog is shown.',
   );
 
   void _requireBoundHome(String homeId) {
