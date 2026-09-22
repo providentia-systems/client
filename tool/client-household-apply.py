@@ -1,32 +1,37 @@
 from pathlib import Path
-import gzip
-import hashlib
-import json
-import subprocess
-
 root = Path(__file__).resolve().parents[1]
-model = root / 'lib/features/inventory/domain/inventory_models.dart'
-if 'const householdStockUnits' not in model.read_text():
-    for stage in ('data', 'base', 'ui'):
-        subprocess.run(['python3', str(root / f'tool/client-household-{stage}-stage.py')], cwd=root, check=True)
-p = root / 'lib/features/inventory/presentation/inventory_controller.dart'
-s = p.read_text()
-if 'unawaited(_publishedCategoriesSubscription?.cancel())' not in s:
-    s = s.replace('    unawaited(_categoriesSubscription?.cancel());', '    unawaited(_categoriesSubscription?.cancel());\n    unawaited(_publishedCategoriesSubscription?.cancel());')
-p.write_text(s)
-archive = (root.parent / 'paired-backend/contracts/source/providentia-v1.json.gz').read_bytes()
-raw = gzip.decompress(archive)
-expected = 'ef5714a6298326d6fb449b966117e8b61c74de67d1bfc274ad8ec431aecd802d'
-compressed = 'd20ba3f9b769b5e30e59f38ecb83816ff6825a9bb646509440fb731cfc012ff1'
-assert hashlib.sha256(raw).hexdigest() == expected
-assert hashlib.sha256(archive).hexdigest() == compressed
-(root / 'contracts/source/providentia-v1.json.gz').write_bytes(archive)
-(root / 'contracts/providentia-v1.json').write_bytes(raw)
-p = root / 'contracts/contract.lock.json'
-lock = json.loads(p.read_text()); lock['version'] = '2.2.0'; lock['sha256'] = expected
-p.write_text(json.dumps(lock, indent=2) + '\n')
-for name in ('tool/generate_api_client.mjs', 'tool/materialize-openapi-contract.sh', 'tool/verify_structure.mjs', 'test/contracts/generated_client_test.dart'):
-    p = root / name
-    s = p.read_text().replace('2.1.0', '2.2.0').replace('13ccdc2d37e73955394a7b7c52da6d9ff7aeefdfd763ac809876737867d15c44', expected).replace('bd106bdfd980823459ec3c769e8aad14cf6c2a2473b38c4708f9e59e635b34cd', compressed)
-    p.write_text(s)
-subprocess.run(['node', 'tool/generate_api_client.mjs'], cwd=root, check=True)
+def edit(name, old, new):
+    path = root / name
+    source = path.read_text()
+    if old in source:
+        path.write_text(source.replace(old, new))
+    elif new not in source:
+        raise RuntimeError('Expected source not found: ' + name)
+edit('lib/core/database/drift_household_repository.dart',
+     "    if (globalCategoryId != null)\n      _requireUuid(globalCategoryId, 'global category');",
+     "    if (globalCategoryId != null) {\n      _requireUuid(globalCategoryId, 'global category');\n    }")
+edit('lib/core/database/drift_household_repository.dart',
+     "    if (draft.globalCategoryId != null)\n      _requireUuid(draft.globalCategoryId!, 'global category');",
+     "    if (draft.globalCategoryId != null) {\n      _requireUuid(draft.globalCategoryId!, 'global category');\n    }")
+edit('lib/core/database/drift_household_repository.dart',
+     "        if (item.catalogCategoryId != null)\n          _requireUuid(item.catalogCategoryId!, 'catalog category');",
+     "        if (item.catalogCategoryId != null) {\n          _requireUuid(item.catalogCategoryId!, 'catalog category');\n        }")
+edit('lib/core/database/drift_household_repository.dart',
+     "        if (unit != null) 'unit': unit,", "        'unit': ?unit,")
+edit('lib/features/inventory/presentation/inventory_workspace.dart',
+     "                if (value != null)\n                  setState(() {\n                    _reason = value;\n                    _error = null;\n                  });",
+     "                if (value != null) {\n                  setState(() {\n                    _reason = value;\n                    _error = null;\n                  });\n                }")
+edit('test/features/inventory/inventory_controller_test.dart',
+     'This name and pack text stay private to the active home.',
+     'This product stays private to your home, even when you select a global category.')
+p = root / 'test/core/database/drift_household_repository_test.dart'
+s = p.read_text(); start = s.index("    'private product creation is atomic private and protocol allowlisted',"); end = s.index("    'private product creation fails closed", start)
+part = s[start:end].replace("        'homeCategoryId': _homeCategoryId,\n", "        'homeCategoryId': _homeCategoryId,\n        'globalCategoryId': null,\n        'unit': 'units',\n").replace('expect(command.keys, hasLength(5));', 'expect(command.keys, hasLength(7));')
+if "'globalCategoryId': null" not in s[start:end]:
+    p.write_text(s[:start] + part + s[end:])
+edit('test/core/database/household_metadata_roundtrip_test.dart',
+     "payload: jsonEncode({...data, 'id': id, 'revision': 1}),",
+     "payload: jsonEncode({...data, if (type == 'inventory-balance') 'homeProductId': id, 'id': id, 'revision': 1}),")
+edit('test/features/inventory/household_workflow_acceptance_test.dart',
+     "        await _workspace(tester, repository, scale: scale);\n        await tester.ensureVisible(find.text('Apple'));",
+     "        await _workspace(tester, repository, scale: scale);\n        await tester.scrollUntilVisible(find.text('Apple'), 180, scrollable: find.byType(Scrollable).first);\n        await tester.ensureVisible(find.text('Apple'));")
