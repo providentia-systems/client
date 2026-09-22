@@ -229,7 +229,7 @@ void main() {
 
   for (final statusCode in <int>[403, 404]) {
     test(
-      'operation status HTTP $statusCode is a purge-class authorization outcome',
+      'verified home denial from operation status HTTP $statusCode is an authorization outcome',
       () async {
         await local.commitLocalMutation(_mutation());
         final remote = _FakeGateway(
@@ -466,7 +466,7 @@ void main() {
 
       expect(
         (await coordinator.synchronize('home-1')).status,
-        SyncRunStatus.completed,
+        SyncRunStatus.uploadsBlocked,
       );
       expect(remote.pushedOperationIds, <String>['operation-1', 'operation-2']);
       var operations =
@@ -483,7 +483,7 @@ void main() {
 
       expect(
         (await coordinator.synchronize('home-1')).status,
-        SyncRunStatus.completed,
+        SyncRunStatus.uploadsBlocked,
       );
       expect(remote.pushedOperationIds, <String>['operation-1', 'operation-2']);
       operations = await database.select(database.clientOperations).get();
