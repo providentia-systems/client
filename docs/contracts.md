@@ -15,15 +15,19 @@ local `providentia_api_client` Dart package.
 
 - Client OpenAPI version: `2.2.0`
 - Contract SHA-256:
-  `d8263a996b1382a0b0742ba4b3ca232e1d6f291644a2659d966e95b2abb038fc`
+  `ef5714a6298326d6fb449b966117e8b61c74de67d1bfc274ad8ec431aecd802d`
 - Canonical backend operations: 235
 - Generated homeowner operations: 167
 
-API 2.2.0 replaces login links with `requestEmailCode` and `verifyEmailCode`,
-adds country onboarding and policy records, account aliases and media, scoped
-access groups, operator approval, and per-member permission overrides. The
-generator rejects retired password and login-link routes. This is a pre-release
-contract realignment; no deployed legacy clients require compatibility.
+API 2.2.0 adds household product overrides, stock-unit labels, global-category
+selection and independent canonical metadata to the existing inventory
+operations. It retains numeric email-code authentication, country onboarding,
+account aliases and media, scoped access groups, operator approval and
+per-member permission overrides. The generator rejects retired password and
+login-link routes. Existing installations must use a compatible backend;
+deploy backend #25 and its migration before the matching Client #21 and
+Admin #13 builds. See [Household workflows](household-workflows.md) for
+migration, unit-label semantics and production acceptance requirements.
 
 Application-owned adapters compose:
 
@@ -80,9 +84,12 @@ and publication remain available only in the separate Admin client.
 
 The generated operation-status lookup is integrated into synchronization
 response-loss recovery. A known immutable result is applied once, an unknown
-operation is retried with the exact same operation ID, unavailable or malformed
-status is deferred safely, and HTTP 403/404 is treated as a purge-class
-authorization outcome.
+operation is retried with the exact same operation ID, and unavailable or
+malformed status is deferred safely. Only explicit backend home-access denial
+permits revoked-home handling; generic HTTP 403/404 and public category
+endpoint failures preserve saved work. Category-refresh failures also retain
+pending or blocked upload status rather than reporting full synchronization
+success.
 
 Use:
 
@@ -93,7 +100,7 @@ node tool/generate_api_client.mjs --check
 
 `--check` does not write. It fails if the contract, token checksum, generated
 source, package metadata, or generation manifest differs. Contract updates
-must be copied from a tagged backend artifact, reviewed for compatibility,
+must be copied from a backend-owned artifact, reviewed for compatibility,
 generated here, and released only with a compatible backend. Generated files
 are never hand-edited.
 
