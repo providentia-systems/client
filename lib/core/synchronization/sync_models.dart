@@ -173,6 +173,7 @@ final class LocalMutation {
   factory LocalMutation({
     required String operationId,
     required String deviceId,
+    String? originatingAccountId,
     required String homeId,
     required String entityType,
     required String entityId,
@@ -184,6 +185,8 @@ final class LocalMutation {
   }) {
     _requireNonEmpty(operationId, 'operationId');
     _requireNonEmpty(deviceId, 'deviceId');
+    if (originatingAccountId != null)
+      _requireNonEmpty(originatingAccountId, 'originatingAccountId');
     _requireNonEmpty(homeId, 'homeId');
     _requireNonEmpty(entityType, 'entityType');
     _requireNonEmpty(entityId, 'entityId');
@@ -205,6 +208,7 @@ final class LocalMutation {
     return LocalMutation._(
       operationId: operationId,
       deviceId: deviceId,
+      originatingAccountId: originatingAccountId,
       homeId: homeId,
       entityType: entityType,
       entityId: entityId,
@@ -219,6 +223,7 @@ final class LocalMutation {
   const LocalMutation._({
     required this.operationId,
     required this.deviceId,
+    this.originatingAccountId,
     required this.homeId,
     required this.entityType,
     required this.entityId,
@@ -231,6 +236,7 @@ final class LocalMutation {
 
   final String operationId;
   final String deviceId;
+  final String? originatingAccountId;
   final String homeId;
   final String entityType;
   final String entityId;
@@ -253,6 +259,7 @@ final class PendingClientOperation {
   const PendingClientOperation({
     required this.operationId,
     required this.deviceId,
+    this.originatingAccountId,
     required this.homeId,
     required this.entityType,
     required this.entityId,
@@ -262,10 +269,12 @@ final class PendingClientOperation {
     required this.payloadSchemaVersion,
     required this.payload,
     required this.retryCount,
+    this.enqueueSequence,
   });
 
   final String operationId;
   final String deviceId;
+  final String? originatingAccountId;
   final String homeId;
   final String entityType;
   final String entityId;
@@ -275,6 +284,7 @@ final class PendingClientOperation {
   final int payloadSchemaVersion;
   final Map<String, Object?> payload;
   final int retryCount;
+  final int? enqueueSequence;
 }
 
 final class PushOperationResult {

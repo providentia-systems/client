@@ -118,6 +118,10 @@ final class SyncCoordinator implements AppSynchronization {
         final operationIds = <String>[operation.operationId];
         await _local.markSyncing(operationIds);
         try {
+          final validator = _remote;
+          if (validator is SyncOperationBindingValidator) {
+            validator.validateOperationBinding(operation);
+          }
           PushOperationResult result;
           if (interruptedOperationIds.contains(operation.operationId)) {
             // The process may have stopped after the server durably accepted

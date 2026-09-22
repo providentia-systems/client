@@ -539,6 +539,50 @@ class $ClientOperationsTable extends ClientOperations
   final GeneratedDatabase attachedDatabase;
   final String? _alias;
   $ClientOperationsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _originatingAccountIdMeta =
+      const VerificationMeta('originatingAccountId');
+  @override
+  late final GeneratedColumn<String> originatingAccountId =
+      GeneratedColumn<String>(
+        'originating_account_id',
+        aliasedName,
+        true,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _enqueueSequenceMeta = const VerificationMeta(
+    'enqueueSequence',
+  );
+  @override
+  late final GeneratedColumn<int> enqueueSequence = GeneratedColumn<int>(
+    'enqueue_sequence',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _safeFailureCodeMeta = const VerificationMeta(
+    'safeFailureCode',
+  );
+  @override
+  late final GeneratedColumn<String> safeFailureCode = GeneratedColumn<String>(
+    'safe_failure_code',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _requestCorrelationIdMeta =
+      const VerificationMeta('requestCorrelationId');
+  @override
+  late final GeneratedColumn<String> requestCorrelationId =
+      GeneratedColumn<String>(
+        'request_correlation_id',
+        aliasedName,
+        true,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+      );
   static const VerificationMeta _operationIdMeta = const VerificationMeta(
     'operationId',
   );
@@ -717,6 +761,10 @@ class $ClientOperationsTable extends ClientOperations
       );
   @override
   List<GeneratedColumn> get $columns => [
+    originatingAccountId,
+    enqueueSequence,
+    safeFailureCode,
+    requestCorrelationId,
     operationId,
     deviceId,
     homeId,
@@ -746,6 +794,42 @@ class $ClientOperationsTable extends ClientOperations
   }) {
     final context = VerificationContext();
     final data = instance.toColumns(true);
+    if (data.containsKey('originating_account_id')) {
+      context.handle(
+        _originatingAccountIdMeta,
+        originatingAccountId.isAcceptableOrUnknown(
+          data['originating_account_id']!,
+          _originatingAccountIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('enqueue_sequence')) {
+      context.handle(
+        _enqueueSequenceMeta,
+        enqueueSequence.isAcceptableOrUnknown(
+          data['enqueue_sequence']!,
+          _enqueueSequenceMeta,
+        ),
+      );
+    }
+    if (data.containsKey('safe_failure_code')) {
+      context.handle(
+        _safeFailureCodeMeta,
+        safeFailureCode.isAcceptableOrUnknown(
+          data['safe_failure_code']!,
+          _safeFailureCodeMeta,
+        ),
+      );
+    }
+    if (data.containsKey('request_correlation_id')) {
+      context.handle(
+        _requestCorrelationIdMeta,
+        requestCorrelationId.isAcceptableOrUnknown(
+          data['request_correlation_id']!,
+          _requestCorrelationIdMeta,
+        ),
+      );
+    }
     if (data.containsKey('operation_id')) {
       context.handle(
         _operationIdMeta,
@@ -896,6 +980,22 @@ class $ClientOperationsTable extends ClientOperations
   ClientOperation map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
     return ClientOperation(
+      originatingAccountId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}originating_account_id'],
+      ),
+      enqueueSequence: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}enqueue_sequence'],
+      ),
+      safeFailureCode: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}safe_failure_code'],
+      ),
+      requestCorrelationId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}request_correlation_id'],
+      ),
       operationId: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}operation_id'],
@@ -970,6 +1070,11 @@ class $ClientOperationsTable extends ClientOperations
 }
 
 class ClientOperation extends DataClass implements Insertable<ClientOperation> {
+  /// Null means historical authorship is unknown, not the signed-in account.
+  final String? originatingAccountId;
+  final int? enqueueSequence;
+  final String? safeFailureCode;
+  final String? requestCorrelationId;
   final String operationId;
   final String deviceId;
   final String homeId;
@@ -989,6 +1094,10 @@ class ClientOperation extends DataClass implements Insertable<ClientOperation> {
   final String? serverCursor;
   final DateTime? acknowledgedAt;
   const ClientOperation({
+    this.originatingAccountId,
+    this.enqueueSequence,
+    this.safeFailureCode,
+    this.requestCorrelationId,
     required this.operationId,
     required this.deviceId,
     required this.homeId,
@@ -1009,6 +1118,18 @@ class ClientOperation extends DataClass implements Insertable<ClientOperation> {
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
+    if (!nullToAbsent || originatingAccountId != null) {
+      map['originating_account_id'] = Variable<String>(originatingAccountId);
+    }
+    if (!nullToAbsent || enqueueSequence != null) {
+      map['enqueue_sequence'] = Variable<int>(enqueueSequence);
+    }
+    if (!nullToAbsent || safeFailureCode != null) {
+      map['safe_failure_code'] = Variable<String>(safeFailureCode);
+    }
+    if (!nullToAbsent || requestCorrelationId != null) {
+      map['request_correlation_id'] = Variable<String>(requestCorrelationId);
+    }
     map['operation_id'] = Variable<String>(operationId);
     map['device_id'] = Variable<String>(deviceId);
     map['home_id'] = Variable<String>(homeId);
@@ -1040,6 +1161,18 @@ class ClientOperation extends DataClass implements Insertable<ClientOperation> {
 
   ClientOperationsCompanion toCompanion(bool nullToAbsent) {
     return ClientOperationsCompanion(
+      originatingAccountId: originatingAccountId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(originatingAccountId),
+      enqueueSequence: enqueueSequence == null && nullToAbsent
+          ? const Value.absent()
+          : Value(enqueueSequence),
+      safeFailureCode: safeFailureCode == null && nullToAbsent
+          ? const Value.absent()
+          : Value(safeFailureCode),
+      requestCorrelationId: requestCorrelationId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(requestCorrelationId),
       operationId: Value(operationId),
       deviceId: Value(deviceId),
       homeId: Value(homeId),
@@ -1075,6 +1208,14 @@ class ClientOperation extends DataClass implements Insertable<ClientOperation> {
   }) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return ClientOperation(
+      originatingAccountId: serializer.fromJson<String?>(
+        json['originatingAccountId'],
+      ),
+      enqueueSequence: serializer.fromJson<int?>(json['enqueueSequence']),
+      safeFailureCode: serializer.fromJson<String?>(json['safeFailureCode']),
+      requestCorrelationId: serializer.fromJson<String?>(
+        json['requestCorrelationId'],
+      ),
       operationId: serializer.fromJson<String>(json['operationId']),
       deviceId: serializer.fromJson<String>(json['deviceId']),
       homeId: serializer.fromJson<String>(json['homeId']),
@@ -1099,6 +1240,10 @@ class ClientOperation extends DataClass implements Insertable<ClientOperation> {
   Map<String, dynamic> toJson({ValueSerializer? serializer}) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
+      'originatingAccountId': serializer.toJson<String?>(originatingAccountId),
+      'enqueueSequence': serializer.toJson<int?>(enqueueSequence),
+      'safeFailureCode': serializer.toJson<String?>(safeFailureCode),
+      'requestCorrelationId': serializer.toJson<String?>(requestCorrelationId),
       'operationId': serializer.toJson<String>(operationId),
       'deviceId': serializer.toJson<String>(deviceId),
       'homeId': serializer.toJson<String>(homeId),
@@ -1119,6 +1264,10 @@ class ClientOperation extends DataClass implements Insertable<ClientOperation> {
   }
 
   ClientOperation copyWith({
+    Value<String?> originatingAccountId = const Value.absent(),
+    Value<int?> enqueueSequence = const Value.absent(),
+    Value<String?> safeFailureCode = const Value.absent(),
+    Value<String?> requestCorrelationId = const Value.absent(),
     String? operationId,
     String? deviceId,
     String? homeId,
@@ -1136,6 +1285,18 @@ class ClientOperation extends DataClass implements Insertable<ClientOperation> {
     Value<String?> serverCursor = const Value.absent(),
     Value<DateTime?> acknowledgedAt = const Value.absent(),
   }) => ClientOperation(
+    originatingAccountId: originatingAccountId.present
+        ? originatingAccountId.value
+        : this.originatingAccountId,
+    enqueueSequence: enqueueSequence.present
+        ? enqueueSequence.value
+        : this.enqueueSequence,
+    safeFailureCode: safeFailureCode.present
+        ? safeFailureCode.value
+        : this.safeFailureCode,
+    requestCorrelationId: requestCorrelationId.present
+        ? requestCorrelationId.value
+        : this.requestCorrelationId,
     operationId: operationId ?? this.operationId,
     deviceId: deviceId ?? this.deviceId,
     homeId: homeId ?? this.homeId,
@@ -1161,6 +1322,18 @@ class ClientOperation extends DataClass implements Insertable<ClientOperation> {
   );
   ClientOperation copyWithCompanion(ClientOperationsCompanion data) {
     return ClientOperation(
+      originatingAccountId: data.originatingAccountId.present
+          ? data.originatingAccountId.value
+          : this.originatingAccountId,
+      enqueueSequence: data.enqueueSequence.present
+          ? data.enqueueSequence.value
+          : this.enqueueSequence,
+      safeFailureCode: data.safeFailureCode.present
+          ? data.safeFailureCode.value
+          : this.safeFailureCode,
+      requestCorrelationId: data.requestCorrelationId.present
+          ? data.requestCorrelationId.value
+          : this.requestCorrelationId,
       operationId: data.operationId.present
           ? data.operationId.value
           : this.operationId,
@@ -1205,6 +1378,10 @@ class ClientOperation extends DataClass implements Insertable<ClientOperation> {
   @override
   String toString() {
     return (StringBuffer('ClientOperation(')
+          ..write('originatingAccountId: $originatingAccountId, ')
+          ..write('enqueueSequence: $enqueueSequence, ')
+          ..write('safeFailureCode: $safeFailureCode, ')
+          ..write('requestCorrelationId: $requestCorrelationId, ')
           ..write('operationId: $operationId, ')
           ..write('deviceId: $deviceId, ')
           ..write('homeId: $homeId, ')
@@ -1227,6 +1404,10 @@ class ClientOperation extends DataClass implements Insertable<ClientOperation> {
 
   @override
   int get hashCode => Object.hash(
+    originatingAccountId,
+    enqueueSequence,
+    safeFailureCode,
+    requestCorrelationId,
     operationId,
     deviceId,
     homeId,
@@ -1248,6 +1429,10 @@ class ClientOperation extends DataClass implements Insertable<ClientOperation> {
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is ClientOperation &&
+          other.originatingAccountId == this.originatingAccountId &&
+          other.enqueueSequence == this.enqueueSequence &&
+          other.safeFailureCode == this.safeFailureCode &&
+          other.requestCorrelationId == this.requestCorrelationId &&
           other.operationId == this.operationId &&
           other.deviceId == this.deviceId &&
           other.homeId == this.homeId &&
@@ -1267,6 +1452,10 @@ class ClientOperation extends DataClass implements Insertable<ClientOperation> {
 }
 
 class ClientOperationsCompanion extends UpdateCompanion<ClientOperation> {
+  final Value<String?> originatingAccountId;
+  final Value<int?> enqueueSequence;
+  final Value<String?> safeFailureCode;
+  final Value<String?> requestCorrelationId;
   final Value<String> operationId;
   final Value<String> deviceId;
   final Value<String> homeId;
@@ -1285,6 +1474,10 @@ class ClientOperationsCompanion extends UpdateCompanion<ClientOperation> {
   final Value<DateTime?> acknowledgedAt;
   final Value<int> rowid;
   const ClientOperationsCompanion({
+    this.originatingAccountId = const Value.absent(),
+    this.enqueueSequence = const Value.absent(),
+    this.safeFailureCode = const Value.absent(),
+    this.requestCorrelationId = const Value.absent(),
     this.operationId = const Value.absent(),
     this.deviceId = const Value.absent(),
     this.homeId = const Value.absent(),
@@ -1304,6 +1497,10 @@ class ClientOperationsCompanion extends UpdateCompanion<ClientOperation> {
     this.rowid = const Value.absent(),
   });
   ClientOperationsCompanion.insert({
+    this.originatingAccountId = const Value.absent(),
+    this.enqueueSequence = const Value.absent(),
+    this.safeFailureCode = const Value.absent(),
+    this.requestCorrelationId = const Value.absent(),
     required String operationId,
     required String deviceId,
     required String homeId,
@@ -1331,6 +1528,10 @@ class ClientOperationsCompanion extends UpdateCompanion<ClientOperation> {
        payload = Value(payload),
        state = Value(state);
   static Insertable<ClientOperation> custom({
+    Expression<String>? originatingAccountId,
+    Expression<int>? enqueueSequence,
+    Expression<String>? safeFailureCode,
+    Expression<String>? requestCorrelationId,
     Expression<String>? operationId,
     Expression<String>? deviceId,
     Expression<String>? homeId,
@@ -1350,6 +1551,12 @@ class ClientOperationsCompanion extends UpdateCompanion<ClientOperation> {
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
+      if (originatingAccountId != null)
+        'originating_account_id': originatingAccountId,
+      if (enqueueSequence != null) 'enqueue_sequence': enqueueSequence,
+      if (safeFailureCode != null) 'safe_failure_code': safeFailureCode,
+      if (requestCorrelationId != null)
+        'request_correlation_id': requestCorrelationId,
       if (operationId != null) 'operation_id': operationId,
       if (deviceId != null) 'device_id': deviceId,
       if (homeId != null) 'home_id': homeId,
@@ -1372,6 +1579,10 @@ class ClientOperationsCompanion extends UpdateCompanion<ClientOperation> {
   }
 
   ClientOperationsCompanion copyWith({
+    Value<String?>? originatingAccountId,
+    Value<int?>? enqueueSequence,
+    Value<String?>? safeFailureCode,
+    Value<String?>? requestCorrelationId,
     Value<String>? operationId,
     Value<String>? deviceId,
     Value<String>? homeId,
@@ -1391,6 +1602,10 @@ class ClientOperationsCompanion extends UpdateCompanion<ClientOperation> {
     Value<int>? rowid,
   }) {
     return ClientOperationsCompanion(
+      originatingAccountId: originatingAccountId ?? this.originatingAccountId,
+      enqueueSequence: enqueueSequence ?? this.enqueueSequence,
+      safeFailureCode: safeFailureCode ?? this.safeFailureCode,
+      requestCorrelationId: requestCorrelationId ?? this.requestCorrelationId,
       operationId: operationId ?? this.operationId,
       deviceId: deviceId ?? this.deviceId,
       homeId: homeId ?? this.homeId,
@@ -1414,6 +1629,22 @@ class ClientOperationsCompanion extends UpdateCompanion<ClientOperation> {
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
+    if (originatingAccountId.present) {
+      map['originating_account_id'] = Variable<String>(
+        originatingAccountId.value,
+      );
+    }
+    if (enqueueSequence.present) {
+      map['enqueue_sequence'] = Variable<int>(enqueueSequence.value);
+    }
+    if (safeFailureCode.present) {
+      map['safe_failure_code'] = Variable<String>(safeFailureCode.value);
+    }
+    if (requestCorrelationId.present) {
+      map['request_correlation_id'] = Variable<String>(
+        requestCorrelationId.value,
+      );
+    }
     if (operationId.present) {
       map['operation_id'] = Variable<String>(operationId.value);
     }
@@ -1471,6 +1702,10 @@ class ClientOperationsCompanion extends UpdateCompanion<ClientOperation> {
   @override
   String toString() {
     return (StringBuffer('ClientOperationsCompanion(')
+          ..write('originatingAccountId: $originatingAccountId, ')
+          ..write('enqueueSequence: $enqueueSequence, ')
+          ..write('safeFailureCode: $safeFailureCode, ')
+          ..write('requestCorrelationId: $requestCorrelationId, ')
           ..write('operationId: $operationId, ')
           ..write('deviceId: $deviceId, ')
           ..write('homeId: $homeId, ')
@@ -1488,6 +1723,214 @@ class ClientOperationsCompanion extends UpdateCompanion<ClientOperation> {
           ..write('serverCursor: $serverCursor, ')
           ..write('acknowledgedAt: $acknowledgedAt, ')
           ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $LocalOperationSequencesTable extends LocalOperationSequences
+    with TableInfo<$LocalOperationSequencesTable, LocalOperationSequence> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $LocalOperationSequencesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _nextSequenceMeta = const VerificationMeta(
+    'nextSequence',
+  );
+  @override
+  late final GeneratedColumn<int> nextSequence = GeneratedColumn<int>(
+    'next_sequence',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [id, nextSequence];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'local_operation_sequences';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<LocalOperationSequence> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('next_sequence')) {
+      context.handle(
+        _nextSequenceMeta,
+        nextSequence.isAcceptableOrUnknown(
+          data['next_sequence']!,
+          _nextSequenceMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_nextSequenceMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  LocalOperationSequence map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return LocalOperationSequence(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}id'],
+      )!,
+      nextSequence: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}next_sequence'],
+      )!,
+    );
+  }
+
+  @override
+  $LocalOperationSequencesTable createAlias(String alias) {
+    return $LocalOperationSequencesTable(attachedDatabase, alias);
+  }
+}
+
+class LocalOperationSequence extends DataClass
+    implements Insertable<LocalOperationSequence> {
+  final int id;
+  final int nextSequence;
+  const LocalOperationSequence({required this.id, required this.nextSequence});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['next_sequence'] = Variable<int>(nextSequence);
+    return map;
+  }
+
+  LocalOperationSequencesCompanion toCompanion(bool nullToAbsent) {
+    return LocalOperationSequencesCompanion(
+      id: Value(id),
+      nextSequence: Value(nextSequence),
+    );
+  }
+
+  factory LocalOperationSequence.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return LocalOperationSequence(
+      id: serializer.fromJson<int>(json['id']),
+      nextSequence: serializer.fromJson<int>(json['nextSequence']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'nextSequence': serializer.toJson<int>(nextSequence),
+    };
+  }
+
+  LocalOperationSequence copyWith({int? id, int? nextSequence}) =>
+      LocalOperationSequence(
+        id: id ?? this.id,
+        nextSequence: nextSequence ?? this.nextSequence,
+      );
+  LocalOperationSequence copyWithCompanion(
+    LocalOperationSequencesCompanion data,
+  ) {
+    return LocalOperationSequence(
+      id: data.id.present ? data.id.value : this.id,
+      nextSequence: data.nextSequence.present
+          ? data.nextSequence.value
+          : this.nextSequence,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LocalOperationSequence(')
+          ..write('id: $id, ')
+          ..write('nextSequence: $nextSequence')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, nextSequence);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is LocalOperationSequence &&
+          other.id == this.id &&
+          other.nextSequence == this.nextSequence);
+}
+
+class LocalOperationSequencesCompanion
+    extends UpdateCompanion<LocalOperationSequence> {
+  final Value<int> id;
+  final Value<int> nextSequence;
+  const LocalOperationSequencesCompanion({
+    this.id = const Value.absent(),
+    this.nextSequence = const Value.absent(),
+  });
+  LocalOperationSequencesCompanion.insert({
+    this.id = const Value.absent(),
+    required int nextSequence,
+  }) : nextSequence = Value(nextSequence);
+  static Insertable<LocalOperationSequence> custom({
+    Expression<int>? id,
+    Expression<int>? nextSequence,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (nextSequence != null) 'next_sequence': nextSequence,
+    });
+  }
+
+  LocalOperationSequencesCompanion copyWith({
+    Value<int>? id,
+    Value<int>? nextSequence,
+  }) {
+    return LocalOperationSequencesCompanion(
+      id: id ?? this.id,
+      nextSequence: nextSequence ?? this.nextSequence,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (nextSequence.present) {
+      map['next_sequence'] = Variable<int>(nextSequence.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LocalOperationSequencesCompanion(')
+          ..write('id: $id, ')
+          ..write('nextSequence: $nextSequence')
           ..write(')'))
         .toString();
   }
@@ -3665,6 +4108,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $ClientOperationsTable clientOperations = $ClientOperationsTable(
     this,
   );
+  late final $LocalOperationSequencesTable localOperationSequences =
+      $LocalOperationSequencesTable(this);
   late final $LocalSyncCursorsTable localSyncCursors = $LocalSyncCursorsTable(
     this,
   );
@@ -3682,6 +4127,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   List<DatabaseSchemaEntity> get allSchemaEntities => [
     localRecords,
     clientOperations,
+    localOperationSequences,
     localSyncCursors,
     recordTombstones,
     localMediaMetadata,
@@ -3954,6 +4400,10 @@ typedef $$LocalRecordsTableProcessedTableManager =
     >;
 typedef $$ClientOperationsTableCreateCompanionBuilder =
     ClientOperationsCompanion Function({
+      Value<String?> originatingAccountId,
+      Value<int?> enqueueSequence,
+      Value<String?> safeFailureCode,
+      Value<String?> requestCorrelationId,
       required String operationId,
       required String deviceId,
       required String homeId,
@@ -3974,6 +4424,10 @@ typedef $$ClientOperationsTableCreateCompanionBuilder =
     });
 typedef $$ClientOperationsTableUpdateCompanionBuilder =
     ClientOperationsCompanion Function({
+      Value<String?> originatingAccountId,
+      Value<int?> enqueueSequence,
+      Value<String?> safeFailureCode,
+      Value<String?> requestCorrelationId,
       Value<String> operationId,
       Value<String> deviceId,
       Value<String> homeId,
@@ -4002,6 +4456,26 @@ class $$ClientOperationsTableFilterComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  ColumnFilters<String> get originatingAccountId => $composableBuilder(
+    column: $table.originatingAccountId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get enqueueSequence => $composableBuilder(
+    column: $table.enqueueSequence,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get safeFailureCode => $composableBuilder(
+    column: $table.safeFailureCode,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get requestCorrelationId => $composableBuilder(
+    column: $table.requestCorrelationId,
+    builder: (column) => ColumnFilters(column),
+  );
+
   ColumnFilters<String> get operationId => $composableBuilder(
     column: $table.operationId,
     builder: (column) => ColumnFilters(column),
@@ -4092,6 +4566,26 @@ class $$ClientOperationsTableOrderingComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  ColumnOrderings<String> get originatingAccountId => $composableBuilder(
+    column: $table.originatingAccountId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get enqueueSequence => $composableBuilder(
+    column: $table.enqueueSequence,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get safeFailureCode => $composableBuilder(
+    column: $table.safeFailureCode,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get requestCorrelationId => $composableBuilder(
+    column: $table.requestCorrelationId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get operationId => $composableBuilder(
     column: $table.operationId,
     builder: (column) => ColumnOrderings(column),
@@ -4182,6 +4676,26 @@ class $$ClientOperationsTableAnnotationComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
+  GeneratedColumn<String> get originatingAccountId => $composableBuilder(
+    column: $table.originatingAccountId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get enqueueSequence => $composableBuilder(
+    column: $table.enqueueSequence,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get safeFailureCode => $composableBuilder(
+    column: $table.safeFailureCode,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get requestCorrelationId => $composableBuilder(
+    column: $table.requestCorrelationId,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<String> get operationId => $composableBuilder(
     column: $table.operationId,
     builder: (column) => column,
@@ -4290,6 +4804,10 @@ class $$ClientOperationsTableTableManager
               $$ClientOperationsTableAnnotationComposer($db: db, $table: table),
           updateCompanionCallback:
               ({
+                Value<String?> originatingAccountId = const Value.absent(),
+                Value<int?> enqueueSequence = const Value.absent(),
+                Value<String?> safeFailureCode = const Value.absent(),
+                Value<String?> requestCorrelationId = const Value.absent(),
                 Value<String> operationId = const Value.absent(),
                 Value<String> deviceId = const Value.absent(),
                 Value<String> homeId = const Value.absent(),
@@ -4308,6 +4826,10 @@ class $$ClientOperationsTableTableManager
                 Value<DateTime?> acknowledgedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => ClientOperationsCompanion(
+                originatingAccountId: originatingAccountId,
+                enqueueSequence: enqueueSequence,
+                safeFailureCode: safeFailureCode,
+                requestCorrelationId: requestCorrelationId,
                 operationId: operationId,
                 deviceId: deviceId,
                 homeId: homeId,
@@ -4328,6 +4850,10 @@ class $$ClientOperationsTableTableManager
               ),
           createCompanionCallback:
               ({
+                Value<String?> originatingAccountId = const Value.absent(),
+                Value<int?> enqueueSequence = const Value.absent(),
+                Value<String?> safeFailureCode = const Value.absent(),
+                Value<String?> requestCorrelationId = const Value.absent(),
                 required String operationId,
                 required String deviceId,
                 required String homeId,
@@ -4346,6 +4872,10 @@ class $$ClientOperationsTableTableManager
                 Value<DateTime?> acknowledgedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => ClientOperationsCompanion.insert(
+                originatingAccountId: originatingAccountId,
+                enqueueSequence: enqueueSequence,
+                safeFailureCode: safeFailureCode,
+                requestCorrelationId: requestCorrelationId,
                 operationId: operationId,
                 deviceId: deviceId,
                 homeId: homeId,
@@ -4387,6 +4917,164 @@ typedef $$ClientOperationsTableProcessedTableManager =
         BaseReferences<_$AppDatabase, $ClientOperationsTable, ClientOperation>,
       ),
       ClientOperation,
+      PrefetchHooks Function()
+    >;
+typedef $$LocalOperationSequencesTableCreateCompanionBuilder =
+    LocalOperationSequencesCompanion Function({
+      Value<int> id,
+      required int nextSequence,
+    });
+typedef $$LocalOperationSequencesTableUpdateCompanionBuilder =
+    LocalOperationSequencesCompanion Function({
+      Value<int> id,
+      Value<int> nextSequence,
+    });
+
+class $$LocalOperationSequencesTableFilterComposer
+    extends Composer<_$AppDatabase, $LocalOperationSequencesTable> {
+  $$LocalOperationSequencesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get nextSequence => $composableBuilder(
+    column: $table.nextSequence,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$LocalOperationSequencesTableOrderingComposer
+    extends Composer<_$AppDatabase, $LocalOperationSequencesTable> {
+  $$LocalOperationSequencesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get nextSequence => $composableBuilder(
+    column: $table.nextSequence,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$LocalOperationSequencesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $LocalOperationSequencesTable> {
+  $$LocalOperationSequencesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<int> get nextSequence => $composableBuilder(
+    column: $table.nextSequence,
+    builder: (column) => column,
+  );
+}
+
+class $$LocalOperationSequencesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $LocalOperationSequencesTable,
+          LocalOperationSequence,
+          $$LocalOperationSequencesTableFilterComposer,
+          $$LocalOperationSequencesTableOrderingComposer,
+          $$LocalOperationSequencesTableAnnotationComposer,
+          $$LocalOperationSequencesTableCreateCompanionBuilder,
+          $$LocalOperationSequencesTableUpdateCompanionBuilder,
+          (
+            LocalOperationSequence,
+            BaseReferences<
+              _$AppDatabase,
+              $LocalOperationSequencesTable,
+              LocalOperationSequence
+            >,
+          ),
+          LocalOperationSequence,
+          PrefetchHooks Function()
+        > {
+  $$LocalOperationSequencesTableTableManager(
+    _$AppDatabase db,
+    $LocalOperationSequencesTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$LocalOperationSequencesTableFilterComposer(
+                $db: db,
+                $table: table,
+              ),
+          createOrderingComposer: () =>
+              $$LocalOperationSequencesTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$LocalOperationSequencesTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                Value<int> nextSequence = const Value.absent(),
+              }) => LocalOperationSequencesCompanion(
+                id: id,
+                nextSequence: nextSequence,
+              ),
+          createCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                required int nextSequence,
+              }) => LocalOperationSequencesCompanion.insert(
+                id: id,
+                nextSequence: nextSequence,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$LocalOperationSequencesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $LocalOperationSequencesTable,
+      LocalOperationSequence,
+      $$LocalOperationSequencesTableFilterComposer,
+      $$LocalOperationSequencesTableOrderingComposer,
+      $$LocalOperationSequencesTableAnnotationComposer,
+      $$LocalOperationSequencesTableCreateCompanionBuilder,
+      $$LocalOperationSequencesTableUpdateCompanionBuilder,
+      (
+        LocalOperationSequence,
+        BaseReferences<
+          _$AppDatabase,
+          $LocalOperationSequencesTable,
+          LocalOperationSequence
+        >,
+      ),
+      LocalOperationSequence,
       PrefetchHooks Function()
     >;
 typedef $$LocalSyncCursorsTableCreateCompanionBuilder =
@@ -5517,6 +6205,11 @@ class $AppDatabaseManager {
       $$LocalRecordsTableTableManager(_db, _db.localRecords);
   $$ClientOperationsTableTableManager get clientOperations =>
       $$ClientOperationsTableTableManager(_db, _db.clientOperations);
+  $$LocalOperationSequencesTableTableManager get localOperationSequences =>
+      $$LocalOperationSequencesTableTableManager(
+        _db,
+        _db.localOperationSequences,
+      );
   $$LocalSyncCursorsTableTableManager get localSyncCursors =>
       $$LocalSyncCursorsTableTableManager(_db, _db.localSyncCursors);
   $$RecordTombstonesTableTableManager get recordTombstones =>
