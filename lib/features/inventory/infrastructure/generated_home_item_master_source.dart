@@ -55,11 +55,23 @@ final class GeneratedHomeItemMasterSource implements HomeItemMasterSource {
           query: <String, String>{'limit': '$limit', 'offset': '$offset'},
         );
       } on generated.ProvidentiaApiException catch (error) {
-        throw HomeItemMasterSourceException(switch (error.statusCode) {
-          401 => HomeItemMasterSourceFailure.authenticationRequired,
-          403 || 404 => HomeItemMasterSourceFailure.authorizationDenied,
-          _ => HomeItemMasterSourceFailure.unavailable,
-        });
+        if (error.statusCode == 401) {
+          throw const HomeItemMasterSourceException(
+            HomeItemMasterSourceFailure.authenticationRequired,
+          );
+        }
+        // A permission change or a proxy's 404 is not revoked membership.
+        // Match the same explicit backend problem type as the sync gateway.
+        if ((error.statusCode == 403 || error.statusCode == 404) &&
+            error.problem.type ==
+                'https://providentia.invalid/problems/sync_home_access_denied') {
+          throw const HomeItemMasterSourceException(
+            HomeItemMasterSourceFailure.authorizationDenied,
+          );
+        }
+        throw const HomeItemMasterSourceException(
+          HomeItemMasterSourceFailure.unavailable,
+        );
       }
       final body = response.requireObject();
       final data = _objectList(body, 'data');
