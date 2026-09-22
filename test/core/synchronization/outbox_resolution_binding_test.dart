@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:providentia/core/database/app_database.dart';
 import 'package:providentia/core/database/drift_local_sync_repository.dart';
 import 'package:providentia/core/synchronization/sync_models.dart';
+import 'package:providentia/core/synchronization/sync_ports.dart';
 
 const owner = '0198a0b1-c2d3-7e4f-8123-456789abcdef';
 const other = '0198a0b1-c2d3-7e4f-8123-456789abcdee';
@@ -87,7 +88,7 @@ void main() {
             PushOperationResult(
               operationId: 'operation',
               kind: PushResultKind.conflict,
-              remoteRevision: 2,
+              acceptedRevision: 2,
               remotePayload: {'quantity': 3},
               safeMessage: 'The server record changed.',
               code: 'revision_conflict',
