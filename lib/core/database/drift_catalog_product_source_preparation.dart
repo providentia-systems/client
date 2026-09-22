@@ -41,11 +41,13 @@ final class DriftCatalogProductSourcePreparation
         throw const CatalogContributionAuthenticationRequiredException();
       case SyncRunStatus.authorizationFailure:
         throw const CatalogContributionForbiddenException();
+      case SyncRunStatus.uploadsBlocked:
+      case SyncRunStatus.uploadsPending:
       case SyncRunStatus.completed:
       case SyncRunStatus.alreadyRunning:
       case SyncRunStatus.offline:
       case SyncRunStatus.retryableFailure:
-        // A completed run may contain blocked operations; a catalog refresh
+        // Other sources may still be blocked, and a catalog refresh
         // failure may follow a successful source acknowledgement. Read the
         // selected source's evidence instead of trusting the run's label.
         if (!await _isAcknowledged(homeProductId)) {
