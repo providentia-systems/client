@@ -120,7 +120,8 @@ final class SyncCoordinator implements AppSynchronization {
         try {
           final validator = _remote;
           if (validator is SyncOperationBindingValidator) {
-            validator.validateOperationBinding(operation);
+            (validator as SyncOperationBindingValidator)
+                .validateOperationBinding(operation);
           }
           PushOperationResult result;
           if (interruptedOperationIds.contains(operation.operationId)) {

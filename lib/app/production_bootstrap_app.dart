@@ -634,9 +634,15 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
   @override
   void initState() {
     super.initState();
-    final localSync = DriftLocalSyncRepository(widget.database);
+    final localSync = DriftLocalSyncRepository(
+      widget.database,
+      accountId: widget.userId,
+      isCurrent: () => _bindingIsCurrent,
+    );
     final household = createProductionHouseholdRepository(
       database: widget.database,
+      originatingAccountId: widget.userId,
+      isCurrent: () => _bindingIsCurrent,
       deviceId: widget.deviceId,
       onMutationCommitted: () async {
         if (_bindingIsCurrent) await _app.refresh();
@@ -653,6 +659,7 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
       delegate: GeneratedSyncGateway(widget.api),
       homeId: widget.home.id,
       deviceId: widget.deviceId,
+      accountId: widget.userId,
       isCurrent: () => _bindingIsCurrent,
     );
     AppSynchronization synchronization = SyncCoordinator(
@@ -2246,6 +2253,8 @@ final class _ProtectedRouteUnavailable extends StatelessWidget {
 @visibleForTesting
 DriftHouseholdRepository createProductionHouseholdRepository({
   required AppDatabase database,
+  String? originatingAccountId,
+  bool Function()? isCurrent,
   required String deviceId,
   required Future<void> Function() onMutationCommitted,
   DateTime Function()? clock,
@@ -2255,6 +2264,8 @@ DriftHouseholdRepository createProductionHouseholdRepository({
   return DriftHouseholdRepository(
     database,
     deviceId: deviceId,
+    originatingAccountId: originatingAccountId,
+    isCurrent: isCurrent,
     clock: clock,
     idGenerator: idGenerator,
     onMutationCommitted: onMutationCommitted,

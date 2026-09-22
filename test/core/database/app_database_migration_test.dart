@@ -3,10 +3,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:providentia/core/database/app_database.dart';
 
 void main() {
-  test('v1 to v2 preserves and rebases pending client operations', () async {
-    final executor = NativeDatabase.memory(
-      setup: (raw) {
-        raw.execute('''
+  test(
+    'v1 to v3 preserves pending client operations without inventing provenance',
+    () async {
+      final executor = NativeDatabase.memory(
+        setup: (raw) {
+          raw.execute('''
           CREATE TABLE local_records (
             home_id TEXT NOT NULL,
             entity_type TEXT NOT NULL,
@@ -20,7 +22,7 @@ void main() {
             PRIMARY KEY (home_id, entity_type, entity_id)
           )
         ''');
-        raw.execute('''
+          raw.execute('''
           CREATE TABLE client_operations (
             operation_id TEXT NOT NULL PRIMARY KEY,
             device_id TEXT NOT NULL,
@@ -39,7 +41,7 @@ void main() {
             acknowledged_at INTEGER NULL
           )
         ''');
-        raw.execute('''
+          raw.execute('''
           INSERT INTO client_operations (
             operation_id, device_id, home_id, entity_type, entity_id,
             operation_type, base_revision, client_timestamp, payload, state
@@ -48,22 +50,30 @@ void main() {
             'record-1', 'set_count', NULL, 0, '{"quantity":2}', 'pending'
           )
         ''');
-        raw.execute('PRAGMA user_version = 1');
-      },
-    );
-    final database = AppDatabase(executor);
-    addTearDown(database.close);
+          raw.execute('PRAGMA user_version = 1');
+        },
+      );
+      final database = AppDatabase(executor);
+      addTearDown(database.close);
 
-    final pending = await database
-        .select(database.clientOperations)
-        .getSingle();
+      final pending = await database
+          .select(database.clientOperations)
+          .getSingle();
 
-    expect(database.schemaVersion, 2);
-    expect(pending.operationId, 'pending-1');
-    expect(pending.state, 'pending');
-    expect(pending.baseRevision, isNull);
-    expect(pending.payloadSchemaVersion, 1);
-    expect(await database.select(database.localSyncCursors).get(), isEmpty);
-    expect(await database.select(database.syncConflictRecords).get(), isEmpty);
-  });
+      expect(database.schemaVersion, 3);
+      expect(pending.originatingAccountId, isNull);
+      expect(pending.enqueueSequence, isNull);
+      expect(pending.safeFailureCode, isNull);
+      expect(pending.requestCorrelationId, isNull);
+      expect(pending.operationId, 'pending-1');
+      expect(pending.state, 'pending');
+      expect(pending.baseRevision, isNull);
+      expect(pending.payloadSchemaVersion, 1);
+      expect(await database.select(database.localSyncCursors).get(), isEmpty);
+      expect(
+        await database.select(database.syncConflictRecords).get(),
+        isEmpty,
+      );
+    },
+  );
 }
