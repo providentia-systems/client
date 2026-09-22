@@ -10452,6 +10452,17 @@
               "format": "uuid"
             },
             "description": "Restrict identities to this product and its related category, unit, pack, variant, alias, and barcode records. Identity-rule filtering returns 422."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Literal, case-insensitive identity search applied before offset pagination. Empty text lists all authorized records.",
+            "schema": {
+              "type": "string",
+              "maxLength": 191,
+              "default": ""
+            }
           }
         ],
         "responses": {

@@ -221,7 +221,7 @@ void main() {
 
   for (final statusCode in <int>[403, 404]) {
     test(
-      'operation status HTTP $statusCode is authorization failure',
+      'unclassified operation status HTTP $statusCode preserves saved intent',
       () async {
         final client = generated.ProvidentiaApiClient(
           baseUri: Uri.parse('https://api.example.test'),
@@ -245,7 +245,7 @@ void main() {
             deviceId: deviceId,
             operationIds: const <String>[operationId],
           ),
-          throwsA(isA<AuthorizationSyncException>()),
+          throwsA(isA<RetryableSyncException>()),
         );
       },
     );
@@ -568,7 +568,7 @@ void main() {
 
   for (final statusCode in <int>[403, 404]) {
     test(
-      'HTTP $statusCode blocks each pushed operation as authorization failure',
+      'unclassified HTTP $statusCode blocks uploads without proving home revocation',
       () async {
         final client = generated.ProvidentiaApiClient(
           baseUri: Uri.parse('https://api.example.test'),
@@ -604,13 +604,11 @@ void main() {
           operations: <PendingClientOperation>[operation],
         );
 
-        expect(
-          response.results.single.kind,
-          PushResultKind.authorizationFailure,
-        );
+        expect(response.results.single.kind, PushResultKind.validationError);
+        expect(response.results.single.code, 'unclassified_http_denial');
         expect(
           response.results.single.safeMessage,
-          'Home access is unavailable.',
+          contains('saved work has been kept'),
         );
       },
     );
@@ -619,14 +617,15 @@ void main() {
   for (final method in <String>['bootstrap', 'pull']) {
     for (final statusCode in <int>[403, 404]) {
       test(
-        '$method HTTP $statusCode is authorization, not authentication',
+        '$method verified HTTP $statusCode home denial is authorization, not authentication',
         () async {
           final client = generated.ProvidentiaApiClient(
             baseUri: Uri.parse('https://api.example.test'),
             httpClient: MockClient((_) async {
               return http.Response(
                 jsonEncode(<String, Object?>{
-                  'type': 'about:blank',
+                  'type':
+                      'https://providentia.invalid/problems/sync_home_access_denied',
                   'title': statusCode == 403 ? 'Forbidden' : 'Not Found',
                   'status': statusCode,
                   'detail': 'Home membership is unavailable.',
@@ -648,7 +647,7 @@ void main() {
               isA<AuthorizationSyncException>().having(
                 (error) => error.safeMessage,
                 'safe message',
-                contains('membership'),
+                contains('home'),
               ),
             ),
           );

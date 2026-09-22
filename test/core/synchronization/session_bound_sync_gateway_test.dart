@@ -37,7 +37,13 @@ void main() {
           lastPulledCursor: null,
           operations: <PendingClientOperation>[operation],
         ),
-        throwsA(isA<AuthenticationSyncException>()),
+        throwsA(
+          isA<BindingSyncException>().having(
+            (error) => error.code,
+            'code',
+            'device_binding_mismatch',
+          ),
+        ),
       );
       expect(operation.deviceId, 'installation');
       expect(operation.operationId, 'operation');
@@ -54,7 +60,13 @@ void main() {
         deviceId: 'previous-account-device',
         operationIds: const <String>['operation'],
       ),
-      throwsA(isA<AuthenticationSyncException>()),
+      throwsA(
+        isA<BindingSyncException>().having(
+          (error) => error.code,
+          'code',
+          'device_binding_mismatch',
+        ),
+      ),
     );
     expect(remote.calls, 0);
   });
