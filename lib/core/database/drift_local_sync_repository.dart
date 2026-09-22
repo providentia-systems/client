@@ -59,7 +59,25 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
       ClientLocalRecordTypes.synchronizationProtected;
 
   final AppDatabase _database;
+  final String? _accountId;
+  final bool Function()? _isCurrent;
   final DateTime Function() _clock;
+
+  void _requireCurrent() {
+    if (_isCurrent != null && !_isCurrent()) {
+      throw const AuthenticationSyncException(
+        'The synchronization workspace changed. Reopen the current home.',
+      );
+    }
+  }
+
+  Future<T> _transaction<T>(Future<T> Function() action) =>
+      _database.transaction(() async {
+        _requireCurrent();
+        final value = await action();
+        _requireCurrent();
+        return value;
+      });
 
   @override
   Stream<SyncSummary> watchSummary({required String homeId}) {
@@ -68,7 +86,25 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
     return query.watch().map((rows) {
       int count(ClientOperationState state) =>
           rows.where((row) => row.state == state.storageValue).length;
-      final safeErrors = rows
+      final orderedRows = [...rows]
+        ..sort((a, b) {
+          if (a.enqueueSequence == null && b.enqueueSequence != null) return -1;
+          if (a.enqueueSequence != null && b.enqueueSequence == null) return 1;
+          final sequence = (a.enqueueSequence ?? 0).compareTo(
+            b.enqueueSequence ?? 0,
+          );
+          if (sequence != 0) return sequence;
+          final timestamp = a.clientTimestamp.compareTo(b.clientTimestamp);
+          return timestamp != 0
+              ? timestamp
+              : a.operationId.compareTo(b.operationId);
+        });
+      final safeErrors = orderedRows
+          .where(
+            (row) =>
+                row.state != ClientOperationState.acknowledged.storageValue &&
+                row.state != ClientOperationState.superseded.storageValue,
+          )
           .where((row) => row.lastSafeError != null)
           .map((row) => row.lastSafeError)
           .toList(growable: false);
@@ -90,7 +126,7 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
 
   @override
   Future<void> commitLocalMutation(LocalMutation mutation) {
-    return _database.transaction(() async {
+    return _transaction(() async {
       await _database
           .into(_database.localRecords)
           .insertOnConflictUpdate(
@@ -108,6 +144,10 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
           .insert(
             ClientOperationsCompanion.insert(
               operationId: mutation.operationId,
+              originatingAccountId: Value(
+                _accountId ?? mutation.originatingAccountId,
+              ),
+              enqueueSequence: Value(sequence),
               deviceId: mutation.deviceId,
               homeId: mutation.homeId,
               entityType: mutation.entityType,
@@ -136,6 +176,7 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
     final query = _database.select(_database.clientOperations)
       ..where((row) => row.homeId.equals(homeId))
       ..orderBy(<OrderingTerm Function(ClientOperations)>[
+        (row) => OrderingTerm.asc(row.enqueueSequence),
         (row) => OrderingTerm.asc(row.clientTimestamp),
         (row) => OrderingTerm.asc(row.operationId),
       ]);
@@ -161,6 +202,8 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
       executable.add(
         PendingClientOperation(
           operationId: row.operationId,
+          originatingAccountId: row.originatingAccountId,
+          enqueueSequence: row.enqueueSequence,
           deviceId: row.deviceId,
           homeId: row.homeId,
           entityType: row.entityType,
@@ -200,7 +243,7 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
     required String homeId,
     required DateTime now,
   }) {
-    return _database.transaction(() async {
+    return _transaction(() async {
       final interrupted =
           await (_database.select(_database.clientOperations)..where(
                 (row) =>
@@ -239,7 +282,7 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
     required DateTime now,
     required RetryPolicy retryPolicy,
   }) {
-    return _database.transaction(() async {
+    return _transaction(() async {
       for (final result in results) {
         final operation =
             await (_database.select(_database.clientOperations)
@@ -337,7 +380,7 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
 
   @override
   Future<void> applyPullPage({required String homeId, required PullPage page}) {
-    return _database.transaction(() async {
+    return _transaction(() async {
       if (page.protocolVersion != 1) {
         throw StateError(
           'Unsupported sync protocol version ${page.protocolVersion}.',
@@ -546,7 +589,7 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
     required String homeId,
     required PullPage page,
   }) {
-    return _database.transaction(() async {
+    return _transaction(() async {
       if (page.protocolVersion != 1 || page.hasMore) {
         throw StateError('Invalid synchronization bootstrap page.');
       }
@@ -575,6 +618,7 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
           (await (_database.select(_database.clientOperations)
                     ..where((row) => row.homeId.equals(homeId))
                     ..orderBy(<OrderingTerm Function(ClientOperations)>[
+                      (row) => OrderingTerm.asc(row.enqueueSequence),
                       (row) => OrderingTerm.asc(row.clientTimestamp),
                       (row) => OrderingTerm.asc(row.operationId),
                     ]))
@@ -876,7 +920,7 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
     required String conflictId,
     required DateTime resolvedAt,
   }) {
-    return _database.transaction(() async {
+    return _transaction(() async {
       final context = await _resolutionContext(
         homeId: homeId,
         conflictId: conflictId,
@@ -914,7 +958,7 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
     required String conflictId,
     required DateTime resolvedAt,
   }) {
-    return _database.transaction(() async {
+    return _transaction(() async {
       final context = await _resolutionContext(
         homeId: homeId,
         conflictId: conflictId,
@@ -960,7 +1004,7 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
     required String newOperationId,
     required DateTime resolvedAt,
   }) {
-    return _database.transaction(() async {
+    return _transaction(() async {
       if (!isUuid(newOperationId)) {
         throw ArgumentError.value(
           newOperationId,
@@ -980,6 +1024,12 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
       _rejectGenericCountResolution(context);
       final revision = _requiredRemoteRevision(context.conflict);
       final payload = _decodePayload(context.operation.payload);
+      if (_accountId != null &&
+          context.operation.originatingAccountId != _accountId) {
+        throw const SyncConflictResolutionException(
+          'The original account binding is not verified. Review recovery before creating a replacement.',
+        );
+      }
       _validateReapplicationIntent(context.operation);
       final at = resolvedAt.toUtc();
 
@@ -992,6 +1042,10 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
             ClientOperationsCompanion.insert(
               operationId: newOperationId,
               deviceId: context.operation.deviceId,
+              originatingAccountId: Value(
+                context.operation.originatingAccountId,
+              ),
+              enqueueSequence: Value(context.operation.enqueueSequence),
               homeId: homeId,
               entityType: context.operation.entityType,
               entityId: context.operation.entityId,

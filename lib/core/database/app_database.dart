@@ -25,6 +25,11 @@ class LocalRecords extends Table {
 }
 
 class ClientOperations extends Table {
+  /// Null means historical authorship is unknown, not the signed-in account.
+  TextColumn get originatingAccountId => text().nullable()();
+  IntColumn get enqueueSequence => integer().nullable()();
+  TextColumn get safeFailureCode => text().nullable()();
+  TextColumn get requestCorrelationId => text().nullable()();
   TextColumn get operationId => text()();
   TextColumn get deviceId => text()();
   TextColumn get homeId => text()();
@@ -48,6 +53,15 @@ class ClientOperations extends Table {
 
   @override
   Set<Column<Object>> get primaryKey => <Column<Object>>{operationId};
+}
+
+/// A database-local monotonic order, independent of clocks and UUID ordering.
+class LocalOperationSequences extends Table {
+  IntColumn get id => integer()();
+  IntColumn get nextSequence => integer()();
+
+  @override
+  Set<Column<Object>> get primaryKey => <Column<Object>>{id};
 }
 
 class LocalSyncCursors extends Table {
@@ -121,6 +135,7 @@ class SyncConflictRecords extends Table {
   tables: <Type>[
     LocalRecords,
     ClientOperations,
+    LocalOperationSequences,
     LocalSyncCursors,
     RecordTombstones,
     LocalMediaMetadata,
@@ -143,7 +158,30 @@ final class AppDatabase extends _$AppDatabase {
       );
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
+
+  /// Call inside the same transaction as the optimistic record and outbox row.
+  /// Nested Drift transactions preserve rollback and serialize concurrent writers.
+  Future<int> allocateOperationSequence() => transaction(() async {
+    await into(localOperationSequences).insert(
+      LocalOperationSequencesCompanion.insert(
+        id: const Value(1),
+        nextSequence: 1,
+      ),
+      mode: InsertMode.insertOrIgnore,
+    );
+    final current = await (select(
+      localOperationSequences,
+    )..where((row) => row.id.equals(1))).getSingle();
+    await (update(
+      localOperationSequences,
+    )..where((row) => row.id.equals(1))).write(
+      LocalOperationSequencesCompanion(
+        nextSequence: Value(current.nextSequence + 1),
+      ),
+    );
+    return current.nextSequence;
+  });
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -162,6 +200,27 @@ final class AppDatabase extends _$AppDatabase {
         await migrator.createTable(recordTombstones);
         await migrator.createTable(localMediaMetadata);
         await migrator.createTable(syncConflictRecords);
+      }
+      if (from < 3) {
+        // Do not infer the creator, device, execution state or dependency order
+        // of historical rows. Their original operation envelopes stay intact.
+        await migrator.addColumn(
+          clientOperations,
+          clientOperations.originatingAccountId,
+        );
+        await migrator.addColumn(
+          clientOperations,
+          clientOperations.enqueueSequence,
+        );
+        await migrator.addColumn(
+          clientOperations,
+          clientOperations.safeFailureCode,
+        );
+        await migrator.addColumn(
+          clientOperations,
+          clientOperations.requestCorrelationId,
+        );
+        await migrator.createTable(localOperationSequences);
       }
     },
     beforeOpen: (_) async {

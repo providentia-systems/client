@@ -4,24 +4,34 @@ import 'package:providentia/core/synchronization/sync_ports.dart';
 /// A workspace may never borrow the credentials of a later signed-in account.
 /// Existing operations keep their immutable device binding; mismatches require
 /// recovery rather than being rewritten and replayed.
-final class SessionBoundSyncGateway implements SyncRemoteGateway {
+final class SessionBoundSyncGateway
+    implements SyncRemoteGateway, SyncOperationBindingValidator {
   factory SessionBoundSyncGateway({
     required SyncRemoteGateway delegate,
     required String homeId,
     required String deviceId,
+    String? accountId,
     required bool Function() isCurrent,
-  }) => SessionBoundSyncGateway._(delegate, homeId, deviceId, isCurrent);
+  }) => SessionBoundSyncGateway._(
+    delegate,
+    homeId,
+    deviceId,
+    isCurrent,
+    accountId,
+  );
 
   SessionBoundSyncGateway._(
     this._delegate,
     this.homeId,
     this.deviceId,
     this._isCurrent,
+    this.accountId,
   );
 
   final SyncRemoteGateway _delegate;
   final String homeId;
   final String deviceId;
+  final String? accountId;
   final bool Function() _isCurrent;
   bool _invalidated = false;
 
@@ -41,6 +51,27 @@ final class SessionBoundSyncGateway implements SyncRemoteGateway {
         'Saved work has a different device binding and needs recovery. '
         'It has not been reassigned or sent.',
         code: 'device_binding_mismatch',
+      );
+    }
+  }
+
+  @override
+  void validateOperationBinding(PendingClientOperation operation) {
+    _requireCurrent(operation.homeId);
+    _requireDevice(operation.deviceId);
+    if (accountId == null) return;
+    if (operation.originatingAccountId == null) {
+      throw const BindingSyncException(
+        'The creator of this historical saved operation is unknown. '
+        'It needs explicit recovery review and has not been reassigned or sent.',
+        code: 'origin_account_unknown',
+      );
+    }
+    if (operation.originatingAccountId != accountId) {
+      throw const BindingSyncException(
+        'This saved operation belongs to another account. '
+        'It has not been reassigned, queried or sent.',
+        code: 'account_binding_mismatch',
       );
     }
   }
@@ -71,8 +102,7 @@ final class SessionBoundSyncGateway implements SyncRemoteGateway {
   }) async {
     _requireCurrent(homeId);
     for (final operation in operations) {
-      _requireCurrent(operation.homeId);
-      _requireDevice(operation.deviceId);
+      validateOperationBinding(operation);
     }
     return _bound(
       homeId,

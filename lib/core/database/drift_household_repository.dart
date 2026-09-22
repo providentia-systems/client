@@ -68,10 +68,19 @@ final class DriftHouseholdRepository
     AppDatabase database, {
     DateTime Function()? clock,
     String? deviceId,
+    String? originatingAccountId,
+    bool Function()? isCurrent,
     String Function()? idGenerator,
     Future<void> Function()? onMutationCommitted,
     StockPreferenceReader? stockPreferenceReader,
   }) {
+    if (originatingAccountId != null && !isUuid(originatingAccountId)) {
+      throw ArgumentError.value(
+        originatingAccountId,
+        'originatingAccountId',
+        'must be a UUID',
+      );
+    }
     if (deviceId != null && !isUuid(deviceId)) {
       throw ArgumentError.value(deviceId, 'deviceId', 'must be a UUID');
     }
@@ -87,6 +96,8 @@ final class DriftHouseholdRepository
       idGenerator ?? UuidV4Generator().call,
       onMutationCommitted,
       stockPreferenceReader,
+      originatingAccountId,
+      isCurrent,
     );
   }
 
@@ -97,6 +108,8 @@ final class DriftHouseholdRepository
     this._idGenerator,
     this._onMutationCommitted,
     this._stockPreferenceReader,
+    this._originatingAccountId,
+    this._isCurrent,
   );
 
   static const String _inventoryItemType = 'phase5.inventory-item';
@@ -145,9 +158,27 @@ final class DriftHouseholdRepository
   final AppDatabase _database;
   final DateTime Function() _clock;
   final String? _deviceId;
+  final String? _originatingAccountId;
+  final bool Function()? _isCurrent;
   final String Function() _idGenerator;
   final Future<void> Function()? _onMutationCommitted;
   final Map<String, String> _emptyShoppingListIds = <String, String>{};
+
+  Future<T> _transaction<T>(Future<T> Function() action) =>
+      _database.transaction(() async {
+        _requireCurrentWriter();
+        final result = await action();
+        _requireCurrentWriter();
+        return result;
+      });
+
+  void _requireCurrentWriter() {
+    if (_isCurrent != null && !_isCurrent()) {
+      throw const AuthenticationSyncException(
+        'The household workspace changed. Reopen the current home.',
+      );
+    }
+  }
 
   bool get _synchronizesMutations => _deviceId != null;
 
@@ -274,7 +305,7 @@ final class DriftHouseholdRepository
         throw StateError('Stock preference access was rejected.');
       }
     }
-    return _database.transaction(() async {
+    return _transaction(() async {
       final activeProduct = await _record(
         homeId: homeId,
         entityType: _homeProductType,
@@ -316,7 +347,7 @@ final class DriftHouseholdRepository
       throw StateError('Synchronization is required.');
     }
     final at = _clock().toUtc();
-    await _database.transaction(() async {
+    await _transaction(() async {
       final product = await _record(
         homeId: preference.homeId,
         entityType: _homeProductType,
@@ -483,7 +514,7 @@ final class DriftHouseholdRepository
     final field = isStore ? 'location' : 'kind';
     final prefix = isStore ? 'purchasing.store' : 'inventory.location';
     final at = _clock().toUtc();
-    await _database.transaction(() async {
+    await _transaction(() async {
       final entityId = id ?? _nextUuid('household place');
       final previous = await _record(
         homeId: homeId,
@@ -559,7 +590,7 @@ final class DriftHouseholdRepository
       throw ArgumentError('Enter a category name of at most 191 characters.');
     }
     final at = _clock().toUtc();
-    await _database.transaction(() async {
+    await _transaction(() async {
       final id = categoryId ?? _nextUuid('home category');
       final previous = await _record(
         homeId: homeId,
@@ -620,7 +651,7 @@ final class DriftHouseholdRepository
     _requireUuid(productId, 'home product');
     if (homeCategoryId != null) _requireUuid(homeCategoryId, 'home category');
     final at = _clock().toUtc();
-    await _database.transaction(() async {
+    await _transaction(() async {
       final previous = await _record(
         homeId: homeId,
         entityType: _homeProductType,
@@ -919,7 +950,7 @@ final class DriftHouseholdRepository
         ),
       );
     }
-    await _database.transaction(() async {
+    await _transaction(() async {
       await (_database.delete(_database.localRecords)..where(
             (row) =>
                 row.homeId.equals(homeId) &
@@ -954,7 +985,7 @@ final class DriftHouseholdRepository
     if (_synchronizesMutations) {
       return _saveSynchronizedCountSession(session);
     }
-    return _database.transaction(() async {
+    return _transaction(() async {
       final existing =
           await (_database.select(_database.localRecords)..where(
                 (record) =>
@@ -1037,7 +1068,7 @@ final class DriftHouseholdRepository
         movement: movement,
       );
     }
-    return _database.transaction(() async {
+    return _transaction(() async {
       final row =
           await (_database.select(_database.localRecords)..where(
                 (record) =>
@@ -1962,7 +1993,7 @@ final class DriftHouseholdRepository
     if (_synchronizesMutations) {
       return _saveSynchronizedList(list);
     }
-    return _database.transaction(
+    return _transaction(
       () => _writeRecord(
         homeId: list.homeId,
         entityType: _shoppingListType,
@@ -1989,7 +2020,7 @@ final class DriftHouseholdRepository
       'resultQuantity': feedback.resultQuantity?.value,
       'reason': feedback.reason,
     };
-    await _database.transaction(() async {
+    await _transaction(() async {
       await _writeProjection(
         homeId: feedback.homeId,
         entityType: _shoppingFeedbackType,
@@ -2054,7 +2085,7 @@ final class DriftHouseholdRepository
         'Suggestion feedback is not published by sync protocol v2.',
       );
     }
-    return _database.transaction(
+    return _transaction(
       () => _writeRecord(
         homeId: feedback.homeId,
         entityType: _feedbackType,
@@ -2736,7 +2767,7 @@ final class DriftHouseholdRepository
     final delta = intent.observedQuantity - intent.projectedQuantity;
     if (delta.abs() <= 0.00000001) return;
     final at = intent.createdAt.toUtc();
-    await _database.transaction(() async {
+    await _transaction(() async {
       final homeProduct = await _record(
         homeId: intent.homeId,
         entityType: _homeProductType,
@@ -2795,7 +2826,7 @@ final class DriftHouseholdRepository
     _requireUuid(session.id, 'count session');
     final at = _clock().toUtc();
     var changed = false;
-    await _database.transaction(() async {
+    await _transaction(() async {
       final existing = await _record(
         homeId: session.homeId,
         entityType: _serverCountSessionType,
@@ -3086,7 +3117,7 @@ final class DriftHouseholdRepository
     }
     final at = _clock().toUtc();
     var changed = false;
-    await _database.transaction(() async {
+    await _transaction(() async {
       final existing = await _record(
         homeId: list.homeId,
         entityType: _serverShoppingListType,
@@ -3574,7 +3605,7 @@ final class DriftHouseholdRepository
       unresolvedRecentPurchaseRows: unresolvedRecentPurchaseRows,
     );
 
-    await _database.transaction(() async {
+    await _transaction(() async {
       for (final item in importedItems.values) {
         await _writeRecord(
           homeId: homeId,
@@ -4023,36 +4054,23 @@ final class DriftHouseholdRepository
     if (deviceId == null) {
       throw StateError('Synchronized mutation has no device identity.');
     }
-    final latestQuery = _database.select(_database.clientOperations)
-      ..where(
-        (row) => row.homeId.equals(homeId) & row.deviceId.equals(deviceId),
-      )
-      ..orderBy(<OrderingTerm Function(ClientOperations)>[
-        (row) => OrderingTerm.desc(row.clientTimestamp),
-        (row) => OrderingTerm.desc(row.operationId),
-      ])
-      ..limit(1);
-    final latest = await latestQuery.getSingleOrNull();
-    var enqueueAt = at.toUtc();
-    if (latest != null && !enqueueAt.isAfter(latest.clientTimestamp)) {
-      // Drift's portable SQLite date-time encoding is second-granular on all
-      // supported targets, so use a full second as the durable tie-breaker.
-      enqueueAt = latest.clientTimestamp.add(const Duration(seconds: 1));
-    }
+    _requireCurrentWriter();
+    final sequence = await _database.allocateOperationSequence();
     await _database
         .into(_database.clientOperations)
         .insert(
           ClientOperationsCompanion.insert(
             operationId: operationId,
+            originatingAccountId: Value(_originatingAccountId),
+            enqueueSequence: Value(sequence),
             deviceId: deviceId,
             homeId: homeId,
             entityType: entityType,
             entityId: entityId,
             operationType: commandType,
             baseRevision: Value<int?>(baseRevision),
-            // This timestamp is also the durable dependency order. UUIDv4 values
-            // are intentionally random and must never decide parent/child order.
-            clientTimestamp: enqueueAt,
+            // Wall-clock metadata never decides dependency ordering.
+            clientTimestamp: at.toUtc(),
             payloadSchemaVersion: const Value<int>(1),
             payload: jsonEncode(payload),
             state: ClientOperationState.pending.storageValue,

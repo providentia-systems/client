@@ -210,3 +210,8 @@ final class RetryPolicy {
     return hash;
   }
 }
+
+/// Local provenance is checked before receipt lookup as well as command push.
+abstract interface class SyncOperationBindingValidator {
+  void validateOperationBinding(PendingClientOperation operation);
+}
