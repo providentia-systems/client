@@ -28,7 +28,7 @@ void main() {
     () async {
       await local.commitLocalMutation(_mutation());
       final remote = _FakeGateway(
-        pushHandler: (_, __) async =>
+        pushHandler: (_, _) async =>
             throw StateError('A mismatched binding must never be dispatched.'),
       );
       final coordinator = SyncCoordinator(
