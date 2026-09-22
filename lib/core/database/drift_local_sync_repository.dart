@@ -882,20 +882,22 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
   Future<void> requeueRetryableOperations({
     required String homeId,
     required DateTime now,
-  }) async {
-    await (_database.update(_database.clientOperations)..where(
-          (row) =>
-              row.homeId.equals(homeId) &
-              row.state.equals(ClientOperationState.retryWait.storageValue) &
-              (row.nextAttemptAt.isNull() |
-                  row.nextAttemptAt.isSmallerOrEqualValue(now.toUtc())),
-        ))
-        .write(
-          ClientOperationsCompanion(
-            state: Value<String>(ClientOperationState.pending.storageValue),
-            nextAttemptAt: const Value<DateTime?>(null),
-          ),
-        );
+  }) {
+    return _transaction(() async {
+      await (_database.update(_database.clientOperations)..where(
+            (row) =>
+                row.homeId.equals(homeId) &
+                row.state.equals(ClientOperationState.retryWait.storageValue) &
+                (row.nextAttemptAt.isNull() |
+                    row.nextAttemptAt.isSmallerOrEqualValue(now.toUtc())),
+          ))
+          .write(
+            ClientOperationsCompanion(
+              state: Value<String>(ClientOperationState.pending.storageValue),
+              nextAttemptAt: const Value<DateTime?>(null),
+            ),
+          );
+    });
   }
 
   @override
@@ -903,20 +905,22 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
     required String homeId,
     required String operationId,
     required DateTime now,
-  }) async {
-    await (_database.update(_database.clientOperations)..where(
-          (row) =>
-              row.homeId.equals(homeId) &
-              row.operationId.equals(operationId) &
-              row.state.equals(ClientOperationState.retryWait.storageValue),
-        ))
-        .write(
-          ClientOperationsCompanion(
-            state: Value<String>(ClientOperationState.pending.storageValue),
-            nextAttemptAt: Value<DateTime>(now.toUtc()),
-            lastSafeError: const Value<String?>(null),
-          ),
-        );
+  }) {
+    return _transaction(() async {
+      await (_database.update(_database.clientOperations)..where(
+            (row) =>
+                row.homeId.equals(homeId) &
+                row.operationId.equals(operationId) &
+                row.state.equals(ClientOperationState.retryWait.storageValue),
+          ))
+          .write(
+            ClientOperationsCompanion(
+              state: Value<String>(ClientOperationState.pending.storageValue),
+              nextAttemptAt: Value<DateTime>(now.toUtc()),
+              lastSafeError: const Value<String?>(null),
+            ),
+          );
+    });
   }
 
   @override
@@ -1253,6 +1257,11 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
         operation.state != ClientOperationState.blockedConflict.storageValue) {
       throw const SyncConflictResolutionException(
         'The blocked local change is no longer available for review.',
+      );
+    }
+    if (_accountId != null && operation.originatingAccountId != _accountId) {
+      throw const SyncConflictResolutionException(
+        'The original account binding is not verified. Review recovery before discarding or replacing saved intent.',
       );
     }
     return (conflict: conflict, operation: operation);
