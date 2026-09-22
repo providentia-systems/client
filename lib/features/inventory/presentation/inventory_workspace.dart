@@ -700,11 +700,12 @@ class _InventoryQuantityDialogState extends State<_InventoryQuantityDialog> {
                   ),
               ],
               onChanged: (value) {
-                if (value != null)
+                if (value != null) {
                   setState(() {
                     _reason = value;
                     _error = null;
                   });
+                }
               },
             ),
             if (_reason == 'Other') ...[

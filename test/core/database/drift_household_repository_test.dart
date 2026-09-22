@@ -735,6 +735,8 @@ void main() {
         'privateName': 'Family spice mix',
         'originalPackText': '250 g jar',
         'homeCategoryId': _homeCategoryId,
+        'globalCategoryId': null,
+        'unit': 'units',
         'status': 'active',
         'id': _createdProductId,
         'revision': 1,
@@ -758,8 +760,10 @@ void main() {
         'privateName': 'Family spice mix',
         'originalPackText': '250 g jar',
         'homeCategoryId': _homeCategoryId,
+        'globalCategoryId': null,
+        'unit': 'units',
       });
-      expect(command.keys, hasLength(5));
+      expect(command.keys, hasLength(7));
       expect(command.containsKey('quantity'), isFalse);
       expect(command.containsKey('homeId'), isFalse);
       final item = await repository.watchItems(homeId: _homeId).first;
