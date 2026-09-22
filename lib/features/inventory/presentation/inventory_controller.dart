@@ -102,6 +102,11 @@ final class InventoryController extends ChangeNotifier {
   List<InventoryItem> get archivedProducts => _archivedProducts;
   List<HomeInventoryCategory> _categories = const [];
   List<HomeInventoryCategory> get homeCategories => _categories;
+  StreamSubscription<List<PublishedInventoryCategory>>?
+  _publishedCategoriesSubscription;
+  List<PublishedInventoryCategory> _publishedCategories = const [];
+  List<PublishedInventoryCategory> get publishedCategories =>
+      _publishedCategories;
   InventoryMetadataRepository? get _metadata =>
       _repository is InventoryMetadataRepository
       ? _repository as InventoryMetadataRepository
@@ -127,6 +132,8 @@ final class InventoryController extends ChangeNotifier {
     required String name,
     String? pack,
     String? categoryId,
+    String? globalCategoryId,
+    String? unit,
     bool archived = false,
   }) => _metadataMutation(() async {
     if (item.homeId != homeId) {
@@ -136,9 +143,16 @@ final class InventoryController extends ChangeNotifier {
       homeId: homeId,
       productId: item.id,
       expectedRevision: item.revision,
-      privateName: name,
-      originalPackText: pack,
+      privateName: item.productId != null && name.trim() == item.catalogName
+          ? null
+          : name,
+      originalPackText:
+          item.productId != null && pack?.trim() == item.catalogPackText
+          ? null
+          : pack,
       homeCategoryId: categoryId,
+      globalCategoryId: globalCategoryId,
+      unit: unit ?? item.unit,
       archived: archived,
     );
   });
@@ -232,6 +246,17 @@ final class InventoryController extends ChangeNotifier {
       onError: (Object _) =>
           _setSafeError('Archived products could not be loaded.'),
     );
+    _publishedCategoriesSubscription = _metadata
+        ?.watchPublishedCategories(homeId)
+        .listen(
+          (rows) {
+            _publishedCategories = List.unmodifiable(rows);
+            notifyListeners();
+          },
+          onError: (Object _) => _setSafeError(
+            'Global categories could not be loaded. Retry synchronization.',
+          ),
+        );
     _categoriesSubscription = _metadata?.watchHomeCategories(homeId).listen((
       rows,
     ) {
@@ -334,6 +359,8 @@ final class InventoryController extends ChangeNotifier {
     required String privateName,
     String? originalPackText,
     String? homeCategoryId,
+    String? globalCategoryId,
+    String unit = 'units',
   }) async {
     final repository = _productCreationRepository;
     if (repository == null || !repository.supportsPrivateHomeProductCreation) {
@@ -361,6 +388,8 @@ final class InventoryController extends ChangeNotifier {
           privateName: privateName,
           originalPackText: originalPackText,
           homeCategoryId: homeCategoryId,
+          globalCategoryId: globalCategoryId,
+          unit: unit,
         ),
       );
       _setState(
@@ -661,6 +690,7 @@ final class InventoryController extends ChangeNotifier {
     _locationsSubscription?.cancel();
     unawaited(_archivedSubscription?.cancel());
     unawaited(_categoriesSubscription?.cancel());
+    unawaited(_publishedCategoriesSubscription?.cancel());
     unawaited(_itemsSubscription?.cancel());
     unawaited(_sessionSubscription?.cancel());
     super.dispose();

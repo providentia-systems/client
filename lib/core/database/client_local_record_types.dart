@@ -2,6 +2,9 @@
 /// from, or removed by, a synchronization bootstrap.
 abstract final class ClientLocalRecordTypes {
   static const String aiReviewResume = 'client.ai-review.resume-v1';
+  static const String publishedCategoryCache =
+      'client.catalog.published-category-v1';
+  static const String catalogProductBase = 'client.catalog.product-base-v1';
   static const String itemMasterCache = 'inventory-item-master-product';
   static const String shoppingSuggestionCache = 'shopping-suggestion-cache-v1';
   static const String shoppingSuggestionLineLink =
@@ -14,6 +17,8 @@ abstract final class ClientLocalRecordTypes {
   static const Set<String> synchronizationProtected = <String>{
     aiReviewResume,
     itemMasterCache,
+    publishedCategoryCache,
+    catalogProductBase,
     shoppingSuggestionCache,
     shoppingSuggestionLineLink,
     strictLocalAiConfiguration,

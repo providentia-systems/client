@@ -140,6 +140,10 @@ final _product = InventoryItem(
 );
 
 class _Repository implements InventoryRepository, InventoryMetadataRepository {
+  @override
+  Stream<List<PublishedInventoryCategory>> watchPublishedCategories(
+    String homeId,
+  ) => Stream.value([]);
   final edits = <Map<String, Object?>>[];
   final categoryNames = <String>[];
   @override
@@ -179,9 +183,11 @@ class _Repository implements InventoryRepository, InventoryMetadataRepository {
   Future<void> updateHomeProduct({
     required String homeId,
     required String productId,
-    required String privateName,
+    required String? privateName,
     String? originalPackText,
     String? homeCategoryId,
+    String? globalCategoryId,
+    String? unit,
     required bool archived,
     int? expectedRevision,
   }) async {

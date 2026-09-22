@@ -354,8 +354,16 @@ void main() {
           find.byKey(const ValueKey<String>('inventory-quantity-input')),
           '3.5',
         );
+        final reason = find.byKey(
+          const ValueKey<String>('inventory-adjustment-reason'),
+        );
+        await tester.ensureVisible(reason);
+        await tester.tap(reason);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Other').last);
+        await tester.pumpAndSettle();
         await tester.enterText(
-          find.byKey(const ValueKey<String>('inventory-adjustment-reason')),
+          find.byKey(const Key('inventory-adjustment-explanation')),
           'Cycle count correction',
         );
         await tester.tap(find.widgetWithText(FilledButton, 'Save'));

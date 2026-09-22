@@ -38,7 +38,7 @@ void main() {
     final synchronization = ItemMasterRefreshingSynchronization(
       delegate: delegate,
       source: source,
-      replaceCache: ({required homeId, required items}) async {
+      replaceCache: ({required homeId, required items, categories}) async {
         expect(homeId, _homeId);
         expect(items, same(source.items));
         replacements++;
@@ -60,7 +60,7 @@ void main() {
         const SyncRunOutcome(status: SyncRunStatus.offline),
       ),
       source: offlineSource,
-      replaceCache: ({required homeId, required items}) async {
+      replaceCache: ({required homeId, required items, categories}) async {
         replacements++;
       },
       homeId: _homeId,
@@ -73,7 +73,7 @@ void main() {
         const SyncRunOutcome(status: SyncRunStatus.completed),
       ),
       source: _Source.failure(const FormatException('partial page')),
-      replaceCache: ({required homeId, required items}) async {
+      replaceCache: ({required homeId, required items, categories}) async {
         replacements++;
       },
       homeId: _homeId,
@@ -96,7 +96,7 @@ void main() {
             HomeItemMasterSourceFailure.authorizationDenied,
           ),
         ),
-        replaceCache: ({required homeId, required items}) async {},
+        replaceCache: ({required homeId, required items, categories}) async {},
         homeId: _homeId,
       );
 

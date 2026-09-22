@@ -137,8 +137,12 @@ final class DriftHouseholdRepository
         'stock-59': 'review-steel-wool-scrubbies-pack-size-pending-292',
       };
 
+  static const String _catalogBaseType =
+      ClientLocalRecordTypes.catalogProductBase;
   static const String _homeProductType = 'inventory-home-product';
   static const String _homeCategoryType = 'inventory-home-category';
+  static const String _publishedCategoryType =
+      ClientLocalRecordTypes.publishedCategoryCache;
   static const String _balanceType = 'inventory-balance';
   static const String _serverCountSessionType = 'inventory-count-session';
   static const String _serverCountLineType = 'inventory-count-line';
@@ -196,6 +200,8 @@ final class DriftHouseholdRepository
         _inventoryItemType,
         _catalogItemType,
         _homeCategoryType,
+        _publishedCategoryType,
+        _catalogBaseType,
         _homeProductType,
         _balanceType,
       },
@@ -212,6 +218,8 @@ final class DriftHouseholdRepository
         entityTypes: const {
           _catalogItemType,
           _homeCategoryType,
+          _publishedCategoryType,
+          _catalogBaseType,
           _homeProductType,
           _balanceType,
         },
@@ -230,6 +238,27 @@ final class DriftHouseholdRepository
             name: _requiredString(data, 'name'),
             revision: row.revision,
             archived: data['status'] == 'archived',
+          );
+        }).toList()..sort((a, b) => a.name.compareTo(b.name)),
+      );
+
+  @override
+  Stream<List<PublishedInventoryCategory>> watchPublishedCategories(
+    String homeId,
+  ) =>
+      _watchRecordTypes(
+        homeId: homeId,
+        entityTypes: const {_publishedCategoryType},
+      ).map(
+        (rows) => rows.map((row) {
+          final data = _decodeObject(row.payload, 'published category');
+          if (data['homeId'] != homeId || row.homeId != homeId) {
+            throw StateError('Cross-home category cache was rejected.');
+          }
+          return PublishedInventoryCategory(
+            id: row.entityId,
+            name: _requiredString(data, 'name'),
+            revision: data['revision'] as int,
           );
         }).toList()..sort((a, b) => a.name.compareTo(b.name)),
       );
@@ -632,9 +661,11 @@ final class DriftHouseholdRepository
   Future<void> updateHomeProduct({
     required String homeId,
     required String productId,
-    required String privateName,
+    required String? privateName,
     String? originalPackText,
     String? homeCategoryId,
+    String? globalCategoryId,
+    String? unit,
     required bool archived,
     int? expectedRevision,
   }) async {
@@ -643,13 +674,17 @@ final class DriftHouseholdRepository
     }
     final draft = PrivateHomeProductDraft(
       homeId: homeId,
-      privateName: privateName,
+      privateName: privateName ?? 'Linked product',
       originalPackText: originalPackText,
       homeCategoryId: homeCategoryId,
+      globalCategoryId: globalCategoryId,
+      unit: unit ?? 'units',
     );
     _requireHomeUuid(homeId);
     _requireUuid(productId, 'home product');
     if (homeCategoryId != null) _requireUuid(homeCategoryId, 'home category');
+    if (globalCategoryId != null)
+      _requireUuid(globalCategoryId, 'global category');
     final at = _clock().toUtc();
     await _transaction(() async {
       final previous = await _record(
@@ -662,7 +697,9 @@ final class DriftHouseholdRepository
         throw StateError('The product changed. Reload before saving.');
       }
       final data = _validatedProjection(previous, homeId);
-      final catalogBacked = data['productId'] != null;
+      if (data['productId'] == null && privateName == null) {
+        throw ArgumentError('A private product must retain a name.');
+      }
       if (archived) {
         final balance = await _record(
           homeId: homeId,
@@ -681,10 +718,11 @@ final class DriftHouseholdRepository
         }
       }
       final payload = <String, Object?>{
-        if (!catalogBacked) 'privateName': draft.privateName.trim(),
-        if (!catalogBacked)
-          'originalPackText': _trimToNull(draft.originalPackText),
+        'privateName': privateName == null ? null : draft.privateName.trim(),
+        'originalPackText': _trimToNull(draft.originalPackText),
         'homeCategoryId': draft.homeCategoryId,
+        'globalCategoryId': draft.globalCategoryId,
+        if (unit != null) 'unit': unit,
         'status': archived ? 'archived' : 'active',
       };
       await _writeProjection(
@@ -721,50 +759,54 @@ final class DriftHouseholdRepository
     if (draft.homeCategoryId != null) {
       _requireUuid(draft.homeCategoryId!, 'home category');
     }
+    if (draft.globalCategoryId != null)
+      _requireUuid(draft.globalCategoryId!, 'global category');
     final privateName = draft.privateName.trim();
     final originalPackText = _trimToNull(draft.originalPackText);
     final at = _clock().toUtc();
-    final result = await _database.transaction<InventoryProductCreationResult>(
-      () async {
-        final homeProductId = _nextUuid('private home product');
-        final representation = <String, Object?>{
+    final result = await _transaction<InventoryProductCreationResult>(() async {
+      final homeProductId = _nextUuid('private home product');
+      final representation = <String, Object?>{
+        'productId': null,
+        'packId': null,
+        'privateName': privateName,
+        'originalPackText': originalPackText,
+        'homeCategoryId': draft.homeCategoryId,
+        'globalCategoryId': draft.globalCategoryId,
+        'unit': draft.unit,
+        'status': 'active',
+      };
+      await _writeProjection(
+        homeId: draft.homeId,
+        entityType: _homeProductType,
+        entityId: homeProductId,
+        revision: 1,
+        representation: representation,
+        at: at,
+      );
+      await _insertGeneratedCommand(
+        homeId: draft.homeId,
+        entityType: _homeProductType,
+        entityId: homeProductId,
+        commandType: 'inventory.home-product.create',
+        baseRevision: null,
+        payload: <String, Object?>{
           'productId': null,
           'packId': null,
           'privateName': privateName,
           'originalPackText': originalPackText,
           'homeCategoryId': draft.homeCategoryId,
-          'status': 'active',
-        };
-        await _writeProjection(
-          homeId: draft.homeId,
-          entityType: _homeProductType,
-          entityId: homeProductId,
-          revision: 1,
-          representation: representation,
-          at: at,
-        );
-        await _insertGeneratedCommand(
-          homeId: draft.homeId,
-          entityType: _homeProductType,
-          entityId: homeProductId,
-          commandType: 'inventory.home-product.create',
-          baseRevision: null,
-          payload: <String, Object?>{
-            'productId': null,
-            'packId': null,
-            'privateName': privateName,
-            'originalPackText': originalPackText,
-            'homeCategoryId': draft.homeCategoryId,
-          },
-          at: at,
-        );
-        return InventoryProductCreationResult(
-          homeProductId: homeProductId,
-          revision: 1,
-          disposition: InventoryProductCreationDisposition.queued,
-        );
-      },
-    );
+          'globalCategoryId': draft.globalCategoryId,
+          'unit': draft.unit,
+        },
+        at: at,
+      );
+      return InventoryProductCreationResult(
+        homeProductId: homeProductId,
+        revision: 1,
+        disposition: InventoryProductCreationDisposition.queued,
+      );
+    });
     _triggerForegroundSync();
     return result;
   }
@@ -842,6 +884,8 @@ final class DriftHouseholdRepository
           'brandName': cachedItem.brand,
           'aliases': cachedItem.aliases,
           'homeCategoryId': null,
+          'globalCategoryId': null,
+          'unit': 'units',
           'status': 'active',
         };
         await _writeProjection(
@@ -883,11 +927,13 @@ final class DriftHouseholdRepository
   Future<void> replaceCatalogItemMaster({
     required String homeId,
     required List<InventoryItem> items,
+    List<PublishedInventoryCategory>? categories,
   }) async {
     _requireHomeUuid(homeId);
     final identities = <String>{};
     final packs = <String>{};
     final publicItems = <InventoryItem>[];
+    final productBases = <String, Map<String, Object?>>{};
     for (final item in items) {
       _requireUuid(item.id, 'item-master item');
       if (item.productId != null) {
@@ -924,31 +970,64 @@ final class DriftHouseholdRepository
           !shapeIsSafe ||
           (hasPublicIdentity && !packs.add(item.packId!)) ||
           (hasPublicIdentity &&
-              item.categorySource == InventoryCategorySource.home) ||
+              item.categorySource == InventoryCategorySource.home &&
+              (item.catalogName == null || item.catalogCategoryId == null)) ||
           (hasPrivateIdentity &&
-              item.categorySource == InventoryCategorySource.global)) {
+              item.categorySource == InventoryCategorySource.global &&
+              item.globalCategoryId != item.categoryId)) {
         throw const FormatException(
           'The item-master snapshot is not safe to cache.',
         );
+      }
+      if (item.productId != null && item.catalogName != null) {
+        if (item.catalogCategoryId != null)
+          _requireUuid(item.catalogCategoryId!, 'catalog category');
+        final base = <String, Object?>{
+          'homeId': homeId,
+          'name': item.catalogName,
+          'categoryId': item.catalogCategoryId,
+          'categoryName': item.catalogCategoryName,
+        };
+        final previous = productBases[item.productId];
+        if (previous != null && jsonEncode(previous) != jsonEncode(base)) {
+          throw const FormatException(
+            'Catalog base metadata changed during pagination.',
+          );
+        }
+        productBases[item.productId!] = base;
       }
       if (!hasPublicIdentity) continue;
       publicItems.add(
         InventoryItem(
           id: item.packId!,
           homeId: homeId,
-          canonicalName: item.canonicalName,
-          packSize: item.packSize,
-          category: item.category,
+          canonicalName: item.catalogName ?? item.canonicalName,
+          packSize: item.catalogName == null
+              ? item.packSize
+              : item.catalogPackText == null || item.catalogPackText!.isEmpty
+              ? 'Unspecified pack'
+              : item.catalogPackText!,
+          category: item.catalogCategoryName ?? item.category,
           brand: item.brand,
-          unit: item.unit,
+          unit: 'units',
           aliases: item.aliases,
           productId: item.productId,
           packId: item.packId,
-          categoryId: item.categoryId,
-          homeCategoryId: item.homeCategoryId,
-          categorySource: item.categorySource,
+          categoryId: item.catalogCategoryId ?? item.categoryId,
+          categorySource: (item.catalogCategoryId ?? item.categoryId) == null
+              ? null
+              : InventoryCategorySource.global,
         ),
       );
+    }
+    final categoryIds = <String>{};
+    for (final category in categories ?? const <PublishedInventoryCategory>[]) {
+      _requireUuid(category.id, 'global category');
+      if (!categoryIds.add(category.id)) {
+        throw const FormatException(
+          'The published category snapshot contains duplicates.',
+        );
+      }
     }
     await _transaction(() async {
       await (_database.delete(_database.localRecords)..where(
@@ -964,6 +1043,40 @@ final class DriftHouseholdRepository
           entityId: item.id,
           payload: _encodeInventoryItem(item),
         );
+      }
+      await (_database.delete(_database.localRecords)..where(
+            (row) =>
+                row.homeId.equals(homeId) &
+                row.entityType.equals(_catalogBaseType),
+          ))
+          .go();
+      for (final entry in productBases.entries) {
+        await _writeRecord(
+          homeId: homeId,
+          entityType: _catalogBaseType,
+          entityId: entry.key,
+          payload: entry.value,
+        );
+      }
+      if (categories != null) {
+        await (_database.delete(_database.localRecords)..where(
+              (row) =>
+                  row.homeId.equals(homeId) &
+                  row.entityType.equals(_publishedCategoryType),
+            ))
+            .go();
+        for (final category in categories) {
+          await _writeRecord(
+            homeId: homeId,
+            entityType: _publishedCategoryType,
+            entityId: category.id,
+            payload: {
+              'homeId': homeId,
+              'name': category.name,
+              'revision': category.revision,
+            },
+          );
+        }
       }
     });
   }
@@ -2136,7 +2249,24 @@ final class DriftHouseholdRepository
   }) {
     final items = <String, InventoryItem>{};
     final catalogItems = <String, InventoryItem>{};
+    final productBases = <String, Map<String, Object?>>{};
+    for (final row in rows.where((row) => row.entityType == _catalogBaseType)) {
+      final base = _decodeObject(row.payload, 'catalog product base');
+      if (row.homeId != homeId || base['homeId'] != homeId) {
+        throw StateError('Cross-home catalog base metadata was rejected.');
+      }
+      productBases[row.entityId] = base;
+    }
     final balances = <String, double>{};
+    final globalCategories = <String, String>{
+      for (final row in rows.where(
+        (row) => row.entityType == _publishedCategoryType,
+      ))
+        row.entityId: _requiredString(
+          _decodeObject(row.payload, 'published category'),
+          'name',
+        ),
+    };
     final homeCategories = <String, String>{};
 
     for (final row in rows.where(
@@ -2245,23 +2375,47 @@ final class DriftHouseholdRepository
         }
         items.remove(packId);
       }
+      final selectedGlobalCategoryId = _nullableUuid(
+        payload['globalCategoryId'],
+        'globalCategoryId',
+      );
+      if (homeCategoryId != null && selectedGlobalCategoryId != null) {
+        throw const FormatException(
+          'A product cannot select both category scopes.',
+        );
+      }
+      final base = productBases[productId];
+      final inheritedCategoryId =
+          catalogItem?.categoryId ??
+          _nullableUuid(
+            base?['categoryId'] ?? payload['categoryId'],
+            'categoryId',
+          );
+      final inheritedCategoryName =
+          catalogItem?.category ??
+          _nullableString(base?['categoryName'] ?? payload['categoryName']);
       final usesHomeCategory = homeCategoryId != null;
       final category = usesHomeCategory
           ? homeCategories[homeCategoryId] ?? 'Uncategorized'
-          : catalogItem?.category ?? 'Uncategorized';
+          : selectedGlobalCategoryId != null
+          ? globalCategories[selectedGlobalCategoryId] ??
+                'Unavailable global category'
+          : inheritedCategoryName ?? 'Uncategorized';
       items[row.entityId] = InventoryItem(
         id: row.entityId,
         homeId: homeId,
         canonicalName:
             privateName ??
-            productName ??
             catalogItem?.canonicalName ??
+            _nullableString(base?['name']) ??
+            productName ??
             (productId == null
                 ? 'Private item ${row.entityId.substring(0, 8)}'
                 : 'Product ${productId.substring(0, 8)}'),
         packSize:
             originalPackText ?? catalogItem?.packSize ?? 'Unspecified pack',
         category: category,
+        unit: _optionalString(payload['unit'], fallback: 'units'),
         brand: catalogItem?.brand ?? _optionalString(payload['brandName']),
         aliases:
             catalogItem?.aliases ??
@@ -2272,11 +2426,23 @@ final class DriftHouseholdRepository
         isHomeProduct: true,
         productId: productId,
         packId: packId,
-        categoryId: usesHomeCategory ? null : catalogItem?.categoryId,
+        categoryId: usesHomeCategory
+            ? null
+            : selectedGlobalCategoryId ?? inheritedCategoryId,
+        globalCategoryId: selectedGlobalCategoryId,
+        catalogName:
+            catalogItem?.canonicalName ??
+            _nullableString(base?['name']) ??
+            productName,
+        catalogPackText: catalogItem?.packSize,
+        catalogCategoryId: inheritedCategoryId,
+        catalogCategoryName: inheritedCategoryName,
         homeCategoryId: homeCategoryId,
         categorySource: usesHomeCategory
             ? InventoryCategorySource.home
-            : catalogItem?.categorySource,
+            : (selectedGlobalCategoryId ?? inheritedCategoryId) == null
+            ? null
+            : InventoryCategorySource.global,
         revision: row.revision,
       );
     }
@@ -4162,6 +4328,14 @@ Map<String, Object?> _encodeInventoryItem(
   if (item.packId != null) 'packId': item.packId,
   if (item.categoryId != null) 'categoryId': item.categoryId,
   if (item.homeCategoryId != null) 'homeCategoryId': item.homeCategoryId,
+  if (item.globalCategoryId != null) 'globalCategoryId': item.globalCategoryId,
+  if (item.catalogName != null) 'catalogName': item.catalogName,
+  if (item.catalogPackText != null) 'catalogPackText': item.catalogPackText,
+  if (item.catalogCategoryId != null)
+    'catalogCategoryId': item.catalogCategoryId,
+  if (item.catalogCategoryName != null)
+    'catalogCategoryName': item.catalogCategoryName,
+
   if (item.categorySource != null) 'categorySource': item.categorySource!.name,
 };
 
@@ -4206,6 +4380,11 @@ InventoryItem _decodeInventoryItem(String encoded) {
     categoryId: categoryId,
     homeCategoryId: homeCategoryId,
     categorySource: categorySource,
+    globalCategoryId: _nullableString(json['globalCategoryId']),
+    catalogName: _nullableString(json['catalogName']),
+    catalogPackText: _nullableString(json['catalogPackText']),
+    catalogCategoryId: _nullableString(json['catalogCategoryId']),
+    catalogCategoryName: _nullableString(json['catalogCategoryName']),
   );
 }
 
