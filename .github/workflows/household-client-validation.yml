@@ -1,0 +1,85 @@
+name: Household client repair workspace
+
+on:
+  push:
+    branches: [fix/client-household-workflows]
+    paths: [.github/workflows/household-client-validation.yml, 'tool/client-household-*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: household-client-repair
+  cancel-in-progress: false
+
+jobs:
+  repair-and-check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: client
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: fix/client-household-workflows
+          path: client
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: providentia-systems/backend
+          ref: 702b47ad7fce5a5d2618dfc618ca1f4cc6fa2d6b
+          path: paired-backend
+          persist-credentials: false
+      - name: Apply reviewed application changes and regenerate contract
+        run: |
+          mkdir -p /tmp/household-client-evidence
+          python3 tool/client-household-apply.py 2>&1 | tee /tmp/household-client-evidence/apply.log
+      - name: Install the existing pinned Flutter toolchain
+        run: |
+          tool/install_flutter_linux.sh "$RUNNER_TEMP/providentia-sdk"
+          echo "$RUNNER_TEMP/providentia-sdk/flutter/bin" >> "$GITHUB_PATH"
+      - name: Resolve only the existing lockfile
+        run: flutter pub get --enforce-lockfile
+      - name: Format and commit reviewable application source
+        run: |
+          dart format lib test contracts/generated/providentia_api_client/lib 2>&1 | tee /tmp/household-client-evidence/format.log
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- lib test contracts tool/generate_api_client.mjs tool/materialize-openapi-contract.sh tool/verify_structure.mjs
+          if ! git diff --cached --quiet; then
+            git commit -m 'fix: complete household product editing, global categories and adjustment forms'
+            git push origin HEAD:fix/client-household-workflows
+          fi
+      - name: Verify source-only and contract gates
+        id: structure
+        run: |
+          node tool/verify_toolchain.mjs
+          bash tool/materialize-openapi-contract.sh
+          node tool/generate_api_client.mjs --check
+          node tool/verify_structure.mjs
+          node --test tool/*.test.mjs 2>&1 | tee /tmp/household-client-evidence/node-tests.log
+      - name: Strict Flutter analysis
+        id: analyze
+        if: always() && steps.structure.outcome != 'skipped'
+        run: flutter analyze --fatal-infos --fatal-warnings 2>&1 | tee /tmp/household-client-evidence/analyze.log
+      - name: Complete Flutter suite and unchanged coverage gate
+        if: always() && steps.analyze.outcome != 'skipped'
+        run: |
+          flutter test --coverage --reporter expanded 2>&1 | tee /tmp/household-client-evidence/tests.log
+          node tool/check_coverage.mjs coverage/lcov.info 80 2>&1 | tee /tmp/household-client-evidence/coverage.log
+      - name: Record exact source and evidence
+        if: always()
+        run: |
+          mkdir -p /tmp/household-client-evidence
+          git rev-parse HEAD > /tmp/household-client-evidence/commit.txt
+          git archive --format=tar HEAD > /tmp/household-client-evidence/client.tar
+          git diff > /tmp/household-client-evidence/uncommitted.patch
+          if test -f coverage/lcov.info; then cp coverage/lcov.info /tmp/household-client-evidence/; fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: household-client-source-evidence
+          path: /tmp/household-client-evidence/
+          retention-days: 2
