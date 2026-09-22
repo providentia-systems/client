@@ -164,7 +164,7 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
         throw AuthenticationSyncException(_safeProblem(error));
       }
       if (error.statusCode == 403 || error.statusCode == 404) {
-        throw AuthorizationSyncException(_safeProblem(error));
+        _throwDeniedRequest(error);
       }
       throw RetryableSyncException(_safeProblem(error));
     }
@@ -285,7 +285,9 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
           'Synchronization response identity did not match the request.',
         );
       }
-      final results = response.results.map(_pushResult).toList(growable: false);
+      final results = response.results
+          .map((result) => _pushResult(result, response.requestId))
+          .toList(growable: false);
       _validatePushResults(operationIds, results);
       return PushResponse(results: results);
     } on generated.ProvidentiaApiException catch (error) {
@@ -293,13 +295,23 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
         throw AuthenticationSyncException(_safeProblem(error));
       }
       if (error.statusCode == 403 || error.statusCode == 404) {
+        final code = _denialCode(error);
+        if (code == 'home_access_denied' || code == 'device_binding_mismatch') {
+          _throwDeniedRequest(error);
+        }
         return PushResponse(
           results: operations
               .map(
                 (operation) => PushOperationResult(
                   operationId: operation.operationId,
-                  kind: PushResultKind.authorizationFailure,
-                  safeMessage: _safeProblem(error),
+                  kind: code == 'permission_denied'
+                      ? PushResultKind.authorizationFailure
+                      : PushResultKind.validationError,
+                  code: code,
+                  requestId: error.problem.requestId,
+                  safeMessage: code == 'permission_denied'
+                      ? 'This command needs a permission review. Saved work has been kept.'
+                      : 'The server did not classify this denial. Check the API address and deployment; saved work has been kept.',
                 ),
               )
               .toList(growable: false),
@@ -448,7 +460,7 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
         throw AuthenticationSyncException(_safeProblem(error));
       }
       if (error.statusCode == 403 || error.statusCode == 404) {
-        throw AuthorizationSyncException(_safeProblem(error));
+        _throwDeniedRequest(error);
       }
       throw RetryableSyncException(_safeProblem(error));
     }
@@ -505,7 +517,7 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
         throw AuthenticationSyncException(_safeProblem(error));
       }
       if (error.statusCode == 403 || error.statusCode == 404) {
-        throw AuthorizationSyncException(_safeProblem(error));
+        _throwDeniedRequest(error);
       }
       if (error.statusCode == 410 &&
           error.problem.type.endsWith('/sync_resync_required')) {
@@ -515,7 +527,10 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
     }
   }
 
-  PushOperationResult _pushResult(generated.SyncOperationResult result) {
+  PushOperationResult _pushResult(
+    generated.SyncOperationResult result,
+    String requestId,
+  ) {
     return PushOperationResult(
       operationId: result.operationId,
       kind: switch (result.status) {
@@ -528,10 +543,14 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
           'Unknown synchronization result status ${result.status}.',
         ),
       },
-      acceptedRevision: result.revision,
+      acceptedRevision:
+          result.revision ?? _commandRevision(result.commandResult),
+      code: sanitizedSyncFailureCode(result.code),
+      requestId: requestId,
       changeCursor: result.changeCursor,
       safeMessage: result.detail,
-      remotePayload: result.representation ?? result.conflict,
+      remotePayload:
+          result.representation ?? result.conflict ?? result.commandResult,
     );
   }
 
@@ -611,6 +630,7 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
       acceptedRevision: (revision as int?) ?? (nestedRevision as int?),
       changeCursor: json['changeCursor'] as String?,
       safeMessage: json['detail'] as String?,
+      code: sanitizedSyncFailureCode(json['code'] as String?),
       remotePayload: representation ?? conflict ?? commandResult,
     );
   }
@@ -638,6 +658,47 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
         'Synchronization omitted operation results: ${missing.join(', ')}.',
       );
     }
+  }
+
+  int? _commandRevision(Map<String, Object?>? result) {
+    final revision = result?['revision'];
+    if (revision != null && (revision is! int || revision < 0)) {
+      throw const FormatException(
+        'Command result revision must be a non-negative integer.',
+      );
+    }
+    return revision as int?;
+  }
+
+  String _denialCode(generated.ProvidentiaApiException error) =>
+      switch (error.problem.type) {
+        'https://providentia.invalid/problems/sync_home_access_denied' =>
+          'home_access_denied',
+        'https://providentia.invalid/problems/sync_device_mismatch' =>
+          'device_binding_mismatch',
+        'https://providentia.invalid/problems/sync_permission_denied' =>
+          'permission_denied',
+        _ => 'unclassified_http_denial',
+      };
+
+  Never _throwDeniedRequest(generated.ProvidentiaApiException error) {
+    final code = _denialCode(error);
+    if (code == 'home_access_denied') {
+      throw const AuthorizationSyncException(
+        'Access to this home is no longer available.',
+      );
+    }
+    if (code == 'device_binding_mismatch') {
+      throw BindingSyncException(
+        'Saved work has a different device binding and needs recovery. It has not been reassigned.',
+        code: code,
+      );
+    }
+    // Old servers and wrong endpoints may return a generic 403/404. Neither
+    // establishes revoked membership or authorizes deletion of offline intent.
+    throw const RetryableSyncException(
+      'The server did not confirm home access. Check the API address, deployment and permissions; saved work has been kept.',
+    );
   }
 
   String _safeProblem(generated.ProvidentiaApiException error) {

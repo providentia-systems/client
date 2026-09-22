@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:providentia/core/database/app_database.dart';
 import 'package:providentia/core/database/drift_local_sync_repository.dart';
 import 'package:providentia/core/synchronization/sync_coordinator.dart';
+import 'package:providentia/core/synchronization/session_bound_sync_gateway.dart';
 import 'package:providentia/core/synchronization/sync_models.dart';
 import 'package:providentia/core/synchronization/sync_ports.dart';
 
@@ -21,6 +22,75 @@ void main() {
   });
 
   tearDown(() => database.close());
+
+  test(
+    'binding mismatch preserves intent, permits downloads and reports blocked uploads',
+    () async {
+      await local.commitLocalMutation(_mutation());
+      final remote = _FakeGateway();
+      final coordinator = SyncCoordinator(
+        local: local,
+        remote: SessionBoundSyncGateway(
+          delegate: remote,
+          homeId: 'home-1',
+          deviceId: 'different-session-device',
+          isCurrent: () => true,
+        ),
+        connectivity: const _OnlineProbe(),
+        clock: () => now,
+      );
+      final first = await coordinator.synchronize('home-1');
+      expect(first.status, SyncRunStatus.uploadsBlocked);
+      expect(first.completed, isFalse);
+      expect(first.pullCompleted, isTrue);
+      expect(first.remainingUploads, 1);
+      final saved = await database
+          .select(database.clientOperations)
+          .getSingle();
+      expect(saved.deviceId, 'device-1');
+      expect(saved.operationId, 'operation-1');
+      expect(
+        saved.state,
+        ClientOperationState.blockedAuthorization.storageValue,
+      );
+      expect(remote.pushedOperationIds, isEmpty);
+      expect(remote.statusOperationIds, isEmpty);
+      // A later successful pull cannot hide the already blocked predecessor.
+      final second = await coordinator.synchronize('home-1');
+      expect(second.status, SyncRunStatus.uploadsBlocked);
+      expect(second.pullCompleted, isTrue);
+      expect(remote.pushedOperationIds, isEmpty);
+    },
+  );
+
+  test(
+    'a terminal validation result is not a successful synchronization',
+    () async {
+      await local.commitLocalMutation(_mutation());
+      final coordinator = SyncCoordinator(
+        local: local,
+        remote: _FakeGateway(
+          pushHandler: (_, operations) async => PushResponse(
+            results: [
+              PushOperationResult(
+                operationId: operations.single.operationId,
+                kind: PushResultKind.validationError,
+                code: 'resource_unavailable',
+                safeMessage: 'A referenced record needs review.',
+              ),
+            ],
+          ),
+        ),
+        connectivity: const _OnlineProbe(),
+        clock: () => now,
+      );
+      final result = await coordinator.synchronize('home-1');
+      expect(result.status, SyncRunStatus.uploadsBlocked);
+      expect(result.pullCompleted, isTrue);
+      expect(result.remainingUploads, 1);
+      expect(result.safeMessage, contains('referenced record'));
+    },
+  );
 
   test('lost response applies the immutable status receipt once', () async {
     await local.commitLocalMutation(_mutation());

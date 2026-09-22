@@ -696,14 +696,19 @@ final class SyncOperationResult {
     this.revision,
     this.changeCursor,
     this.detail,
+    this.code,
     Map<String, Object?>? representation,
     Map<String, Object?>? conflict,
+    Map<String, Object?>? commandResult,
   }) : representation = representation == null
            ? null
            : Map<String, Object?>.unmodifiable(representation),
        conflict = conflict == null
            ? null
-           : Map<String, Object?>.unmodifiable(conflict);
+           : Map<String, Object?>.unmodifiable(conflict),
+       commandResult = commandResult == null
+           ? null
+           : Map<String, Object?>.unmodifiable(commandResult);
 
   factory SyncOperationResult.fromJson(Map<String, Object?> json) {
     return SyncOperationResult(
@@ -712,6 +717,8 @@ final class SyncOperationResult {
       revision: _optionalInteger(json, 'revision'),
       changeCursor: _optionalString(json, 'changeCursor'),
       detail: _optionalString(json, 'detail'),
+      code: _optionalString(json, 'code'),
+      commandResult: _optionalObject(json, 'result'),
       representation: _optionalObject(json, 'representation'),
       conflict: _optionalObject(json, 'conflict'),
     );
@@ -722,6 +729,8 @@ final class SyncOperationResult {
   final int? revision;
   final String? changeCursor;
   final String? detail;
+  final String? code;
+  final Map<String, Object?>? commandResult;
   final Map<String, Object?>? representation;
   final Map<String, Object?>? conflict;
 }
