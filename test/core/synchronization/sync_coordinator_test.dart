@@ -5,8 +5,8 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:providentia/core/database/app_database.dart';
 import 'package:providentia/core/database/drift_local_sync_repository.dart';
-import 'package:providentia/core/synchronization/sync_coordinator.dart';
 import 'package:providentia/core/synchronization/session_bound_sync_gateway.dart';
+import 'package:providentia/core/synchronization/sync_coordinator.dart';
 import 'package:providentia/core/synchronization/sync_models.dart';
 import 'package:providentia/core/synchronization/sync_ports.dart';
 
@@ -27,7 +27,10 @@ void main() {
     'binding mismatch preserves intent, permits downloads and reports blocked uploads',
     () async {
       await local.commitLocalMutation(_mutation());
-      final remote = _FakeGateway();
+      final remote = _FakeGateway(
+        pushHandler: (_, __) async =>
+            throw StateError('A mismatched binding must never be dispatched.'),
+      );
       final coordinator = SyncCoordinator(
         local: local,
         remote: SessionBoundSyncGateway(
