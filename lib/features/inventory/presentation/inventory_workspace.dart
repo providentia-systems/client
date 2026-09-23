@@ -592,7 +592,7 @@ class _InventoryRow extends StatelessWidget {
   }
 
   Future<void> _editQuantity(BuildContext context) async {
-    final result = await showDialog<(double, String)>(
+    final result = await showDialog<double>(
       context: context,
       builder: (_) => _InventoryQuantityDialog(
         item: item,
@@ -601,16 +601,14 @@ class _InventoryRow extends StatelessWidget {
     );
     if (result == null) return;
     if (countSessionActive) {
-      await controller.recordManualCount(
-        item: item,
-        observedQuantity: result.$1,
-      );
+      await controller.recordManualCount(item: item, observedQuantity: result);
     } else {
       await controller.adjustQuantity(
         item: item,
         locationId: 'primary',
-        observedQuantity: result.$1,
-        reason: result.$2,
+        observedQuantity: result,
+        // The user is recording observed stock, not classifying a movement.
+        reason: 'Stock count correction',
       );
     }
   }
@@ -632,8 +630,6 @@ class _InventoryQuantityDialog extends StatefulWidget {
 
 class _InventoryQuantityDialogState extends State<_InventoryQuantityDialog> {
   late final TextEditingController _quantity;
-  final _explanation = TextEditingController();
-  String _reason = 'Stock count correction';
   String? _error;
 
   @override
@@ -647,7 +643,6 @@ class _InventoryQuantityDialogState extends State<_InventoryQuantityDialog> {
   @override
   void dispose() {
     _quantity.dispose();
-    _explanation.dispose();
     super.dispose();
   }
 
@@ -674,54 +669,6 @@ class _InventoryQuantityDialogState extends State<_InventoryQuantityDialog> {
               suffixText: widget.item.unit,
             ),
           ),
-          if (!widget.countSessionActive) ...<Widget>[
-            const SizedBox(height: 20),
-            DropdownButtonFormField<String>(
-              key: const Key('inventory-adjustment-reason'),
-              initialValue: _reason,
-              isExpanded: true,
-              menuMaxHeight: 360,
-              decoration: const InputDecoration(
-                labelText: 'Reason for adjustment',
-              ),
-              items: [
-                for (final reason in const [
-                  'Stock count correction',
-                  'Stock received',
-                  'Used or consumed',
-                  'Spoiled or expired',
-                  'Damaged or lost',
-                  'Given away',
-                  'Other',
-                ])
-                  DropdownMenuItem(
-                    value: reason,
-                    child: Text(reason, overflow: TextOverflow.ellipsis),
-                  ),
-              ],
-              onChanged: (value) {
-                if (value != null) {
-                  setState(() {
-                    _reason = value;
-                    _error = null;
-                  });
-                }
-              },
-            ),
-            if (_reason == 'Other') ...[
-              const SizedBox(height: 20),
-              TextField(
-                key: const Key('inventory-adjustment-explanation'),
-                controller: _explanation,
-                maxLength: 191,
-                minLines: 2,
-                maxLines: 4,
-                decoration: const InputDecoration(
-                  labelText: 'Explanation for Other',
-                ),
-              ),
-            ],
-          ],
           if (_error != null) ...[
             const SizedBox(height: 12),
             Text(
@@ -748,20 +695,6 @@ class _InventoryQuantityDialogState extends State<_InventoryQuantityDialog> {
       setState(() => _error = 'Enter a finite quantity of zero or more.');
       return;
     }
-    final explanation = _explanation.text.trim();
-    if (!widget.countSessionActive &&
-        _reason == 'Other' &&
-        (explanation.isEmpty || explanation.length > 191)) {
-      setState(() => _error = 'Explain Other in 1 to 191 characters.');
-      return;
-    }
-    Navigator.pop(context, (
-      parsed,
-      widget.countSessionActive
-          ? ''
-          : _reason == 'Other'
-          ? explanation
-          : _reason,
-    ));
+    Navigator.pop(context, parsed);
   }
 }

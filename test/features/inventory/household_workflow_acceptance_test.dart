@@ -85,53 +85,83 @@ void main() {
       },
     );
   }
+  for (final quantity in <double?>[null, 3]) {
+    testWidgets(
+      'quantity entry from $quantity has no reason controls and keeps the stock audit',
+      (tester) async {
+        final repository = _Repository(quantity: quantity);
+        await _workspace(tester, repository);
+        if (quantity == null) {
+          await tester.tap(find.text('Item master'));
+          await tester.pumpAndSettle();
+        }
+        await tester.ensureVisible(find.text('Apple'));
+        await tester.tap(find.text('Apple'));
+        await tester.pumpAndSettle();
+        expect(find.text('Reason for adjustment'), findsNothing);
+        expect(find.text('Stock count correction'), findsNothing);
+        expect(
+          find.byKey(const Key('inventory-adjustment-reason')),
+          findsNothing,
+        );
+        expect(
+          find.byKey(const Key('inventory-adjustment-explanation')),
+          findsNothing,
+        );
+        expect(
+          find.descendant(
+            of: find.byType(AlertDialog),
+            matching: find.byType(TextField),
+          ),
+          findsOneWidget,
+        );
+        await tester.enterText(
+          find.byKey(const Key('inventory-quantity-input')),
+          '4.5',
+        );
+        await tester.tap(find.text('Save'));
+        await tester.pumpAndSettle();
+        expect(repository.adjustments.single.observedQuantity, 4.5);
+        expect(repository.adjustments.single.reason, 'Stock count correction');
+        expect(find.byType(AlertDialog), findsNothing);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
   testWidgets(
-    'quantity correction has a useful default and Other requires explanation',
+    'quantity validation and cancellation do not write stock; zero is accepted',
     (tester) async {
       final repository = _Repository();
       await _workspace(tester, repository);
       await tester.ensureVisible(find.text('Apple'));
       await tester.tap(find.text('Apple'));
       await tester.pumpAndSettle();
-      expect(find.text('Stock count correction'), findsOneWidget);
-      await tester.enterText(
-        find.byKey(const Key('inventory-quantity-input')),
-        '4',
-      );
-      await tester.tap(find.text('Save'));
+      for (final invalid in ['', 'no quantity', '-1', 'NaN', 'Infinity']) {
+        await tester.enterText(
+          find.byKey(const Key('inventory-quantity-input')),
+          invalid,
+        );
+        await tester.tap(find.text('Save'));
+        await tester.pumpAndSettle();
+        expect(repository.adjustments, isEmpty);
+        expect(
+          find.text('Enter a finite quantity of zero or more.'),
+          findsOneWidget,
+        );
+      }
+      await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
-      expect(repository.adjustments.single.reason, 'Stock count correction');
+      expect(repository.adjustments, isEmpty);
       await tester.tap(find.text('Apple'));
       await tester.pumpAndSettle();
-      await _choose(
-        tester,
-        find.byKey(const Key('inventory-adjustment-reason')),
-        'Other',
-      );
-      await tester.tap(find.text('Save'));
-      await tester.pumpAndSettle();
-      expect(repository.adjustments, hasLength(1));
-      expect(
-        find.byKey(const Key('inventory-adjustment-explanation')),
-        findsOneWidget,
-      );
-      await tester.ensureVisible(
-        find.byKey(const Key('inventory-adjustment-explanation')),
-      );
-      await tester.enterText(
-        find.byKey(const Key('inventory-adjustment-explanation')),
-        'Neighbour returned some apples',
-      );
       await tester.enterText(
         find.byKey(const Key('inventory-quantity-input')),
-        '5',
+        '0',
       );
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
-      expect(
-        repository.adjustments.last.reason,
-        'Neighbour returned some apples',
-      );
+      expect(repository.adjustments.single.observedQuantity, 0);
+      expect(repository.adjustments.single.reason, 'Stock count correction');
       expect(tester.takeException(), isNull);
     },
   );
@@ -244,33 +274,36 @@ Future<void> _workspace(
 
 class _Repository
     implements InventoryProductCreationRepository, InventoryMetadataRepository {
-  _Repository({bool localCategories = false, bool linked = false})
-    : categories = localCategories
-          ? [
-              HomeInventoryCategory(
-                id: 'local',
-                name: 'Pantry',
-                revision: 1,
-                archived: false,
-              ),
-            ]
-          : [],
-      item = InventoryItem(
-        id: 'apple',
-        homeId: 'home',
-        canonicalName: 'Apple',
-        packSize: '1 kg',
-        category: 'Produce',
-        currentQuantity: 3,
-        isHomeProduct: true,
-        revision: 5,
-        productId: linked ? 'catalog-apple' : null,
-        packId: linked ? 'catalog-pack' : null,
-        catalogName: linked ? 'Apple' : null,
-        catalogPackText: linked ? '1 kg' : null,
-        catalogCategoryId: linked ? 'global' : null,
-        catalogCategoryName: linked ? 'Produce' : null,
-      );
+  _Repository({
+    bool localCategories = false,
+    bool linked = false,
+    double? quantity = 3,
+  }) : categories = localCategories
+           ? [
+               HomeInventoryCategory(
+                 id: 'local',
+                 name: 'Pantry',
+                 revision: 1,
+                 archived: false,
+               ),
+             ]
+           : [],
+       item = InventoryItem(
+         id: 'apple',
+         homeId: 'home',
+         canonicalName: 'Apple',
+         packSize: '1 kg',
+         category: 'Produce',
+         currentQuantity: quantity,
+         isHomeProduct: true,
+         revision: 5,
+         productId: linked ? 'catalog-apple' : null,
+         packId: linked ? 'catalog-pack' : null,
+         catalogName: linked ? 'Apple' : null,
+         catalogPackText: linked ? '1 kg' : null,
+         catalogCategoryId: linked ? 'global' : null,
+         catalogCategoryName: linked ? 'Produce' : null,
+       );
   final List<HomeInventoryCategory> categories;
   final InventoryItem item;
   final created = <PrivateHomeProductDraft>[];
