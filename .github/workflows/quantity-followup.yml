@@ -1,0 +1,43 @@
+name: Quantity dialog follow-up
+on:
+  push:
+    branches: [fix/client-household-workflows]
+    paths: [.github/workflows/quantity-followup.yml, tool/quantity-followup.patch]
+permissions:
+  contents: write
+concurrency:
+  group: quantity-followup-edit
+  cancel-in-progress: false
+jobs:
+  apply:
+    if: github.ref == 'refs/heads/fix/client-household-workflows'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: fix/client-household-workflows
+      - name: Apply the reviewed source patch
+        run: |
+          git apply --recount --check tool/quantity-followup.patch
+          git apply --recount tool/quantity-followup.patch
+      - name: Install the existing pinned Flutter SDK
+        run: |
+          tool/install_flutter_linux.sh "$RUNNER_TEMP/providentia-sdk"
+          echo "$RUNNER_TEMP/providentia-sdk/flutter/bin" >> "$GITHUB_PATH"
+      - name: Format and validate the complete client
+        run: |
+          flutter pub get --enforce-lockfile
+          dart format lib/features/inventory/presentation/inventory_workspace.dart test/features/inventory/household_workflow_acceptance_test.dart test/features/inventory/inventory_workflow_coverage_test.dart
+          git diff --check
+          flutter analyze --fatal-infos --fatal-warnings
+          flutter test --coverage
+          node tool/check_coverage.mjs coverage/lcov.info 80
+      - name: Commit verified changes and remove temporary editing files
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- lib/features/inventory/presentation/inventory_workspace.dart test/features/inventory/household_workflow_acceptance_test.dart test/features/inventory/inventory_workflow_coverage_test.dart
+          git rm -- .github/workflows/quantity-followup.yml tool/quantity-followup.patch
+          git commit -m 'fix: remove adjustment reason controls from household quantity entry'
+          git push origin HEAD:fix/client-household-workflows
