@@ -354,17 +354,13 @@ void main() {
           find.byKey(const ValueKey<String>('inventory-quantity-input')),
           '3.5',
         );
-        final reason = find.byKey(
-          const ValueKey<String>('inventory-adjustment-reason'),
+        expect(
+          find.byKey(const Key('inventory-adjustment-reason')),
+          findsNothing,
         );
-        await tester.ensureVisible(reason);
-        await tester.tap(reason);
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('Other').last);
-        await tester.pumpAndSettle();
-        await tester.enterText(
+        expect(
           find.byKey(const Key('inventory-adjustment-explanation')),
-          'Cycle count correction',
+          findsNothing,
         );
         await tester.tap(find.widgetWithText(FilledButton, 'Save'));
         await tester.pumpAndSettle();
@@ -374,7 +370,7 @@ void main() {
         expect(repository.adjustments, hasLength(1));
         expect(repository.adjustments.single.id, 'dialog-adjustment');
         expect(repository.adjustments.single.observedQuantity, 3.5);
-        expect(repository.adjustments.single.reason, 'Cycle count correction');
+        expect(repository.adjustments.single.reason, 'Stock count correction');
         expect(repository.movements.single?.quantityDelta, 1.5);
       },
     );
