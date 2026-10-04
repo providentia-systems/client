@@ -72,9 +72,116 @@ final class _ReadyReport extends StatelessWidget {
   final HouseholdReport report;
   final Future<void> Function() onRefresh;
 
-  @override
-  Widget build(BuildContext context) {
-    final sections = <Widget>[
+  List<Widget> _sections() {
+    // Current responses identify their sources even when every data list is
+    // empty. Never select a legacy model merely because a report has no rows.
+    if (report.sourceReports.isNotEmpty) {
+      return <Widget>[
+        _ReportSection(
+          title: 'Inventory quantities',
+          icon: Icons.inventory_2_outlined,
+          emptyText: 'No inventory facts are available.',
+          children: report.inventoryFacts
+              .map(
+                (line) => _ReportRow(
+                  title: line.productName,
+                  detail:
+                      'Quantity ${line.factualQuantity}'
+                      '${line.packText.isEmpty ? '' : ' · ${line.packText}'}'
+                      '${line.configuredMinimum == null ? '' : ' · Minimum ${line.configuredMinimum}'}',
+                ),
+              )
+              .toList(growable: false),
+        ),
+        _ReportSection(
+          title: 'Monthly purchases',
+          icon: Icons.calendar_month_outlined,
+          emptyText: 'No committed purchase totals are available.',
+          children: report.purchaseTotals
+              .map(
+                (line) => _ReportRow(
+                  title: '${line.month} · ${line.currency} ${line.total}',
+                  detail:
+                      '${line.receiptCount} receipt'
+                      '${line.receiptCount == 1 ? '' : 's'}'
+                      '${line.storeName == null ? '' : ' · ${line.storeName}'}',
+                ),
+              )
+              .toList(growable: false),
+        ),
+        _ReportSection(
+          title: 'Consumption estimates',
+          icon: Icons.insights_outlined,
+          emptyText: 'No consumption estimates are available.',
+          children: report.consumptionEstimates
+              .map(
+                (line) => _ReportRow(
+                  title: '${line.productName} · ${line.confidenceBand.name}',
+                  detail: <String>[
+                    'Estimated quantity/day ${line.dailyRate}',
+                    '${line.sampleIntervals} intervals over ${line.coverageDays} days',
+                    ...line.limitations,
+                  ].join(' · '),
+                ),
+              )
+              .toList(growable: false),
+        ),
+        _ReportSection(
+          title: 'Shopping suggestions',
+          icon: Icons.shopping_cart_outlined,
+          emptyText: 'No shopping suggestions are available.',
+          children: report.shoppingSuggestions
+              .map(
+                (line) => _ReportRow(
+                  title: line.productName,
+                  detail:
+                      'Suggested quantity ${line.requiredQuantity}'
+                      '${line.packText.isEmpty ? '' : ' · ${line.packText}'}'
+                      ' · ${line.status} · ${line.confidenceBand.name} confidence',
+                ),
+              )
+              .toList(growable: false),
+        ),
+        _ReportSection(
+          title: 'Suggestion price comparisons',
+          icon: Icons.price_check_outlined,
+          emptyText: 'No comparable suggestion prices are available.',
+          children: report.suggestionPriceComparisons
+              .map(
+                (line) => _ReportRow(
+                  title: line.productName ?? line.packText ?? 'Pack comparison',
+                  detail:
+                      '${line.currency} ${line.effectiveTotal}'
+                      ' · ${line.packCount} packs'
+                      '${line.storeName == null ? '' : ' · ${line.storeName}'}'
+                      '${line.selected ? ' · Selected' : ''}'
+                      '${line.reason.isEmpty ? '' : ' · ${line.reason}'}',
+                ),
+              )
+              .toList(growable: false),
+        ),
+        _ReportSection(
+          title: 'Report sources',
+          icon: Icons.info_outline_rounded,
+          emptyText: 'No report metadata is available.',
+          children: report.sourceReports
+              .map(
+                (source) => _ReportRow(
+                  title: source.kind.name,
+                  detail: <String>[
+                    'As of ${source.asOf.toUtc().toIso8601String()}',
+                    if (source.quantitySemantics != null)
+                      source.quantitySemantics!,
+                    if (source.currencyPolicy != null) source.currencyPolicy!,
+                  ].join(' · '),
+                ),
+              )
+              .toList(growable: false),
+        ),
+      ];
+    }
+
+    return <Widget>[
       _ReportSection(
         title: 'Balances by location',
         icon: Icons.inventory_2_outlined,
@@ -199,7 +306,10 @@ final class _ReadyReport extends StatelessWidget {
       ),
       _BacktestSection(backtest: report.backtest),
     ];
+  }
 
+  @override
+  Widget build(BuildContext context) {
     return CustomScrollView(
       slivers: <Widget>[
         SliverToBoxAdapter(
@@ -238,7 +348,7 @@ final class _ReadyReport extends StatelessWidget {
             builder: (context, constraints) {
               final columns = constraints.crossAxisExtent >= 900 ? 2 : 1;
               return SliverGrid(
-                delegate: SliverChildListDelegate(sections),
+                delegate: SliverChildListDelegate(_sections()),
                 gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: columns,
                   crossAxisSpacing: 14,
