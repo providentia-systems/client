@@ -11,42 +11,46 @@ import 'package:providentia/features/reporting/presentation/household_reports_pa
 import 'package:providentia_api_client/providentia_api_client.dart';
 
 void main() {
-  testWidgets('current adapter facts and currency-isolated totals are visible', (
-    tester,
-  ) async {
-    final requested = <String>[];
-    final controller = _controller((request) async {
-      requested.add(request.url.path);
-      return _json(_body(request.url.path));
-    });
-    addTearDown(controller.dispose);
-    await controller.load();
-    await _show(tester, controller);
+  testWidgets(
+    'current adapter facts and currency-isolated totals are visible',
+    (tester) async {
+      final requested = <String>[];
+      final controller = _controller((request) async {
+        requested.add(request.url.path);
+        return _json(_body(request.url.path));
+      });
+      addTearDown(controller.dispose);
+      await controller.load();
+      await _show(tester, controller);
 
-    expect(requested, hasLength(4));
-    expect(controller.status, ReportingStatus.ready);
-    expect(find.text('Rice'), findsOneWidget);
-    expect(find.textContaining('Quantity 5.25'), findsOneWidget);
-    expect(find.text('2026-10 · NAD 25'), findsOneWidget);
-    expect(find.text('2026-10 · USD 10'), findsOneWidget);
-    expect(find.textContaining('1 receipt · Market'), findsOneWidget);
-    expect(find.text('Oats · high'), findsOneWidget);
-    expect(find.textContaining('Estimated quantity/day 0.125'), findsOneWidget);
-    expect(find.textContaining('Counts are sparse.'), findsOneWidget);
-    expect(find.text('Soap'), findsOneWidget);
-    expect(find.textContaining('Suggested quantity 1.75'), findsOneWidget);
-    expect(find.textContaining('NAD 42.75 · 2 packs'), findsOneWidget);
-    expect(find.text('Balances by location'), findsNothing);
-    expect(find.text('Movement ledger'), findsNothing);
-    expect(find.textContaining('NAD 35'), findsNothing);
-    expect(tester.takeException(), isNull);
+      expect(requested, hasLength(4));
+      expect(controller.status, ReportingStatus.ready);
+      expect(find.text('Rice'), findsOneWidget);
+      expect(find.textContaining('Quantity 5.25'), findsOneWidget);
+      expect(find.text('2026-10 · NAD 25'), findsOneWidget);
+      expect(find.text('2026-10 · USD 10'), findsOneWidget);
+      expect(find.textContaining('1 receipt · Market'), findsOneWidget);
+      expect(find.text('Oats · high'), findsOneWidget);
+      expect(
+        find.textContaining('Estimated quantity/day 0.125'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Counts are sparse.'), findsOneWidget);
+      expect(find.text('Soap'), findsOneWidget);
+      expect(find.textContaining('Suggested quantity 1.75'), findsOneWidget);
+      expect(find.textContaining('NAD 42.75 · 2 packs'), findsOneWidget);
+      expect(find.text('Balances by location'), findsNothing);
+      expect(find.text('Movement ledger'), findsNothing);
+      expect(find.textContaining('NAD 35'), findsNothing);
+      expect(tester.takeException(), isNull);
 
-    controller.switchHome(_otherHome);
-    await tester.pumpAndSettle();
-    expect(find.text('Rice'), findsNothing);
-    expect(find.text('2026-10 · NAD 25'), findsNothing);
-    expect(find.text('Load reports'), findsOneWidget);
-  });
+      controller.switchHome(_otherHome);
+      await tester.pumpAndSettle();
+      expect(find.text('Rice'), findsNothing);
+      expect(find.text('2026-10 · NAD 25'), findsNothing);
+      expect(find.text('Load reports'), findsOneWidget);
+    },
+  );
 
   testWidgets('empty current reports do not fall back to legacy collections', (
     tester,
@@ -67,7 +71,10 @@ void main() {
       find.text('No committed purchase totals are available.'),
       findsOneWidget,
     );
-    expect(find.text('No consumption estimates are available.'), findsOneWidget);
+    expect(
+      find.text('No consumption estimates are available.'),
+      findsOneWidget,
+    );
     expect(find.text('No shopping suggestions are available.'), findsOneWidget);
     expect(find.text('Balances by location'), findsNothing);
     expect(find.text('Reports are temporarily unavailable'), findsNothing);
