@@ -97,10 +97,7 @@ void main() {
   });
 }
 
-Future<void> _show(
-  WidgetTester tester,
-  ReportingController controller,
-) async {
+Future<void> _show(WidgetTester tester, ReportingController controller) async {
   tester.view.physicalSize = const Size(1400, 1200);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
