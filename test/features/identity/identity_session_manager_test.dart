@@ -6,9 +6,398 @@ import 'package:http/testing.dart';
 import 'package:providentia/core/networking/session_http_client.dart';
 import 'package:providentia/features/identity/application/identity_ports.dart';
 import 'package:providentia/features/identity/application/identity_session_manager.dart';
+import 'package:providentia/features/identity/application/offline_session_store.dart';
 import 'package:providentia/features/identity/domain/identity_models.dart';
 
 void main() {
+  group('bounded native offline cold start', () {
+    test(
+      'online verified native sign-in creates a bounded restart lease',
+      () async {
+        final now = DateTime.utc(2026, 8, 9, 12);
+        final store = _MemoryOfflineStore();
+        final online = _Fixture(offlineStore: store);
+        addTearDown(online.dispose);
+        online.transport.currentUser = _offlineLease(now).user;
+        await online.manager.requestEmailCode('person@example.com');
+        await online.manager.verifyEmailCode('12345678');
+        expect(store.value!.verifiedAt, now);
+        expect(store.value!.expiresAt, now.add(const Duration(hours: 24)));
+        expect(online.credentials.value!.userId, _userId);
+        final restarted = _Fixture(
+          offlineStore: store,
+          stored: online.credentials.value,
+        );
+        addTearDown(restarted.dispose);
+        restarted.transport.refreshError = const IdentityTransportException(
+          kind: IdentityFailureKind.network,
+          safeMessage: 'Offline',
+        );
+        await restarted.manager.restore();
+        expect(restarted.manager.snapshot.isOffline, isTrue);
+      },
+    );
+    test(
+      'first home creation refreshes a lease without fabricating old membership',
+      () async {
+        final now = DateTime.utc(2026, 8, 9, 12);
+        final store = _MemoryOfflineStore();
+        final fixture = _Fixture(offlineStore: store);
+        addTearDown(fixture.dispose);
+        fixture.transport.currentUser = _offlineLease(now).user;
+        await fixture.manager.requestEmailCode('person@example.com');
+        await fixture.manager.verifyEmailCode('12345678');
+        const createdHome = '77777777-7777-4777-8777-777777777777';
+        fixture.transport.currentUser = _currentUser(
+          now,
+          activeHomeId: createdHome,
+          profile: const <String, Object?>{'onboardingComplete': true},
+          homes: <CurrentUserHomeView>[
+            CurrentUserHomeView(
+              id: createdHome,
+              name: 'New home',
+              role: 'owner',
+            ),
+          ],
+        );
+        await fixture.manager.coordinateActiveHomeMutation<void>(
+          homeId: createdHome,
+          mutation: () async {},
+        );
+        // Production activation reports the successful selection once more.
+        expect(
+          () => fixture.manager.updateActiveHome(createdHome),
+          returnsNormally,
+        );
+        await fixture.manager.refreshCurrentUser();
+        expect(fixture.manager.snapshot.session!.activeHomeId, createdHome);
+        expect(store.value!.session.activeHomeId, createdHome);
+        expect(store.value!.user.homes.single.id, createdHome);
+        final restarted = _Fixture(
+          offlineStore: store,
+          stored: fixture.credentials.value,
+        );
+        addTearDown(restarted.dispose);
+        restarted.transport.refreshError = const IdentityTransportException(
+          kind: IdentityFailureKind.network,
+          safeMessage: 'Offline',
+        );
+        await restarted.manager.restore();
+        expect(restarted.manager.snapshot.isOffline, isTrue);
+        expect(restarted.manager.snapshot.session!.activeHomeId, createdHome);
+      },
+    );
+    test('bounded server expiry wins over the local 24-hour policy', () async {
+      final now = DateTime.utc(2026, 8, 9, 12);
+      final store = _MemoryOfflineStore();
+      final online = _Fixture(offlineStore: store);
+      addTearDown(online.dispose);
+      final metadata = _grant(now).metadata;
+      online.transport.exchangeGrant = SessionGrant(
+        metadata: SessionMetadata(
+          sessionId: metadata.sessionId,
+          deviceId: metadata.deviceId,
+          userId: metadata.userId,
+          accessExpiresAt: metadata.accessExpiresAt,
+          refreshExpiresAt: now.add(const Duration(hours: 2)),
+          idleExpiresAt: now.add(const Duration(hours: 1)),
+          refreshIdleTtl: const Duration(hours: 1),
+          transport: ClientSessionTransport.nativeBearer,
+        ),
+        secrets: const SessionSecrets(
+          accessToken: 'access-token',
+          refreshToken: 'refresh-token',
+        ),
+      );
+      online.transport.currentUser = _offlineLease(now).user;
+      await online.manager.requestEmailCode('person@example.com');
+      await online.manager.verifyEmailCode('12345678');
+      expect(store.value!.expiresAt, now.add(const Duration(hours: 1)));
+    });
+    test(
+      'refresh timeout restores local access without accepting late credentials',
+      () async {
+        final now = DateTime.utc(2026, 8, 9, 12);
+        final store = _MemoryOfflineStore()..value = _offlineLease(now);
+        final fixture = _Fixture(
+          offlineStore: store,
+          stored: _offlineSaved(),
+          requestTimeout: const Duration(milliseconds: 20),
+        );
+        addTearDown(fixture.dispose);
+        final delayed = Completer<SessionGrant>();
+        fixture.transport.refreshGate = delayed;
+        await fixture.manager.restore();
+        expect(fixture.manager.snapshot.isOffline, isTrue);
+        delayed.complete(_grant(now));
+        await Future<void>.delayed(Duration.zero);
+        expect(fixture.manager.snapshot.isOffline, isTrue);
+        expect(fixture.manager.accessToken, isNull);
+      },
+    );
+
+    for (final kind in <IdentityFailureKind>[
+      IdentityFailureKind.network,
+      IdentityFailureKind.unavailable,
+    ]) {
+      test('restores exact saved session on ${kind.name} only', () async {
+        final now = DateTime.utc(2026, 8, 9, 12);
+        final store = _MemoryOfflineStore()..value = _offlineLease(now);
+        final fixture = _Fixture(
+          clock: _MutableClock(now.add(const Duration(hours: 1))),
+          offlineStore: store,
+          stored: _offlineSaved(),
+        );
+        addTearDown(fixture.dispose);
+        fixture.transport.refreshError = IdentityTransportException(
+          kind: kind,
+          safeMessage: 'Offline',
+        );
+        await fixture.manager.restore();
+        expect(fixture.manager.snapshot.isOffline, isTrue);
+        expect(fixture.manager.snapshot.currentUser?.userId, _userId);
+        expect(fixture.manager.accessToken, isNull);
+        expect(await fixture.manager.ensureFresh(), isFalse);
+        expect(store.value!.verifiedAt, now);
+        expect(store.value!.lastObservedAt, fixture.clock.value);
+      });
+    }
+    for (final kind in <IdentityFailureKind>[
+      IdentityFailureKind.authentication,
+      IdentityFailureKind.forbidden,
+      IdentityFailureKind.validation,
+      IdentityFailureKind.rateLimited,
+    ]) {
+      test('${kind.name} never opens offline access', () async {
+        final now = DateTime.utc(2026, 8, 9, 12);
+        final store = _MemoryOfflineStore()..value = _offlineLease(now);
+        final fixture = _Fixture(offlineStore: store, stored: _offlineSaved());
+        addTearDown(fixture.dispose);
+        fixture.transport.refreshError = IdentityTransportException(
+          kind: kind,
+          safeMessage: 'Rejected',
+        );
+        await fixture.manager.restore();
+        expect(fixture.manager.snapshot.isOffline, isFalse);
+        expect(fixture.manager.snapshot.isAuthenticated, isFalse);
+        if (kind != IdentityFailureKind.rateLimited) {
+          expect(store.value, isNull);
+        }
+      });
+    }
+    for (final hours in <int>[-1, 24, 25]) {
+      test('clock offset $hours hours fails closed', () async {
+        final now = DateTime.utc(2026, 8, 9, 12);
+        final store = _MemoryOfflineStore()..value = _offlineLease(now);
+        final fixture = _Fixture(
+          clock: _MutableClock(now.add(Duration(hours: hours))),
+          offlineStore: store,
+          stored: _offlineSaved(),
+        );
+        addTearDown(fixture.dispose);
+        fixture.transport.refreshError = const IdentityTransportException(
+          kind: IdentityFailureKind.network,
+          safeMessage: 'Offline',
+        );
+        await fixture.manager.restore();
+        expect(fixture.manager.snapshot.isAuthenticated, isFalse);
+      });
+    }
+    test(
+      'legacy saved credentials without account binding cannot restore offline',
+      () async {
+        final store = _MemoryOfflineStore()
+          ..value = _offlineLease(DateTime.utc(2026, 8, 9, 12));
+        final fixture = _Fixture(
+          offlineStore: store,
+          stored: StoredNativeSession(
+            sessionId: _sessionId,
+            deviceId: _deviceId,
+            refreshToken: 'refresh-token',
+          ),
+        );
+        addTearDown(fixture.dispose);
+        fixture.transport.refreshError = const IdentityTransportException(
+          kind: IdentityFailureKind.network,
+          safeMessage: 'Offline',
+        );
+        await fixture.manager.restore();
+        expect(fixture.manager.snapshot.isAuthenticated, isFalse);
+      },
+    );
+    test(
+      'cross-account saved credential cannot open cached household identity',
+      () async {
+        final store = _MemoryOfflineStore()
+          ..value = _offlineLease(DateTime.utc(2026, 8, 9, 12));
+        final fixture = _Fixture(
+          offlineStore: store,
+          stored: _offlineSaved(userId: '99999999-9999-4999-8999-999999999999'),
+        );
+        addTearDown(fixture.dispose);
+        fixture.transport.refreshError = const IdentityTransportException(
+          kind: IdentityFailureKind.network,
+          safeMessage: 'Offline',
+        );
+        await fixture.manager.restore();
+        expect(fixture.manager.snapshot.isAuthenticated, isFalse);
+      },
+    );
+    test('secure-store read/write failure denies local access', () async {
+      for (final failRead in <bool>[true, false]) {
+        final store = _MemoryOfflineStore()
+          ..value = _offlineLease(DateTime.utc(2026, 8, 9, 12))
+          ..readFails = failRead
+          ..writeFails = !failRead;
+        final fixture = _Fixture(offlineStore: store, stored: _offlineSaved());
+        addTearDown(fixture.dispose);
+        fixture.transport.refreshError = const IdentityTransportException(
+          kind: IdentityFailureKind.network,
+          safeMessage: 'Offline',
+        );
+        await fixture.manager.restore();
+        expect(fixture.manager.snapshot.isAuthenticated, isFalse);
+      }
+    });
+    test(
+      'backward clock while open invalidates persistent offline access',
+      () async {
+        final now = DateTime.utc(2026, 8, 9, 12);
+        final store = _MemoryOfflineStore()..value = _offlineLease(now);
+        final fixture = _Fixture(
+          clock: _MutableClock(now.add(const Duration(hours: 1))),
+          offlineStore: store,
+          stored: _offlineSaved(),
+        );
+        addTearDown(fixture.dispose);
+        fixture.transport.refreshError = const IdentityTransportException(
+          kind: IdentityFailureKind.network,
+          safeMessage: 'Offline',
+        );
+        await fixture.manager.restore();
+        fixture.clock.value = now;
+        expect(fixture.manager.localAccessIsCurrent, isFalse);
+        await fixture.manager.checkOfflineAccess();
+        expect(fixture.manager.snapshot.isAuthenticated, isFalse);
+        expect(store.value, isNull);
+        expect(fixture.credentials.value, isNotNull);
+      },
+    );
+    test(
+      'offline HTTP never sends a bearer or synthesizes authorization denial',
+      () async {
+        final store = _MemoryOfflineStore()
+          ..value = _offlineLease(DateTime.utc(2026, 8, 9, 12));
+        final fixture = _Fixture(offlineStore: store, stored: _offlineSaved());
+        addTearDown(fixture.dispose);
+        fixture.transport.refreshError = const IdentityTransportException(
+          kind: IdentityFailureKind.network,
+          safeMessage: 'Offline',
+        );
+        await fixture.manager.restore();
+        var sent = 0;
+        final client = SessionHttpClient(
+          inner: MockClient((request) async {
+            sent++;
+            return http.Response('{}', 200);
+          }),
+          sessions: fixture.manager,
+        );
+        addTearDown(client.close);
+        await expectLater(
+          client.post(Uri.parse('https://example.test/api/sync/push')),
+          throwsA(isA<http.ClientException>()),
+        );
+        expect(sent, 0);
+        expect(fixture.manager.snapshot.isOffline, isTrue);
+      },
+    );
+    test('offline logout clears local lease even without network', () async {
+      final store = _MemoryOfflineStore()
+        ..value = _offlineLease(DateTime.utc(2026, 8, 9, 12));
+      final fixture = _Fixture(offlineStore: store, stored: _offlineSaved());
+      addTearDown(fixture.dispose);
+      fixture.transport.refreshError = const IdentityTransportException(
+        kind: IdentityFailureKind.network,
+        safeMessage: 'Offline',
+      );
+      fixture.transport.logoutError = fixture.transport.refreshError;
+      await fixture.manager.restore();
+      await fixture.manager.logout();
+      expect(fixture.manager.snapshot.isAuthenticated, isFalse);
+      expect(store.value, isNull);
+      expect(fixture.credentials.value, isNull);
+      expect(fixture.pendingStore.logoutIntent, isFalse);
+      expect(fixture.manager.snapshot.safeMessage, contains('this device'));
+      expect(fixture.manager.snapshot.safeMessage, isNot(contains('browser')));
+      final restarted = _Fixture(
+        offlineStore: store,
+        stored: fixture.credentials.value,
+        sharedPendingStore: fixture.pendingStore,
+      );
+      addTearDown(restarted.dispose);
+      await restarted.manager.restore();
+      expect(
+        restarted.manager.snapshot.status,
+        IdentitySessionStatus.signedOut,
+      );
+      expect(restarted.transport.refreshTokens, isEmpty);
+      expect(restarted.transport.logoutCalls, 0);
+    });
+    test(
+      'known revocation closes an open offline snapshot immediately',
+      () async {
+        final store = _MemoryOfflineStore()
+          ..value = _offlineLease(DateTime.utc(2026, 8, 9, 12));
+        final fixture = _Fixture(offlineStore: store, stored: _offlineSaved());
+        addTearDown(fixture.dispose);
+        fixture.transport.refreshError = const IdentityTransportException(
+          kind: IdentityFailureKind.network,
+          safeMessage: 'Offline',
+        );
+        await fixture.manager.restore();
+        await fixture.manager.invalidateOfflineAccess();
+        expect(fixture.manager.snapshot.isAuthenticated, isFalse);
+        expect(store.value, isNull);
+      },
+    );
+    test(
+      'failed lease retirement falls back to journal and credential deletion',
+      () async {
+        final now = DateTime.utc(2026, 8, 9, 12);
+        final store = _MemoryOfflineStore()..value = _offlineLease(now);
+        final fixture = _Fixture(offlineStore: store, stored: _offlineSaved());
+        addTearDown(fixture.dispose);
+        fixture.transport.refreshError = const IdentityTransportException(
+          kind: IdentityFailureKind.network,
+          safeMessage: 'Offline',
+        );
+        await fixture.manager.restore();
+        store.clearFails = true;
+        fixture.clock.value = now.subtract(const Duration(minutes: 1));
+        await fixture.manager.checkOfflineAccess();
+        expect(fixture.manager.snapshot.isAuthenticated, isFalse);
+        expect(fixture.credentials.value, isNull);
+        expect(fixture.pendingStore.logoutIntent, isTrue);
+      },
+    );
+    test('web sessions never use a native offline lease', () async {
+      final store = _MemoryOfflineStore()
+        ..value = _offlineLease(DateTime.utc(2026, 8, 9, 12));
+      final fixture = _Fixture(
+        offlineStore: store,
+        sessionTransport: ClientSessionTransport.webCookie,
+      );
+      addTearDown(fixture.dispose);
+      fixture.transport.refreshError = const IdentityTransportException(
+        kind: IdentityFailureKind.network,
+        safeMessage: 'Offline',
+      );
+      await fixture.manager.restore();
+      expect(fixture.manager.snapshot.isAuthenticated, isFalse);
+    });
+  });
+
   test(
     'origin client persists the email-code binding before prompting',
     () async {
@@ -1350,6 +1739,7 @@ const _bindingToken = 'binding-token-private-proof-000000000000000000000000';
 final class _Fixture {
   _Fixture({
     _MutableClock? clock,
+    OfflineSessionStore? offlineStore,
     String installationId = _deviceId,
     bool credentialWriteFails = false,
     int? pendingWriteFailsAfter,
@@ -1372,6 +1762,7 @@ final class _Fixture {
        transport = _FakeIdentityTransport(sessionTransport) {
     manager = IdentitySessionManager(
       transport: transport,
+      offlineSessionStore: offlineStore,
       credentialStore: credentials,
       pendingEmailCodeStore: pendingStore,
 
@@ -1693,8 +2084,10 @@ CurrentUserView _currentUser(
   String deviceId = _deviceId,
   String? activeHomeId,
   List<CurrentUserHomeView> homes = const <CurrentUserHomeView>[],
+  Map<String, Object?> profile = const <String, Object?>{},
 }) => CurrentUserView(
   userId: userId,
+  profile: profile,
   email: 'person@example.com',
   emailVerified: true,
   homes: homes,
@@ -1733,4 +2126,52 @@ DeviceSessionView _currentSession(
   idleExpiresAt: now.add(
     Duration(days: transport == ClientSessionTransport.webCookie ? 30 : 60),
   ),
+);
+
+final class _MemoryOfflineStore implements OfflineSessionStore {
+  OfflineSessionLease? value;
+  bool readFails = false;
+  bool writeFails = false;
+  bool clearFails = false;
+  @override
+  Future<OfflineSessionLease?> read() async {
+    if (readFails) throw StateError('Locked');
+    return value;
+  }
+
+  @override
+  Future<void> write(OfflineSessionLease lease) async {
+    if (writeFails) throw StateError('Locked');
+    value = lease;
+  }
+
+  @override
+  Future<void> clear() async {
+    if (clearFails) throw StateError('Locked');
+    value = null;
+  }
+}
+
+StoredNativeSession _offlineSaved({String userId = _userId}) =>
+    StoredNativeSession(
+      sessionId: _sessionId,
+      deviceId: _deviceId,
+      refreshToken: 'refresh-token',
+      userId: userId,
+    );
+OfflineSessionLease _offlineLease(DateTime now) => OfflineSessionLease(
+  session: _grant(now, durable: true).metadata,
+  user: CurrentUserView(
+    userId: _userId,
+    email: 'person@example.com',
+    emailVerified: true,
+    homes: const <CurrentUserHomeView>[],
+    pendingInvitations: const <CurrentUserInvitationView>[],
+    platformRoles: const <PlatformRole>{},
+    currentSession: _currentSession(now),
+    profile: const <String, Object?>{'onboardingComplete': true},
+  ),
+  verifiedAt: now,
+  lastObservedAt: now,
+  expiresAt: now.add(const Duration(hours: 24)),
 );

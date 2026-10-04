@@ -78,6 +78,14 @@ jobs:
             '41cf968998241465d8b1dfffb1eb60dd10c35de5022a3647e14174ea3af84143  web/sqlite3.wasm' \
             | sha256sum --check --strict
 
+      - name: Verify encrypted browser persistence in Chromium
+        run: |
+          bash tools/install_node_linux.sh "$RUNNER_TEMP/providentia-browser-node"
+          export PATH="$RUNNER_TEMP/providentia-browser-node/bin:$PATH"
+          export CHROME_EXECUTABLE="$(command -v google-chrome || command -v chromium)"
+          test -n "$CHROME_EXECUTABLE"
+          bash tool/browser_security/run_probe.sh
+
       - name: Verify formatting
         run: |
           if ! dart format --output=none --set-exit-if-changed lib test; then
@@ -108,6 +116,7 @@ jobs:
           path: |
             coverage/lcov.info
             build/compliance/dart-dependencies.json
+            build/browser-security-proof/result.json
           if-no-files-found: error
           retention-days: 14
 

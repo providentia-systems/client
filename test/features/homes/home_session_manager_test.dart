@@ -9,6 +9,61 @@ import '../../support/access_fixture.dart';
 
 void main() {
   test(
+    'native offline restore opens only the exact verified home without transport',
+    () async {
+      final transport = _FakeHomeTransport(homes: <HomeSummary>[]);
+      final manager = HomeSessionManager(
+        transport: transport,
+        activeHomeStore: _MemoryActiveHomeStore(value: 'untrusted'),
+        isOffline: () => true,
+        restoreOfflineHome: (id) async =>
+            id == 'home-a' ? _home('home-a', 'Saved') : null,
+      );
+      addTearDown(manager.dispose);
+      await manager.load(sessionActiveHomeId: 'home-a');
+      expect(manager.snapshot.hasActiveHome, isTrue);
+      expect(manager.snapshot.activeHome?.id, 'home-a');
+      expect(transport.switches, isEmpty);
+      await manager.selectHome('home-b');
+      expect(manager.snapshot.activeHome?.id, 'home-a');
+      expect(transport.switches, isEmpty);
+    },
+  );
+
+  test(
+    'local preference alone and mismatched offline home do not grant access',
+    () async {
+      for (final cached in <HomeSummary?>[null, _home('other-home', 'Other')]) {
+        final manager = HomeSessionManager(
+          transport: _FakeHomeTransport(homes: <HomeSummary>[]),
+          activeHomeStore: _MemoryActiveHomeStore(value: 'home-a'),
+          isOffline: () => true,
+          restoreOfflineHome: (_) async => cached,
+        );
+        addTearDown(manager.dispose);
+        await manager.load(sessionActiveHomeId: 'home-a');
+        expect(manager.snapshot.hasActiveHome, isFalse);
+      }
+    },
+  );
+
+  test('authentication loss wins over delayed offline home restore', () async {
+    final pending = Completer<HomeSummary?>();
+    final manager = HomeSessionManager(
+      transport: _FakeHomeTransport(homes: <HomeSummary>[]),
+      activeHomeStore: _MemoryActiveHomeStore(),
+      isOffline: () => true,
+      restoreOfflineHome: (_) => pending.future,
+    );
+    addTearDown(manager.dispose);
+    final loading = manager.load(sessionActiveHomeId: 'home-a');
+    manager.handleAuthenticationLost();
+    pending.complete(_home('home-a', 'Saved'));
+    await loading;
+    expect(manager.snapshot.hasActiveHome, isFalse);
+  });
+
+  test(
     'multiple homes require selection when no active preference exists',
     () async {
       final transport = _FakeHomeTransport(

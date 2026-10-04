@@ -16,7 +16,9 @@ import 'package:providentia/core/networking/credentialed_http_client.dart';
 import 'package:providentia/core/networking/generated_api_connectivity_probe.dart';
 import 'package:providentia/core/networking/generated_stock_preference_reader.dart';
 import 'package:providentia/core/networking/session_http_client.dart';
+import 'package:providentia/core/security/browser_database_unlock_gate.dart';
 import 'package:providentia/core/security/device_identity_store.dart';
+import 'package:providentia/core/security/platform_offline_access_store.dart';
 import 'package:providentia/core/security/platform_pending_email_code_store.dart';
 import 'package:providentia/core/security/platform_session_coordination.dart';
 import 'package:providentia/core/security/platform_session_credential_store.dart';
@@ -90,6 +92,7 @@ import 'package:providentia/features/identity/infrastructure/api11_identity_tran
 import 'package:providentia/features/identity/presentation/account_access_page.dart';
 import 'package:providentia/features/identity/presentation/email_code_sign_in_page.dart';
 import 'package:providentia/features/identity/presentation/identity_controller.dart';
+import 'package:providentia/features/identity/presentation/offline_access_notice.dart';
 import 'package:providentia/features/inventory/application/stock_camera_capture_session.dart';
 import 'package:providentia/features/inventory/application/stock_photo_count_controller.dart';
 import 'package:providentia/features/inventory/application/stock_preference_repository.dart';
@@ -119,9 +122,16 @@ import 'package:providentia_api_client/providentia_api_client.dart';
 /// local-first household workspace. No home ID or bearer token is required at
 /// build time, and every server call is bound to the authenticated session.
 final class ProductionBootstrapApp extends StatefulWidget {
-  const ProductionBootstrapApp({required this.configuration, super.key});
+  const ProductionBootstrapApp({
+    required this.configuration,
+    this.database,
+    this.onBrowserDatabaseLock,
+    super.key,
+  });
 
   final RuntimeConfiguration configuration;
+  final AppDatabase? database;
+  final Future<void> Function()? onBrowserDatabaseLock;
 
   @override
   State<ProductionBootstrapApp> createState() => _ProductionBootstrapAppState();
@@ -134,6 +144,7 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp>
   late final ProvidentiaApiClient _identityApi;
   late final ProvidentiaApiClient _authorizedApi;
   late final IdentitySessionManager _identityManager;
+  late final PlatformOfflineAccessStore _offlineAccessStore;
   late final IdentityController _identityController;
   late final HomesController _homesController;
   late final ProductionSessionSecurityBoundary _sessionSecurityBoundary;
@@ -147,6 +158,7 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp>
       GlobalKey<NavigatorState>();
   final ProductionProtectedRouteRegistry _protectedRouteRegistry =
       ProductionProtectedRouteRegistry();
+  bool _hadAuthenticatedSession = false;
   String? _securedHomeId;
   Set<String> _securedHomePermissions = const <String>{};
   final Map<String, Future<bool>> _revokedHomePurges = <String, Future<bool>>{};
@@ -157,7 +169,7 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _database = AppDatabase.defaults();
+    _database = widget.database ?? AppDatabase.defaults();
     _homeRevocationBoundary = ProductionHomeRevocationBoundary(
       purge: (homeId) {
         _scheduleRevokedHomePurge(homeId);
@@ -179,7 +191,11 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp>
       _identityApi,
       sessionTransport: sessionTransport,
     );
+    _offlineAccessStore = PlatformOfflineAccessStore(
+      origin: widget.configuration.apiBaseUri,
+    );
     _identityManager = IdentitySessionManager(
+      offlineSessionStore: _offlineAccessStore,
       transport: identityTransport,
       credentialStore: PlatformSessionCredentialStore(),
       pendingEmailCodeStore: PlatformPendingEmailCodeStore(),
@@ -203,6 +219,24 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp>
     final homes = HomeSessionManager(
       transport: Api11HomeTransport(_authorizedApi),
       activeHomeStore: DriftActiveHomeStore(_database),
+      isOffline: () => _identityManager.snapshot.isOffline,
+      restoreOfflineHome: (homeId) async {
+        final identity = _identityManager.snapshot;
+        if (!identity.isOffline || identity.session == null) return null;
+        return _offlineAccessStore.readHome(identity.session!, homeId);
+      },
+      onHomeVerified: (home) async {
+        if (!kIsWeb && !_identityManager.snapshot.isOffline) {
+          await _identityManager.refreshCurrentUser();
+        }
+        final identity = _identityManager.snapshot;
+        if (!identity.isAuthenticated ||
+            identity.isOffline ||
+            identity.session == null) {
+          return;
+        }
+        await _offlineAccessStore.rememberHome(identity.session!, home);
+      },
       onActiveHomeChanged: _identityManager.updateActiveHome,
       onHomeAccessRevoked: _scheduleRevokedHomePurge,
       coordinateActiveHomeMutation: ({required homeId, required mutation}) =>
@@ -262,81 +296,100 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp>
                     onboarding: true,
                     onSignOut: _signOut,
                   )
-                : HomeSelectionPage(
-                    accountProfile:
-                        identitySnapshot.currentUser?.profile ??
-                        const <String, Object?>{},
-                    profilePort: GeneratedProfilePort(_authorizedApi),
-                    accountAccess: Map<String, Object?>.from(
-                      identitySnapshot.currentUser?.profile['accountAccess']
-                              as Map? ??
-                          const <String, Object?>{},
-                    ),
-                    controller: _homesController,
-                    sessionActiveHomeId:
-                        identitySnapshot.session?.activeHomeId ??
-                        identitySnapshot.currentUser?.activeHomeId,
-                    accountPageBuilder: (context) => AccountAccessPage(
-                      profilePort: GeneratedProfilePort(_authorizedApi),
-                      profilePageBuilder: (_) => AccountProfilePage(
-                        port: GeneratedProfilePort(_authorizedApi),
-                        onChanged: _identityController.refreshCurrentUser,
-                      ),
-                      identityController: _identityController,
-                      homesController: _homesController,
-                      catalogSharingPageBuilder: _catalogSharingPageBuilder(
-                        _homesController.snapshot.activeHome,
-                        _homesController.snapshot.effectivePermissions,
-                      ),
-                      householdReportsPageBuilder: _householdReportsPageBuilder,
-                      householdAiPageBuilder: _householdAiPageBuilder,
-                      dataGovernancePageBuilder: _dataGovernancePageBuilder,
-                    ),
+                : OfflineAccessNotice(
+                    offline: identitySnapshot.isOffline,
+                    onReconnect: _identityController.restore,
                     onSignOut: _signOut,
-                    activeHomeBuilder: (context, home) {
-                      final permissions =
-                          _homesController.snapshot.effectivePermissions;
-                      final permissionKey = permissions.toList(growable: false)
-                        ..sort();
-                      return _ConnectedHomeWorkspace(
-                        key: ValueKey<String>(
-                          '${identitySnapshot.session!.userId}:'
-                          '${identitySnapshot.session!.deviceId}:'
-                          '${home.id}:${permissionKey.join(',')}',
-                        ),
-                        home: home,
-                        access: HouseholdWorkspaceAccess.fromPermissions(
-                          permissions,
-                        ),
-                        revokedDataPurge: _revokedHomePurges[home.id],
-                        syncRevocationGate: _homeSyncRevocationGate,
-                        homeRevocationBoundary: _homeRevocationBoundary,
-                        database: _database,
-                        deviceId: identitySnapshot.session!.deviceId,
-                        userId: identitySnapshot.session!.userId,
-                        permissionFingerprint: permissionKey.join(','),
-                        api: _authorizedApi,
-                        identityController: _identityController,
-                        homesController: _homesController,
-                        catalogSharingPageBuilder: _catalogSharingPageBuilder(
-                          home,
-                          permissions,
-                        ),
-                        canContributeCatalog: mayContributeCatalogProduct(
-                          permissions,
-                        ),
-                        householdReportsPageBuilder:
-                            _householdReportsPageBuilder,
-                        householdAiPageBuilder: _householdAiPageBuilder,
-                        dataGovernancePageBuilder: _dataGovernancePageBuilder,
-                        protectedRouteRegistry: _protectedRouteRegistry,
-                        onCatalogAuthorizationLost:
-                            _handleCatalogSharingAuthorizationLost,
-                        workspaceNavigatorKey: _workspaceNavigatorKey,
-                        onChangeHome: _homesController.returnToChooser,
-                        onSignOut: _signOut,
-                      );
-                    },
+                    child: HomeSelectionPage(
+                      key: ValueKey<String>(
+                        '${identitySnapshot.session?.sessionId}:${identitySnapshot.isOffline}',
+                      ),
+                      accountProfile:
+                          identitySnapshot.currentUser?.profile ??
+                          const <String, Object?>{},
+                      profilePort: identitySnapshot.isOffline
+                          ? null
+                          : GeneratedProfilePort(_authorizedApi),
+                      accountAccess: Map<String, Object?>.from(
+                        identitySnapshot.currentUser?.profile['accountAccess']
+                                as Map? ??
+                            const <String, Object?>{},
+                      ),
+                      controller: _homesController,
+                      sessionActiveHomeId:
+                          identitySnapshot.session?.activeHomeId ??
+                          identitySnapshot.currentUser?.activeHomeId,
+                      accountPageBuilder: identitySnapshot.isOffline
+                          ? null
+                          : (context) => AccountAccessPage(
+                              profilePort: GeneratedProfilePort(_authorizedApi),
+                              profilePageBuilder: (_) => AccountProfilePage(
+                                port: GeneratedProfilePort(_authorizedApi),
+                                onChanged:
+                                    _identityController.refreshCurrentUser,
+                              ),
+                              identityController: _identityController,
+                              homesController: _homesController,
+                              catalogSharingPageBuilder:
+                                  _catalogSharingPageBuilder(
+                                    _homesController.snapshot.activeHome,
+                                    _homesController
+                                        .snapshot
+                                        .effectivePermissions,
+                                  ),
+                              householdReportsPageBuilder:
+                                  _householdReportsPageBuilder,
+                              householdAiPageBuilder: _householdAiPageBuilder,
+                              dataGovernancePageBuilder:
+                                  _dataGovernancePageBuilder,
+                            ),
+                      onSignOut: _signOut,
+                      activeHomeBuilder: (context, home) {
+                        final permissions =
+                            _homesController.snapshot.effectivePermissions;
+                        final permissionKey = permissions.toList(
+                          growable: false,
+                        )..sort();
+                        return _ConnectedHomeWorkspace(
+                          key: ValueKey<String>(
+                            '${identitySnapshot.session!.userId}:'
+                            '${identitySnapshot.session!.deviceId}:'
+                            '${home.id}:${identitySnapshot.isOffline}:${permissionKey.join(',')}',
+                          ),
+                          home: home,
+                          access: HouseholdWorkspaceAccess.fromPermissions(
+                            permissions,
+                          ),
+                          revokedDataPurge: _revokedHomePurges[home.id],
+                          syncRevocationGate: _homeSyncRevocationGate,
+                          homeRevocationBoundary: _homeRevocationBoundary,
+                          database: _database,
+                          deviceId: identitySnapshot.session!.deviceId,
+                          userId: identitySnapshot.session!.userId,
+                          permissionFingerprint: permissionKey.join(','),
+                          api: _authorizedApi,
+                          identityController: _identityController,
+                          homesController: _homesController,
+                          catalogSharingPageBuilder: _catalogSharingPageBuilder(
+                            home,
+                            permissions,
+                          ),
+                          canContributeCatalog: mayContributeCatalogProduct(
+                            permissions,
+                          ),
+                          householdReportsPageBuilder:
+                              _householdReportsPageBuilder,
+                          householdAiPageBuilder: _householdAiPageBuilder,
+                          dataGovernancePageBuilder: _dataGovernancePageBuilder,
+                          protectedRouteRegistry: _protectedRouteRegistry,
+                          onCatalogAuthorizationLost:
+                              _handleCatalogSharingAuthorizationLost,
+                          workspaceNavigatorKey: _workspaceNavigatorKey,
+                          onChangeHome: _homesController.returnToChooser,
+                          onSignOut: _signOut,
+                        );
+                      },
+                    ),
                   ),
           ),
         );
@@ -384,6 +437,14 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp>
 
   void _handleIdentitySession(IdentitySessionSnapshot snapshot) {
     _sessionSecurityBoundary.handleIdentitySession(snapshot);
+    if (snapshot.isAuthenticated) _hadAuthenticatedSession = true;
+    if (_hadAuthenticatedSession &&
+        (snapshot.status == IdentitySessionStatus.signedOut ||
+            snapshot.status == IdentitySessionStatus.sessionExpired)) {
+      _hadAuthenticatedSession = false;
+      final lock = widget.onBrowserDatabaseLock;
+      if (lock != null) unawaited(lock());
+    }
   }
 
   Future<void> _handleCatalogSharingAuthorizationLost() async {
@@ -406,6 +467,17 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp>
       previousPermissions: _securedHomePermissions,
       currentPermissions: currentPermissions,
     );
+    if (_securedHomeId != null &&
+        currentHomeId == _securedHomeId &&
+        _homesController.snapshot.status == HomeSessionStatus.ready &&
+        _securedHomePermissions.difference(currentPermissions).isNotEmpty &&
+        !_identityManager.snapshot.isOffline) {
+      unawaited(
+        _offlineAccessStore
+            .revokeHome(_securedHomeId!)
+            .catchError((_) => _identityManager.invalidateOfflineAccess()),
+      );
+    }
     _securedHomeId = currentHomeId;
     _securedHomePermissions = currentPermissions;
   }
@@ -415,7 +487,8 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp>
     final permissions = _homesController.snapshot.effectivePermissions;
     if (home == null ||
         !permissions.contains(HomePermissions.reportsRead) ||
-        !_identityController.snapshot.isAuthenticated) {
+        (!_identityController.snapshot.isAuthenticated ||
+            _identityController.snapshot.isOffline)) {
       return const _ProtectedRouteUnavailable();
     }
     return ProductionHouseholdReportsRoute(
@@ -427,7 +500,8 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp>
   };
 
   WidgetBuilder get _dataGovernancePageBuilder => (_) {
-    if (!_identityController.snapshot.isAuthenticated) {
+    if ((!_identityController.snapshot.isAuthenticated ||
+        _identityController.snapshot.isOffline)) {
       return const _ProtectedRouteUnavailable();
     }
     final home = _homesController.snapshot.activeHome;
@@ -488,6 +562,11 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp>
   }
 
   void _scheduleRevokedHomePurge(String homeId) {
+    unawaited(
+      _offlineAccessStore
+          .revokeHome(homeId)
+          .catchError((_) => _identityManager.invalidateOfflineAccess()),
+    );
     final quiesced = _homeSyncRevocationGate.revokeAndWait(homeId);
     _revokedHomePurges[homeId] = quiesced
         .then((_) => RevokedHomeDataPurger(_database).purge(homeId))
@@ -927,6 +1006,7 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    unawaited(widget.identityController.checkOfflineAccess());
     if (state == AppLifecycleState.resumed) {
       _resumeSyncGate.resume();
     }
@@ -951,31 +1031,37 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
           catalogContributionPageBuilder: _catalogContributionPageBuilder,
           access: widget.access,
           navigatorKey: widget.workspaceNavigatorKey,
-          onChangeHome: widget.onChangeHome,
+          onChangeHome: widget.identityController.snapshot.isOffline
+              ? null
+              : widget.onChangeHome,
           onSignOut: widget.onSignOut,
           syncConflictController: _syncConflicts,
           onCountReconciliation: (_) {
             _app.selectSection(AppSection.stock);
           },
-          accountPageBuilder: (context) => AccountAccessPage(
-            profilePort: GeneratedProfilePort(widget.api),
-            profilePageBuilder: (_) => AccountProfilePage(
-              port: GeneratedProfilePort(widget.api),
-              onChanged: widget.identityController.refreshCurrentUser,
-            ),
-            identityController: widget.identityController,
-            homesController: widget.homesController,
-            catalogSharingPageBuilder: widget.catalogSharingPageBuilder,
-            catalogContributionPageBuilder: _catalogContributionPageBuilder,
-            catalogProductImageContributionPageBuilder:
-                _catalogProductImageContributionPageBuilder,
-            catalogStorePriceContributionPageBuilder:
-                _catalogStorePriceContributionPageBuilder,
-            catalogImportPageBuilder: _catalogImportPageBuilder,
-            householdReportsPageBuilder: widget.householdReportsPageBuilder,
-            householdAiPageBuilder: _connectedHouseholdAiPageBuilder,
-            dataGovernancePageBuilder: widget.dataGovernancePageBuilder,
-          ),
+          accountPageBuilder: widget.identityController.snapshot.isOffline
+              ? null
+              : (context) => AccountAccessPage(
+                  profilePort: GeneratedProfilePort(widget.api),
+                  profilePageBuilder: (_) => AccountProfilePage(
+                    port: GeneratedProfilePort(widget.api),
+                    onChanged: widget.identityController.refreshCurrentUser,
+                  ),
+                  identityController: widget.identityController,
+                  homesController: widget.homesController,
+                  catalogSharingPageBuilder: widget.catalogSharingPageBuilder,
+                  catalogContributionPageBuilder:
+                      _catalogContributionPageBuilder,
+                  catalogProductImageContributionPageBuilder:
+                      _catalogProductImageContributionPageBuilder,
+                  catalogStorePriceContributionPageBuilder:
+                      _catalogStorePriceContributionPageBuilder,
+                  catalogImportPageBuilder: _catalogImportPageBuilder,
+                  householdReportsPageBuilder:
+                      widget.householdReportsPageBuilder,
+                  householdAiPageBuilder: _connectedHouseholdAiPageBuilder,
+                  dataGovernancePageBuilder: widget.dataGovernancePageBuilder,
+                ),
         );
       },
     );
@@ -1143,6 +1229,7 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
       ..sort();
     return mounted &&
         identity.isAuthenticated &&
+        widget.identityController.localAccessIsCurrent &&
         identity.session?.userId == widget.userId &&
         identity.session?.deviceId == widget.deviceId &&
         homes.activeHome?.id == widget.home.id &&
@@ -2360,5 +2447,56 @@ final class _WorkspaceFailure extends StatelessWidget {
         child: Text('The selected home could not be opened safely.'),
       ),
     ),
+  );
+}
+
+/// The local browser passphrase gate is separate from account authentication.
+/// Once unlocked, the unchanged email-code session flow authorizes every home.
+final class BrowserProtectedBootstrap extends StatelessWidget {
+  const BrowserProtectedBootstrap({required this.configuration, super.key});
+
+  final RuntimeConfiguration configuration;
+
+  @override
+  Widget build(BuildContext context) => BrowserDatabaseUnlockGate(
+    builder: (context, session, lockLocalDatabase) => _BrowserSessionApp(
+      key: ObjectKey(session),
+      configuration: configuration,
+      session: session,
+      lockLocalDatabase: lockLocalDatabase,
+    ),
+  );
+}
+
+final class _BrowserSessionApp extends StatefulWidget {
+  const _BrowserSessionApp({
+    required this.configuration,
+    required this.session,
+    required this.lockLocalDatabase,
+    super.key,
+  });
+
+  final RuntimeConfiguration configuration;
+  final BrowserDatabaseSession session;
+  final Future<void> Function() lockLocalDatabase;
+
+  @override
+  State<_BrowserSessionApp> createState() => _BrowserSessionAppState();
+}
+
+final class _BrowserSessionAppState extends State<_BrowserSessionApp> {
+  late final AppDatabase _database;
+
+  @override
+  void initState() {
+    super.initState();
+    _database = AppDatabase(widget.session.executor);
+  }
+
+  @override
+  Widget build(BuildContext context) => ProductionBootstrapApp(
+    configuration: widget.configuration,
+    database: _database,
+    onBrowserDatabaseLock: widget.lockLocalDatabase,
   );
 }

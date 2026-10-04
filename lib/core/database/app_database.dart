@@ -1,5 +1,5 @@
 import 'package:drift/drift.dart';
-import 'package:drift_flutter/drift_flutter.dart';
+import 'package:providentia/core/database/platform_database.dart';
 
 part 'app_database.g.dart';
 
@@ -145,17 +145,7 @@ class SyncConflictRecords extends Table {
 final class AppDatabase extends _$AppDatabase {
   AppDatabase(super.executor);
 
-  AppDatabase.defaults()
-    : super(
-        driftDatabase(
-          name: 'providentia',
-          native: const DriftNativeOptions(shareAcrossIsolates: true),
-          web: DriftWebOptions(
-            sqlite3Wasm: Uri.parse('sqlite3.wasm'),
-            driftWorker: Uri.parse('drift_worker.dart.js'),
-          ),
-        ),
-      );
+  AppDatabase.defaults() : super(openPlatformDatabase());
 
   @override
   int get schemaVersion => 3;

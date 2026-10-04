@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:pdfrx/pdfrx.dart';
 import 'package:providentia/app/configuration_required_app.dart';
@@ -16,5 +17,9 @@ void main(List<String> launchArguments) {
     return;
   }
 
-  runApp(ProductionBootstrapApp(configuration: configuration));
+  runApp(
+    kIsWeb
+        ? BrowserProtectedBootstrap(configuration: configuration)
+        : ProductionBootstrapApp(configuration: configuration),
+  );
 }

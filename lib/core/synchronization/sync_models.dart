@@ -293,6 +293,9 @@ final class PushOperationResult {
     required this.operationId,
     required this.kind,
     this.acceptedRevision,
+    this.entityId,
+    this.entityType,
+    this.commandType,
     this.changeCursor,
     this.safeMessage,
     this.code,
@@ -305,6 +308,9 @@ final class PushOperationResult {
   final String operationId;
   final PushResultKind kind;
   final int? acceptedRevision;
+  final String? entityId;
+  final String? entityType;
+  final String? commandType;
   final String? changeCursor;
   final String? safeMessage;
   final String? code;

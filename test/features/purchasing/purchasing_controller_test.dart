@@ -427,6 +427,65 @@ void main() {
     },
   );
 
+  testWidgets(
+    'accepted commit clears stale capture error and shows confirmed readback state',
+    (tester) async {
+      final repository = _CaptureRepository();
+      final controller = PurchasingController(
+        repository: repository,
+        homeId: 'home-a',
+        mayWrite: true,
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: PurchasingWorkspace(controller: controller)),
+        ),
+      );
+      repository.emitInitial();
+      await tester.pump();
+      repository._captures.addError(
+        const FormatException('Invalid receipt readback.'),
+      );
+      await tester.pump();
+      expect(controller.state.captureError, isNotNull);
+      repository._captures.add(
+        PurchaseReceiptCapture(
+          id: 'receipt-a',
+          homeId: 'home-a',
+          purchaseDate: DateTime.utc(2026, 10, 3),
+          currency: 'NAD',
+          notes: '',
+          revision: 4,
+          status: PurchaseReceiptStatus.committed,
+          synchronizationState: PurchaseSynchronizationState.pending,
+          commitConfirmed: true,
+          lines: const [],
+        ),
+      );
+      await tester.pump();
+      expect(controller.state.captureError, isNull);
+      expect(controller.state.captureNotice, contains('server confirmed'));
+      expect(
+        find.text(
+          'Commit confirmed by the server; receipt details are refreshing.',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Commit queued locally; awaiting server confirmation.'),
+        findsNothing,
+      );
+      repository._captures.add(null);
+      await tester.pump();
+      expect(
+        controller.state.captureNotice,
+        'The receipt commit is synchronized.',
+      );
+      controller.dispose();
+      await repository.close();
+    },
+  );
+
   test(
     'durable unresolved decision completes review and permits ordinary commit',
     () async {

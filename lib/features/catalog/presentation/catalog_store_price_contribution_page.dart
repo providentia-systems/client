@@ -40,7 +40,7 @@ final class _CatalogStorePriceContributionPageState
     _currency = TextEditingController(
       text: widget.defaultCurrency.trim().toUpperCase(),
     );
-    final now = DateTime.now();
+    final now = catalogStorePriceToday(DateTime.now());
     _observedOn = DateTime(now.year, now.month, now.day);
     widget.inventoryController.start();
     widget.inventoryController.addListener(_reconcileInventory);
@@ -78,7 +78,7 @@ final class _CatalogStorePriceContributionPageState
     _storeName.clear();
     _storeLocation.clear();
     _price.clear();
-    final now = DateTime.now();
+    final now = catalogStorePriceToday(DateTime.now());
     _observedOn = DateTime(now.year, now.month, now.day);
     _clearing = false;
   }
@@ -291,7 +291,7 @@ final class _CatalogStorePriceContributionPageState
           ListTile(
             key: const Key('store-price-observed-on'),
             contentPadding: EdgeInsets.zero,
-            title: const Text('Observed on'),
+            title: const Text('Observed on (UTC date)'),
             subtitle: Text(_date(_observedOn)),
             trailing: const Icon(Icons.calendar_month_outlined),
             onTap: busy ? null : _chooseDate,
@@ -350,7 +350,7 @@ final class _CatalogStorePriceContributionPageState
   }
 
   Future<void> _chooseDate() async {
-    final now = DateTime.now();
+    final now = catalogStorePriceToday(DateTime.now());
     final selected = await showDatePicker(
       context: context,
       initialDate: _observedOn,
@@ -515,3 +515,9 @@ String _date(DateTime value) =>
     '${value.year.toString().padLeft(4, '0')}-'
     '${value.month.toString().padLeft(2, '0')}-'
     '${value.day.toString().padLeft(2, '0')}';
+
+/// Matches the service's UTC date ceiling even around local midnight.
+DateTime catalogStorePriceToday(DateTime instant) {
+  final utc = instant.toUtc();
+  return DateTime.utc(utc.year, utc.month, utc.day);
+}

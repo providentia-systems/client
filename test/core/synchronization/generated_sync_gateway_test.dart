@@ -215,6 +215,14 @@ void main() {
         PushResultKind.acknowledged,
       );
       expect(response.operations.first.result!.acceptedRevision, 4);
+      expect(
+        response.operations.first.result!.entityId,
+        '0198a0b1-c2d3-7e4f-b456-789abcdef012',
+      );
+      expect(
+        response.operations.first.result!.commandType,
+        'inventory.location.create',
+      );
       expect(response.operations.last.isKnown, isFalse);
     },
   );

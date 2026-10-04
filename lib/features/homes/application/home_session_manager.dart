@@ -22,6 +22,9 @@ final class HomeSessionManager {
     void Function(String homeId)? onHomeAccessRevoked,
     ActiveHomeMutationCoordinator? coordinateActiveHomeMutation,
     ActiveHomeClearMutationCoordinator? coordinateActiveHomeClearMutation,
+    Future<HomeSummary?> Function(String homeId)? restoreOfflineHome,
+    Future<void> Function(HomeSummary home)? onHomeVerified,
+    bool Function()? isOffline,
   }) => HomeSessionManager._(
     transport,
     activeHomeStore,
@@ -29,6 +32,9 @@ final class HomeSessionManager {
     onHomeAccessRevoked,
     coordinateActiveHomeMutation,
     coordinateActiveHomeClearMutation,
+    restoreOfflineHome,
+    onHomeVerified,
+    isOffline,
   );
 
   HomeSessionManager._(
@@ -38,6 +44,9 @@ final class HomeSessionManager {
     this._onHomeAccessRevoked,
     this._coordinateActiveHomeMutation,
     this._coordinateActiveHomeClearMutation,
+    this._restoreOfflineHome,
+    this._onHomeVerified,
+    this._isOffline,
   ) : _snapshot = HomeSessionSnapshot(
         status: HomeSessionStatus.selectionRequired,
       );
@@ -48,6 +57,9 @@ final class HomeSessionManager {
   final void Function(String homeId)? _onHomeAccessRevoked;
   final ActiveHomeMutationCoordinator? _coordinateActiveHomeMutation;
   final ActiveHomeClearMutationCoordinator? _coordinateActiveHomeClearMutation;
+  final Future<HomeSummary?> Function(String homeId)? _restoreOfflineHome;
+  final Future<void> Function(HomeSummary home)? _onHomeVerified;
+  final bool Function()? _isOffline;
   final StreamController<HomeSessionSnapshot> _states =
       StreamController<HomeSessionSnapshot>.broadcast(sync: true);
 
@@ -65,6 +77,32 @@ final class HomeSessionManager {
   }) async {
     _ensureOpen();
     final generation = ++_generation;
+    if (_isOffline?.call() == true) {
+      _emit(HomeSessionSnapshot(status: HomeSessionStatus.loading));
+      HomeSummary? home;
+      try {
+        if (sessionActiveHomeId != null) {
+          home = await _restoreOfflineHome?.call(sessionActiveHomeId);
+        }
+      } on Object {
+        /* Invalid or unavailable secure cache cannot grant access. */
+      }
+      if (generation != _generation) return;
+      if (home?.id != sessionActiveHomeId) home = null;
+      _emit(
+        HomeSessionSnapshot(
+          status: home == null
+              ? HomeSessionStatus.failure
+              : HomeSessionStatus.ready,
+          homes: home == null ? const <HomeSummary>[] : <HomeSummary>[home],
+          activeHome: home,
+          safeMessage: home == null
+              ? 'Reconnect to verify access to this home. Saved work is preserved.'
+              : 'Offline: access is limited to this previously verified home.',
+        ),
+      );
+      return;
+    }
     final previouslyActiveHomeId = _snapshot.activeHome?.id;
     final previouslyAuthorizedIds = _snapshot.homes
         .map((home) => home.id)
@@ -275,6 +313,12 @@ final class HomeSessionManager {
   }
 
   Future<void> selectHome(String homeId) async {
+    if (_isOffline?.call() == true) {
+      _emit(
+        _snapshot.copyWith(safeMessage: 'Reconnect before changing homes.'),
+      );
+      return;
+    }
     _ensureOpen();
     if (!_snapshot.homes.any((home) => home.id == homeId)) {
       throw ArgumentError.value(homeId, 'homeId', 'must be an authorized home');
@@ -853,6 +897,12 @@ final class HomeSessionManager {
         return;
       }
       _onActiveHomeChanged?.call(selected.id);
+      try {
+        await _onHomeVerified?.call(selected);
+      } on Object {
+        /* A cache failure does not undo current online authorization. */
+      }
+      if (generation != _generation) return;
       _emit(
         HomeSessionSnapshot(
           status: HomeSessionStatus.ready,

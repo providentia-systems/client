@@ -64,6 +64,12 @@ abstract interface class LocalSyncStore {
   });
 }
 
+/// Optional cache-health port for installations affected by old receipt
+/// serializers. Recovery replaces only the authorized home snapshot.
+abstract interface class ReceiptReadbackRecovery {
+  Future<bool> requiresReceiptReadbackRecovery({required String homeId});
+}
+
 /// Atomic persistence boundary for explicit, home-scoped conflict review.
 abstract interface class LocalSyncConflictStore {
   Stream<List<SyncConflict>> watchUnresolvedConflicts({required String homeId});

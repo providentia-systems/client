@@ -35,6 +35,9 @@ final class PlatformSessionCredentialStore implements SessionCredentialStore {
             ? _requiredString(decoded, 'installationId')
             : deviceId,
         refreshToken: _requiredString(decoded, 'refreshToken'),
+        userId: decoded.containsKey('userId')
+            ? _requiredString(decoded, 'userId')
+            : null,
       );
     } on Object {
       await clear();
@@ -53,6 +56,7 @@ final class PlatformSessionCredentialStore implements SessionCredentialStore {
         'deviceId': session.deviceId,
         'installationId': session.installationId,
         'refreshToken': session.refreshToken,
+        if (session.userId != null) 'userId': session.userId!,
       }),
     );
   }

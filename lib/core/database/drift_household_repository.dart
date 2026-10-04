@@ -1277,10 +1277,45 @@ final class DriftHouseholdRepository
   Stream<PurchaseReceiptCapture?> watchActiveReceiptCapture({
     required String homeId,
   }) {
-    return _watchRecordTypes(
-      homeId: homeId,
-      entityTypes: const <String>{_receiptType, _receiptLineType, _storeType},
-    ).map((rows) => _projectActiveReceiptCapture(homeId, rows));
+    final records = _database.localRecords;
+    final operations = _database.clientOperations;
+    final query =
+        _database.select(records).join([
+          leftOuterJoin(
+            operations,
+            operations.homeId.equalsExp(records.homeId) &
+                operations.entityId.equalsExp(records.entityId) &
+                operations.entityType.equalsExp(records.entityType) &
+                operations.operationType.equals('purchasing.receipt.commit') &
+                operations.state.equals(
+                  ClientOperationState.acknowledged.storageValue,
+                ),
+          ),
+        ])..where(
+          records.homeId.equals(homeId) &
+              records.isTombstone.equals(false) &
+              records.entityType.isIn({
+                _receiptType,
+                _receiptLineType,
+                _storeType,
+              }),
+        );
+    return query.watch().map((rows) {
+      final projections = <String, LocalRecord>{};
+      final confirmed = <String>{};
+      for (final row in rows) {
+        final record = row.readTable(records);
+        projections['${record.entityType}\u0000${record.entityId}'] = record;
+        if (row.readTableOrNull(operations) != null) {
+          confirmed.add(record.entityId);
+        }
+      }
+      return _projectActiveReceiptCapture(
+        homeId,
+        projections.values.toList(growable: false),
+        confirmedCommits: confirmed,
+      );
+    });
   }
 
   @override
@@ -1875,7 +1910,7 @@ final class DriftHouseholdRepository
         );
       },
     );
-    if (result.awaitsServerConfirmation) {
+    if (result.requiresSynchronization) {
       _triggerForegroundSync();
     }
     return result;
@@ -1966,7 +2001,7 @@ final class DriftHouseholdRepository
         );
       },
     );
-    if (result.awaitsServerConfirmation) {
+    if (result.requiresSynchronization) {
       _triggerForegroundSync();
     }
     return result;
@@ -2076,7 +2111,7 @@ final class DriftHouseholdRepository
         disposition: PurchaseMutationDisposition.queued,
       );
     });
-    if (result.awaitsServerConfirmation) {
+    if (result.requiresSynchronization) {
       _triggerForegroundSync();
     }
     return result;
@@ -2557,8 +2592,9 @@ final class DriftHouseholdRepository
 
   PurchaseReceiptCapture? _projectActiveReceiptCapture(
     String homeId,
-    List<LocalRecord> rows,
-  ) {
+    List<LocalRecord> rows, {
+    Set<String> confirmedCommits = const {},
+  }) {
     final stores = <String, String>{};
     for (final row in rows.where((row) => row.entityType == _storeType)) {
       final payload = _validatedProjection(row, homeId);
@@ -2571,8 +2607,15 @@ final class DriftHouseholdRepository
     for (final row in rows.where((row) => row.entityType == _receiptType)) {
       final payload = _validatedProjection(row, homeId);
       final status = _requiredString(payload, 'status');
+      final hasPendingLines = rows.any(
+        (line) =>
+            line.entityType == _receiptLineType &&
+            line.synchronizedAt == null &&
+            _validatedProjection(line, homeId)['receiptId'] == row.entityId,
+      );
       if (status == 'draft' ||
-          (status == 'committed' && row.synchronizedAt == null)) {
+          (status == 'committed' &&
+              (row.synchronizedAt == null || hasPendingLines))) {
         activeReceipts.add(row);
       } else if (status != 'committed' && status != 'cancelled') {
         throw FormatException('Unsupported receipt status "$status".');
@@ -2663,6 +2706,7 @@ final class DriftHouseholdRepository
             ),
       notes: _optionalString(payload['notes']),
       sourceReference: _nullableString(payload['sourceReference']),
+      commitConfirmed: confirmedCommits.contains(receipt.entityId),
       revision: receipt.revision,
       status: receiptStatus,
       synchronizationState:
@@ -4046,10 +4090,22 @@ final class DriftHouseholdRepository
         'The local receipt state cannot be retried safely. Synchronize first.',
       );
     }
+    var readbackComplete = row.synchronizedAt != null;
+    if (readbackComplete && commandType == 'purchasing.receipt.commit') {
+      final lines = await _receiptLineRecords(
+        homeId: row.homeId,
+        receiptId: entityId,
+      );
+      readbackComplete = lines.values.every(
+        (line) => line.synchronizedAt != null,
+      );
+    }
     final state = ClientOperationState.fromStorage(operation.state);
     final disposition = switch (state) {
       ClientOperationState.acknowledged =>
-        PurchaseMutationDisposition.synchronized,
+        !readbackComplete
+            ? PurchaseMutationDisposition.confirmedAwaitingReadback
+            : PurchaseMutationDisposition.synchronized,
       ClientOperationState.pending ||
       ClientOperationState.syncing ||
       ClientOperationState.retryWait =>

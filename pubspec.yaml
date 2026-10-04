@@ -48,3 +48,10 @@ dependency_overrides:
 
 flutter:
   uses-material-design: true
+
+# sqlite3 3.x verifies the pinned release binary hash before bundling it.
+# Every native build/test uses SQLCipher; an ordinary SQLite build fails closed.
+hooks:
+  user_defines:
+    sqlite3:
+      source: sqlcipher

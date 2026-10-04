@@ -4,10 +4,12 @@ import 'package:drift/drift.dart';
 import 'package:providentia/core/database/app_database.dart';
 import 'package:providentia/core/database/client_local_record_types.dart';
 import 'package:providentia/core/security/uuid_v4.dart';
+import 'package:providentia/core/synchronization/receipt_projection_validation.dart';
 import 'package:providentia/core/synchronization/sync_models.dart';
 import 'package:providentia/core/synchronization/sync_ports.dart';
 
-final class DriftLocalSyncRepository implements LocalSyncRepository {
+final class DriftLocalSyncRepository
+    implements LocalSyncRepository, ReceiptReadbackRecovery {
   factory DriftLocalSyncRepository(
     AppDatabase database, {
     DateTime Function()? clock,
@@ -315,6 +317,12 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
             await (_database.select(_database.clientOperations)
                   ..where((row) => row.operationId.equals(result.operationId)))
                 .getSingle();
+        // Completion is immutable. A late retry/error must not resurrect an
+        // acknowledged (or explicitly superseded) command after restart.
+        if (operation.state == ClientOperationState.acknowledged.storageValue ||
+            operation.state == ClientOperationState.superseded.storageValue) {
+          continue;
+        }
         final nextState = _stateFor(result.kind);
         final nextRetryCount = result.kind == PushResultKind.retryableFailure
             ? operation.retryCount + 1
@@ -350,7 +358,11 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
         );
 
         if (result.kind == PushResultKind.acknowledged &&
-            result.acceptedRevision != null) {
+            result.acceptedRevision != null &&
+            !operation.operationType.startsWith('purchasing.receipt')) {
+          // A receipt command result confirms execution, not a fully decoded
+          // resource. Keep its optimistic projection pending until validated
+          // authoritative readback, even when an acknowledgement has a revision.
           await (_database.update(_database.localRecords)..where(
                 (row) =>
                     row.homeId.equals(operation.homeId) &
@@ -396,6 +408,46 @@ final class DriftLocalSyncRepository implements LocalSyncRepository {
         }
       }
     });
+  }
+
+  @override
+  Future<bool> requiresReceiptReadbackRecovery({required String homeId}) async {
+    _requireCurrent();
+    final rows =
+        await (_database.select(_database.localRecords)..where(
+              (row) =>
+                  row.homeId.equals(homeId) &
+                  row.synchronizedAt.isNotNull() &
+                  row.isTombstone.equals(false) &
+                  row.entityType.isIn({
+                    'purchasing-receipt',
+                    'purchasing-receipt-line',
+                  }),
+            ))
+            .get();
+    _requireCurrent();
+    for (final row in rows) {
+      try {
+        validateReceiptProjection(
+          RemoteChange(
+            homeId: homeId,
+            entityId: row.entityId,
+            entityType: row.entityType,
+            revision: row.revision,
+            kind: RemoteChangeKind.upsert,
+            cursor: '',
+            serverTimestamp: row.updatedAt,
+            payload: _decodePayload(row.payload),
+          ),
+        );
+      } on FormatException {
+        // Older builds could advance the cursor past undecodable purchase
+        // data. A fresh authorized snapshot repairs that cache while retaining
+        // outbox intent and immutable operation identities.
+        return true;
+      }
+    }
+    return false;
   }
 
   @override

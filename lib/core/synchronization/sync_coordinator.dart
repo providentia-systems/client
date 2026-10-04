@@ -124,26 +124,14 @@ final class SyncCoordinator implements AppSynchronization {
                 .validateOperationBinding(operation);
           }
           PushOperationResult result;
-          if (interruptedOperationIds.contains(operation.operationId)) {
-            // The process may have stopped after the server durably accepted
-            // this command but before the client stored its receipt. Ask for
-            // that immutable receipt before reusing the exact operation ID.
-            OperationStatusItem? recovered;
-            try {
-              recovered = await _statusFor(operation);
-            } on BindingSyncException {
-              rethrow;
-            } on AuthenticationSyncException {
-              rethrow;
-            } on AuthorizationSyncException {
-              rethrow;
-            } on Exception {
-              // Status recovery is an optimization over the server's durable
-              // idempotency key. If it is unavailable after a restart, the
-              // exact command is still safe to submit again.
-            }
+          if (interruptedOperationIds.contains(operation.operationId) ||
+              operation.retryCount > 0) {
+            // A persisted attempt may already have committed. An unavailable
+            // or malformed status is not evidence that it is unknown: defer
+            // until the immutable result can be checked with this binding.
+            final recovered = await _statusFor(operation);
             result =
-                recovered?.result ??
+                recovered.result ??
                 await _pushOne(
                   operation: operation,
                   homeId: homeId,
@@ -156,21 +144,17 @@ final class SyncCoordinator implements AppSynchronization {
                 homeId: homeId,
                 lastPulledCursor: lastPulledCursor,
               );
-            } on RetryableSyncException catch (ambiguousFailure) {
-              OperationStatusItem recovered;
-              try {
-                recovered = await _statusFor(operation);
-              } on BindingSyncException {
-                rethrow;
-              } on AuthenticationSyncException {
-                rethrow;
-              } on AuthorizationSyncException {
-                rethrow;
-              } on Exception {
-                // Do not issue a second command while the first transport
-                // outcome is ambiguous and its status cannot be established.
-                throw ambiguousFailure;
-              }
+            } on BindingSyncException {
+              rethrow;
+            } on AuthenticationSyncException {
+              rethrow;
+            } on AuthorizationSyncException {
+              rethrow;
+            } on Exception {
+              // Both transport loss and a malformed successful response may
+              // follow a durable commit. Only an explicit unknown result
+              // permits one exact retry, never a replacement operation ID.
+              final recovered = await _statusFor(operation);
               result =
                   recovered.result ??
                   await _pushOne(
@@ -180,6 +164,7 @@ final class SyncCoordinator implements AppSynchronization {
                   );
             }
           }
+          _validateResultBinding(operation, result);
           await _local.applyPushResults(
             results: <PushOperationResult>[result],
             now: _clock().toUtc(),
@@ -251,6 +236,12 @@ final class SyncCoordinator implements AppSynchronization {
       }
 
       var cursor = await _local.cursorForHome(homeId);
+      final recovery = _local;
+      if (recovery is ReceiptReadbackRecovery &&
+          await (recovery as ReceiptReadbackRecovery)
+              .requiresReceiptReadbackRecovery(homeId: homeId)) {
+        cursor = null;
+      }
       if (cursor == null) {
         final bootstrap = await _remote.bootstrap(homeId: homeId);
         await _local.replaceWithBootstrap(homeId: homeId, page: bootstrap);
@@ -421,6 +412,7 @@ final class SyncCoordinator implements AppSynchronization {
         'Synchronization returned an invalid command result.',
       );
     }
+    _validateResultBinding(operation, response.results.single);
     return response.results.single;
   }
 
@@ -454,6 +446,50 @@ final class SyncCoordinator implements AppSynchronization {
         'Operation status returned an invalid command identity.',
       );
     }
+    final result = response.operations.single.result;
+    if (result != null) _validateResultBinding(operation, result);
     return response.operations.single;
+  }
+
+  void _validateResultBinding(
+    PendingClientOperation operation,
+    PushOperationResult result,
+  ) {
+    if (result.operationId != operation.operationId ||
+        (result.entityId != null && result.entityId != operation.entityId) ||
+        (result.entityType != null &&
+            result.entityType != operation.entityType) ||
+        (result.commandType != null &&
+            result.commandType != operation.operationType) ||
+        (result.acceptedRevision != null && result.acceptedRevision! < 0)) {
+      throw const FormatException(
+        'Synchronization result binding was invalid.',
+      );
+    }
+    final payload = result.remotePayload;
+    if (payload != null &&
+        result.kind == PushResultKind.acknowledged &&
+        ((operation.entityType == 'purchasing-receipt' &&
+                payload['receiptId'] != null &&
+                payload['receiptId'] != operation.entityId) ||
+            (operation.entityType == 'purchasing-receipt-line' &&
+                payload['receiptId'] != null &&
+                payload['receiptId'] != operation.payload['receiptId']) ||
+            (payload['revision'] != null &&
+                result.acceptedRevision != null &&
+                payload['revision'] != result.acceptedRevision))) {
+      throw const FormatException(
+        'Synchronization result resource binding was invalid.',
+      );
+    }
+    if (payload != null &&
+        ((payload['homeId'] != null && payload['homeId'] != operation.homeId) ||
+            (operation.operationType.startsWith('purchasing.receipt') &&
+                payload['id'] != null &&
+                payload['id'] != operation.entityId))) {
+      throw const FormatException(
+        'Synchronization result representation crossed its binding.',
+      );
+    }
   }
 }

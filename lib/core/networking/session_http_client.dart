@@ -27,6 +27,12 @@ final class SessionHttpClient extends http.BaseClient {
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
     // Capture before the first await: request bytes must never be sent using
     // credentials acquired by a later login or a different account.
+    if (_sessions.snapshot.isOffline) {
+      throw http.ClientException(
+        'Offline access requires online session and home revalidation before requests.',
+        request.url,
+      );
+    }
     final binding = _binding();
     final body = await request.finalize().toBytes();
     if (!_matches(binding)) return _authenticationRequired(request, body);
