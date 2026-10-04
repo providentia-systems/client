@@ -27,6 +27,16 @@ and consumes it once. Native sessions use protected device credentials; web
 sessions use HttpOnly cookies and CSRF protection. No authentication callback
 URL or browser approval step is required.
 
+Native household databases now use SQLCipher with an OS-secured installation
+key and verified migration of existing work. Previously verified native users
+can reopen their saved active home during a bounded network outage; queued work
+keeps its identity and waits for online access revalidation. The browser uses a
+separate local-data passphrase to encrypt its persistent database, followed by
+the same email-code account sign-in. Losing that passphrase can make unsynced
+browser data unrecoverable. See [local database protection](docs/local-database-security.md),
+[offline access](docs/offline-cold-start-security.md), and
+[receipt confirmation recovery](docs/receipt-confirmation-recovery.md).
+
 Account profiles, verified email aliases, cropped avatars, country-policy
 acceptance, home profiles, invitations and individual member permissions are
 composed in this client. Administrators assign one account group and one group

@@ -15,6 +15,17 @@ import 'package:providentia/features/inventory/domain/inventory_models.dart';
 import 'package:providentia/features/inventory/presentation/inventory_controller.dart';
 
 void main() {
+  test('price form date matches UTC validation across local midnight', () {
+    expect(
+      catalogStorePriceToday(DateTime.parse('2026-08-25T00:30:00+02:00')),
+      DateTime.utc(2026, 8, 24),
+    );
+    expect(
+      catalogStorePriceToday(DateTime.parse('2026-08-24T23:30:00-07:00')),
+      DateTime.utc(2026, 8, 25),
+    );
+  });
+
   test('store-price preview is a closed, normalized public DTO', () {
     final service = CatalogStorePriceService(
       _StorePriceRepository(),

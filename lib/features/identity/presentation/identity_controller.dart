@@ -19,6 +19,10 @@ final class IdentityController extends ChangeNotifier {
 
   IdentitySessionSnapshot get snapshot => _snapshot;
 
+  bool get localAccessIsCurrent => _manager.localAccessIsCurrent;
+
+  Future<void> checkOfflineAccess() => _manager.checkOfflineAccess();
+
   bool get isBusy =>
       _snapshot.status == IdentitySessionStatus.restoring ||
       _snapshot.status == IdentitySessionStatus.requestingEmailCode ||

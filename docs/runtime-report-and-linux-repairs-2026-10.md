@@ -47,7 +47,8 @@ The headless verifier needs `xvfb` and `x11-utils` (`xwininfo`). These are test
 utilities, not extra application runtime dependencies. It probes the application
 for 60 quarter-second observations inside an outer timeout. The helper cleans up
 only its own process and the package verifier deletes only its temporary profile.
-Existing user databases, keyring credentials and storage paths are unchanged.
+That initial startup repair left storage unchanged; the follow-on native
+encryption migration and its key lifecycle are documented separately below.
 
 `tool/first_frame_smoke.test.mjs` covers visible success, an invisible live
 process, a live process logging a startup exception, immediate process exit and
@@ -70,11 +71,23 @@ A visible first frame proves startup, not successful authentication or a complet
 receipt/shopping workflow. Platform build proofs likewise do not replace physical
 Android/iOS acceptance or real cross-installation household testing.
 
-## Scope still outstanding from the architecture report
+## Follow-on repairs on the same branch
 
-This change does not claim to repair the backend's 15 recorded response-contract
-mismatches, receipt commit/readback reconciliation, offline cold-start access or
-local database encryption. Strict Client decoding is not weakened to accommodate
-invalid backend responses. No pending receipt should be manually recommitted or
-assigned a new operation identity to work around an uncertain server outcome.
-Those findings remain separate release acceptance items.
+The initial report/Linux repair commit did not cover receipt recovery, offline
+cold start or at-rest database protection. The same branch now adds those
+implementations, described in [receipt confirmation](receipt-confirmation-recovery.md),
+[offline access](offline-cold-start-security.md) and
+[database security](local-database-security.md). They preserve strict contract
+parsing and immutable operation identities; a pending receipt is never manually
+recommitted with a new identity to mask an uncertain server outcome.
+
+The full-suite rerun also caught a UTC/local-midnight mismatch in the store-price
+form. Its default date and picker ceiling now use the same UTC date as the
+application validation, with a boundary regression; future-date validation is
+unchanged.
+
+Backend response-contract serializers must still conform to the frozen API.
+Client recovery does not normalize invalid server responses into success.
+Platform build evidence and Linux acceptance do not stand in for physical mobile
+acceptance, production deployment, or legacy browser-cache migration. No merge
+or deployment is part of this repair task.

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:providentia/features/identity/application/identity_ports.dart';
+import 'package:providentia/features/identity/application/offline_session_store.dart';
 import 'package:providentia/features/identity/domain/identity_models.dart';
 
 /// Owns the origin-bound email-code verification and authenticated session.
@@ -17,6 +18,8 @@ final class IdentitySessionManager implements SessionAuthorizer {
     Duration logoutTimeout = const Duration(seconds: 15),
     Duration requestTimeout = const Duration(seconds: 15),
     int? requestedSessionIdleSeconds,
+    OfflineSessionStore? offlineSessionStore,
+    Duration offlineAccessWindow = const Duration(hours: 24),
   }) => IdentitySessionManager._(
     transport,
     credentialStore,
@@ -28,6 +31,8 @@ final class IdentitySessionManager implements SessionAuthorizer {
     logoutTimeout,
     requestTimeout,
     requestedSessionIdleSeconds,
+    offlineSessionStore,
+    offlineAccessWindow,
   );
 
   IdentitySessionManager._(
@@ -41,7 +46,13 @@ final class IdentitySessionManager implements SessionAuthorizer {
     this.logoutTimeout,
     this.requestTimeout,
     this.requestedSessionIdleSeconds,
+    this._offlineSessionStore,
+    this.offlineAccessWindow,
   ) : _snapshot = const IdentitySessionSnapshot.signedOut() {
+    if (offlineAccessWindow <= Duration.zero ||
+        offlineAccessWindow > const Duration(hours: 24)) {
+      throw ArgumentError.value(offlineAccessWindow, 'offlineAccessWindow');
+    }
     if (refreshLeeway.isNegative) {
       throw ArgumentError.value(refreshLeeway, 'refreshLeeway');
     }
@@ -86,6 +97,14 @@ final class IdentitySessionManager implements SessionAuthorizer {
   final Duration logoutTimeout;
   final Duration requestTimeout;
   final int? requestedSessionIdleSeconds;
+  final OfflineSessionStore? _offlineSessionStore;
+  final Duration offlineAccessWindow;
+  OfflineSessionLease? _offlineLease;
+  Timer? _offlineExpiryTimer;
+  Timer? _offlineObservationTimer;
+  Stopwatch? _offlineElapsed;
+  DateTime? _offlineStartedAt;
+  Future<void>? _offlineObservation;
 
   IdentitySessionSnapshot _snapshot;
   PendingEmailCode? _pendingEmailCode;
@@ -236,6 +255,10 @@ final class IdentitySessionManager implements SessionAuthorizer {
   }
 
   Future<bool> _ensureFresh() async {
+    if (_snapshot.isOffline) {
+      await checkOfflineAccess();
+      return false;
+    }
     final session = _snapshot.session;
     final now = _clock().toUtc();
     if (session != null && session.isExpiredAt(now)) {
@@ -341,6 +364,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
           )
           .timeout(requestTimeout);
       _validateCurrentUser(user, _snapshot.session!);
+      await _rememberVerifiedIdentity(_snapshot.session!, user);
       _emit(_snapshot.copyWith(currentUser: user, clearMessage: true));
       return user;
     } on TimeoutException {
@@ -429,6 +453,16 @@ final class IdentitySessionManager implements SessionAuthorizer {
     _secrets = null;
     _emit(const IdentitySessionSnapshot.signedOut());
 
+    _offlineExpiryTimer?.cancel();
+    _offlineObservationTimer?.cancel();
+    _offlineElapsed?.stop();
+    _offlineLease = null;
+    try {
+      await _offlineSessionStore?.clear();
+    } on Object {
+      // Missing native credentials or the durable logout journal still
+      // prevent a leftover lease from independently granting local access.
+    }
     var localCredentialCleared = true;
     try {
       await _credentialStoreOperation<void>(_credentialStore.clear);
@@ -450,8 +484,9 @@ final class IdentitySessionManager implements SessionAuthorizer {
       _emit(
         IdentitySessionSnapshot(
           status: IdentitySessionStatus.signedOut,
-          safeMessage:
-              'Signed out on this screen. Providentia will finish clearing the browser session before restoring it.',
+          safeMessage: sessionTransport == ClientSessionTransport.webCookie
+              ? 'Signed out on this screen. Providentia will finish clearing the browser session before restoring it.'
+              : 'Signed out on this device. Remote sign-out could not be confirmed.',
         ),
       );
     }
@@ -572,6 +607,20 @@ final class IdentitySessionManager implements SessionAuthorizer {
             .toList(growable: false),
       ),
     );
+    final lease = _offlineLease;
+    if (lease != null && !_snapshot.isOffline) {
+      if (canMirrorCurrentUser &&
+          (homeId == null ||
+              lease.user.homes.any((home) => home.id == homeId))) {
+        _offlineLease = lease.withActiveHome(homeId);
+        unawaited(_saveOfflineLease(_offlineLease!));
+      } else {
+        // Creating/accepting a home can make the current online identity newer
+        // than its cached lease. Never fabricate membership or throw from the
+        // ordinary home activation path; refresh /me before caching it again.
+        unawaited(invalidateOfflineAccess());
+      }
+    }
     if (!canMirrorCurrentUser) {
       unawaited(refreshCurrentUser().catchError((_) => null));
     }
@@ -784,6 +833,9 @@ final class IdentitySessionManager implements SessionAuthorizer {
       return;
     }
     _invalidateLifecycle();
+    _offlineExpiryTimer?.cancel();
+    _offlineObservationTimer?.cancel();
+    _offlineElapsed?.stop();
     _disposed = true;
     _secrets = null;
     await _coordinationSubscription.cancel();
@@ -1311,6 +1363,10 @@ final class IdentitySessionManager implements SessionAuthorizer {
         );
         return false;
       }
+      if (expectedStoredSession != null &&
+          await _restoreOffline(expectedStoredSession, generation)) {
+        return true;
+      }
       if (_isCurrent(generation)) {
         _emitTransientRefreshFailure(
           'The session refresh timed out. Check your connection and try again.',
@@ -1356,6 +1412,12 @@ final class IdentitySessionManager implements SessionAuthorizer {
           );
         }
       } else {
+        if (expectedStoredSession != null &&
+            (error.kind == IdentityFailureKind.network ||
+                error.kind == IdentityFailureKind.unavailable) &&
+            await _restoreOffline(expectedStoredSession, generation)) {
+          return true;
+        }
         _emitTransientRefreshFailure(error.safeMessage);
       }
       return false;
@@ -1432,6 +1494,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
               deviceId: grant.metadata.deviceId,
               installationId: grant.metadata.installationId,
               refreshToken: grant.secrets.refreshToken!,
+              userId: grant.metadata.userId,
             ),
           ),
         );
@@ -1507,6 +1570,16 @@ final class IdentitySessionManager implements SessionAuthorizer {
       }
       return false;
     }
+    _offlineExpiryTimer?.cancel();
+    _offlineObservationTimer?.cancel();
+    _offlineElapsed?.stop();
+    _offlineLease = null;
+    if (sessionTransport == ClientSessionTransport.nativeBearer &&
+        bootstrapMessage == null &&
+        currentUser != null) {
+      await _rememberVerifiedIdentity(grant.metadata, currentUser);
+      if (!_isCurrent(generation)) return false;
+    }
     _emit(
       IdentitySessionSnapshot(
         status: IdentitySessionStatus.authenticated,
@@ -1560,6 +1633,7 @@ final class IdentitySessionManager implements SessionAuthorizer {
   void _validateCurrentUser(CurrentUserView user, SessionMetadata session) {
     if (user.userId != session.userId ||
         !user.currentSession.current ||
+        user.currentSession.isRevoked ||
         user.currentSession.id != session.sessionId ||
         user.currentSession.deviceId != session.deviceId ||
         user.currentSession.transport != session.transport ||
@@ -1592,7 +1666,9 @@ final class IdentitySessionManager implements SessionAuthorizer {
     if (expectedStoredSession != null &&
         (metadata.sessionId != expectedStoredSession.sessionId ||
             metadata.deviceId != expectedStoredSession.deviceId ||
-            metadata.installationId != expectedStoredSession.installationId)) {
+            metadata.installationId != expectedStoredSession.installationId ||
+            (expectedStoredSession.userId != null &&
+                metadata.userId != expectedStoredSession.userId))) {
       throw const IdentityTransportException(
         kind: IdentityFailureKind.validation,
         safeMessage: 'The saved session identity changed unexpectedly.',
@@ -1900,12 +1976,228 @@ final class IdentitySessionManager implements SessionAuthorizer {
     }
   }
 
+  Future<void> _rememberVerifiedIdentity(
+    SessionMetadata session,
+    CurrentUserView user,
+  ) async {
+    if (sessionTransport != ClientSessionTransport.nativeBearer ||
+        _offlineSessionStore == null) {
+      return;
+    }
+    final now = _clock().toUtc();
+    var expiresAt = now.add(offlineAccessWindow);
+    for (final deadline in <DateTime?>[
+      session.idleExpiresAt,
+      session.refreshExpiresAt,
+    ]) {
+      if (deadline != null && deadline.isBefore(expiresAt)) {
+        expiresAt = deadline;
+      }
+    }
+    final lease = OfflineSessionLease(
+      session: session,
+      user: user,
+      verifiedAt: now,
+      lastObservedAt: now,
+      expiresAt: expiresAt,
+    );
+    _offlineLease = lease;
+    await _saveOfflineLease(lease);
+  }
+
+  Future<void> _saveOfflineLease(OfflineSessionLease lease) async {
+    try {
+      await _offlineSessionStore?.write(lease);
+    } on Object {
+      // Online sign-in remains usable if local offline caching is unavailable.
+      // Clear any previous grant rather than extending an unverified lease.
+      try {
+        await _offlineSessionStore?.clear();
+      } on Object {
+        /* fail closed on read */
+      }
+    }
+  }
+
+  Future<bool> _restoreOffline(
+    StoredNativeSession saved,
+    int generation,
+  ) async {
+    if (sessionTransport != ClientSessionTransport.nativeBearer ||
+        _offlineSessionStore == null ||
+        !_isCurrent(generation)) {
+      return false;
+    }
+    try {
+      final lease = await _offlineSessionStore.read();
+      final now = _clock().toUtc();
+      if (lease == null ||
+          !lease.permits(saved, now) ||
+          lease.expiresAt.difference(lease.verifiedAt) > offlineAccessWindow ||
+          !_isCurrent(generation)) {
+        return false;
+      }
+      _validateCurrentUser(lease.user, lease.session);
+      final observed = lease.observedAt(now);
+      // Persist the high-water clock before making cached data accessible.
+      await _offlineSessionStore.write(observed);
+      if (!_isCurrent(generation)) return false;
+      _offlineLease = observed;
+      _secrets = SessionSecrets(refreshToken: saved.refreshToken);
+      _emit(
+        IdentitySessionSnapshot(
+          status: IdentitySessionStatus.offline,
+          session: lease.session,
+          currentUser: lease.user,
+          safeMessage:
+              'Offline: using previously verified access. Reconnect to verify access and synchronize.',
+        ),
+      );
+      _offlineExpiryTimer?.cancel();
+      _offlineElapsed = Stopwatch()..start();
+      _offlineStartedAt = now;
+      _offlineObservationTimer?.cancel();
+      _offlineObservationTimer = Timer.periodic(const Duration(minutes: 1), (
+        _,
+      ) {
+        unawaited(checkOfflineAccess());
+      });
+      _offlineExpiryTimer = Timer(lease.expiresAt.difference(now), () {
+        if (_isCurrent(generation) && _snapshot.isOffline) {
+          unawaited(_expireOfflineAccess());
+        }
+      });
+      return true;
+    } on Object {
+      return false;
+    }
+  }
+
+  /// Also checked immediately before local repository mutations. A changed
+  /// wall clock cannot extend an open lease beyond monotonic elapsed time.
+  bool get localAccessIsCurrent {
+    if (!_snapshot.isOffline) return _snapshot.isAuthenticated;
+    final lease = _offlineLease;
+    final started = _offlineStartedAt;
+    if (lease == null || started == null) return false;
+    final now = _clock().toUtc();
+    final monotonicNow = started.add(_offlineElapsed?.elapsed ?? Duration.zero);
+    return !now.isBefore(lease.lastObservedAt) &&
+        !now.isBefore(monotonicNow.subtract(const Duration(seconds: 5))) &&
+        lease.expiresAt.isAfter(now) &&
+        lease.expiresAt.isAfter(monotonicNow) &&
+        !lease.session.isExpiredAt(now);
+  }
+
+  Future<void> checkOfflineAccess() {
+    final existing = _offlineObservation;
+    if (existing != null) return existing;
+    final future = _observeOfflineAccess();
+    _offlineObservation = future;
+    return future.whenComplete(() {
+      if (identical(_offlineObservation, future)) _offlineObservation = null;
+    });
+  }
+
+  Future<void> _observeOfflineAccess() async {
+    if (!_snapshot.isOffline) return;
+    if (!localAccessIsCurrent) return _expireOfflineAccess();
+    final lease = _offlineLease;
+    if (lease == null) return;
+    final generation = _lifecycleGeneration;
+    final observed = lease.observedAt(_clock().toUtc());
+    try {
+      await _offlineSessionStore?.write(observed);
+      if (_isCurrent(generation) && _snapshot.isOffline) {
+        _offlineLease = observed;
+      }
+    } on Object {
+      if (_isCurrent(generation) && _snapshot.isOffline) {
+        await _expireOfflineAccess();
+      }
+    }
+  }
+
+  Future<void> _expireOfflineAccess() async {
+    _offlineExpiryTimer?.cancel();
+    _offlineObservationTimer?.cancel();
+    _offlineElapsed?.stop();
+    _invalidateLifecycle();
+    _secrets = null;
+    _offlineLease = null;
+    _emit(
+      IdentitySessionSnapshot(
+        status: IdentitySessionStatus.sessionExpired,
+        safeMessage:
+            'Offline access expired or the device clock changed. Reconnect to verify your session. Saved work is preserved.',
+      ),
+    );
+    try {
+      await _offlineSessionStore?.clear();
+    } on Object {
+      // If the lease cannot be durably retired, use the independent existing
+      // logout journal and credential deletion rather than allowing rollback
+      // to revive an expired cached grant on the next process start.
+      try {
+        await _pendingStore<void>(_pendingEmailCodeStore.markLogoutIntent);
+      } on Object {
+        /* credential deletion remains an independent barrier */
+      }
+      await _bestEffortClearSessionStore();
+    }
+  }
+
+  /// Retires cached local authority after a known home/permission revocation.
+  /// A failed durable clear cannot be ignored and later used as offline access.
+  Future<void> invalidateOfflineAccess() async {
+    if (_snapshot.isOffline) return _expireOfflineAccess();
+    _offlineLease = null;
+    _offlineExpiryTimer?.cancel();
+    _offlineObservationTimer?.cancel();
+    _offlineElapsed?.stop();
+    try {
+      await _offlineSessionStore?.clear();
+    } on Object {
+      try {
+        await _pendingStore<void>(_pendingEmailCodeStore.markLogoutIntent);
+      } on Object {
+        /* native credential deletion is a second barrier */
+      }
+      await _clearSession();
+      _invalidateLifecycle();
+      _emit(
+        IdentitySessionSnapshot(
+          status: IdentitySessionStatus.sessionExpired,
+          safeMessage:
+              'Cached access could not be retired safely. Sign in again when secure storage is available.',
+        ),
+      );
+    }
+  }
+
   Future<void> _clearSession() async {
     _secrets = null;
+    if (sessionTransport == ClientSessionTransport.nativeBearer) {
+      try {
+        await _pendingStore<void>(_pendingEmailCodeStore.markLogoutIntent);
+      } on Object {
+        // Secure credential and lease deletion are independent barriers.
+      }
+    }
     await _bestEffortClearSessionStore();
   }
 
   Future<void> _bestEffortClearSessionStore() async {
+    _offlineExpiryTimer?.cancel();
+    _offlineObservationTimer?.cancel();
+    _offlineElapsed?.stop();
+    _offlineLease = null;
+    try {
+      await _offlineSessionStore?.clear();
+    } on Object {
+      // The durable logout journal and missing native credential also block
+      // local restore. Cached data is never an independent credential.
+    }
     try {
       await _credentialStoreOperation<void>(_credentialStore.clear);
     } on Object {

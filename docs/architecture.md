@@ -86,3 +86,16 @@ queue credentials must never be compiled into Flutter. See
 [local development](local-development.md) for the supported launch topology.
 
 Current household metadata projection, category-cache and unit-label boundaries are documented in [Household workflows](household-workflows.md).
+
+## Native local data protection and cold start
+
+Native default databases use SQLCipher with an OS-secured installation key and
+verified lossless migration of legacy records/outbox rows. Offline cold starts
+use a bounded secure-store identity/home lease; ordinary preferences never
+grant access. Local-only access blocks all authenticated network requests until
+online session and home revalidation. Logout preserves encrypted pending work
+but retires local-access authority. See [offline policy](offline-cold-start-security.md)
+and [database/key lifecycle](local-database-security.md). Web uses a separate user-entered local-data passphrase, browser WebCrypto and
+atomic encrypted IndexedDB snapshots of memory-only SQLite. Account sign-in
+remains email-code based; no native offline grant is enabled on web. Legacy web
+storage is preserved behind an explicit recovery gate, not silently migrated.

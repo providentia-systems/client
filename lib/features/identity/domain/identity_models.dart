@@ -9,6 +9,7 @@ enum IdentitySessionStatus {
   waitingForEmailCode,
   verifyingEmailCode,
   authenticated,
+  offline,
   refreshing,
   emailCodeExpired,
   sessionExpired,
@@ -194,17 +195,20 @@ final class StoredNativeSession {
     required this.deviceId,
     String? installationId,
     required this.refreshToken,
+    this.userId,
   }) : installationId = installationId ?? deviceId {
     _requireUuid(sessionId, 'sessionId');
     _requireUuid(deviceId, 'deviceId');
     _requireUuid(this.installationId, 'installationId');
     _requireNonEmpty(refreshToken, 'refreshToken');
+    if (userId != null) _requireUuid(userId!, 'userId');
   }
 
   final String sessionId;
   final String deviceId;
   final String installationId;
   final String refreshToken;
+  final String? userId;
 }
 
 final class DeviceSessionView {
@@ -428,7 +432,10 @@ final class IdentitySessionSnapshot {
   final String? safeMessage;
   final List<DeviceSessionView> deviceSessions;
 
+  bool get isOffline => status == IdentitySessionStatus.offline;
+
   bool get isAuthenticated =>
+      isOffline ||
       status == IdentitySessionStatus.authenticated ||
       status == IdentitySessionStatus.refreshing;
 

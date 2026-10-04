@@ -12,10 +12,21 @@ and release test pass.
 | macOS | macOS 10.15–26, x64 and Arm64 | Release compile on `macos-15`; runner architecture only |
 | Debian | Debian 10–13, x64 and Arm64 | No Debian runner in Phase 1 |
 | Ubuntu | Ubuntu 20.04–24.04 LTS, x64 and Arm64 | Release compile on Ubuntu 24.04 x64 |
-| Chrome | Latest two supported releases | Web compile only; browser matrix pending |
-| Firefox | Latest two supported releases | Web compile only; browser matrix pending |
-| Safari | 15.6+ | Web compile only; browser matrix pending |
-| Edge | Latest two supported releases | Web compile only; browser matrix pending |
+| Chrome | Current release meeting the secure-storage features below | Web compile plus required PR synthetic WASM/WebCrypto persistence probe; final CI outcome required |
+| Firefox | Feature-gated, version acceptance pending | Runtime browser matrix pending |
+| Safari | Feature-gated, version acceptance pending | Runtime browser matrix pending; no Safari 15.6+ guarantee |
+| Edge | Feature-gated, version acceptance pending | Runtime browser matrix pending |
+
+Browser storage requires HTTPS (or a browser-trusted loopback context),
+WebCrypto PBKDF2/AES-GCM, Web Locks, IndexedDB database enumeration and strict
+transaction durability, OPFS directory inspection, and the pinned SQLite WASM.
+The app refuses unsupported/unreadable storage rather than falling back to
+plaintext or an ephemeral database. Unlock uses a separate local-data passphrase;
+account sign-in remains the existing email-code flow. See
+[database security](local-database-security.md) for loss/recovery and legacy
+browser-data handling. The October repair workspace cannot run Chromium because
+of environment process-socket restrictions; the final PR CI probe is the
+required real-browser evidence, and does not certify a complete browser matrix.
 
 The earlier Ubuntu 26.04 statement is not carried forward because the official
 Flutter table verified for this phase ends at Ubuntu 24.04 LTS.

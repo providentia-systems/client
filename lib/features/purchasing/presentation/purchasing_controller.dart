@@ -78,6 +78,8 @@ final class PurchasingController extends ChangeNotifier {
   List<PurchaseMatchCandidate> _legacyMatchCandidates =
       const <PurchaseMatchCandidate>[];
   bool _itemMasterVerified = false;
+  bool _captureReadFailed = false;
+  String? _lastSynchronizedReceiptId;
   final Map<String, String> _createdHomeProductIds = <String, String>{};
   PurchasingState _state = const PurchasingState();
 
@@ -204,8 +206,9 @@ final class PurchasingController extends ChangeNotifier {
               return;
             }
             final confirmed =
-                _state.capture?.commitAwaitingConfirmation == true &&
+                _state.capture?.commitAwaitingReadback == true &&
                 capture == null;
+            if (confirmed) _lastSynchronizedReceiptId = _state.capture!.id;
             _state = PurchasingState(
               lines: _state.lines,
               matchCandidates: _state.matchCandidates,
@@ -215,13 +218,17 @@ final class PurchasingController extends ChangeNotifier {
               capture: capture,
               captureNotice: confirmed
                   ? 'The receipt commit is synchronized.'
+                  : capture?.commitConfirmed == true
+                  ? 'The server confirmed the receipt commit. Receipt details are refreshing.'
                   : _state.captureNotice,
-              captureError: _state.captureError,
+              captureError: _captureReadFailed ? null : _state.captureError,
               safeError: _state.safeError,
             );
+            _captureReadFailed = false;
             notifyListeners();
           },
           onError: (Object error) {
+            _captureReadFailed = true;
             _setCaptureError(_captureSafeError(error));
           },
         );
@@ -561,7 +568,7 @@ final class PurchasingController extends ChangeNotifier {
     if (capture == null) {
       return _rejectCapture('No draft receipt is available to commit.');
     }
-    if (capture.commitAwaitingConfirmation) {
+    if (capture.commitAwaitingReadback) {
       return _runCaptureMutation(
         () => _captureRepository!.commitReceipt(
           homeId: homeId,
@@ -638,6 +645,9 @@ final class PurchasingController extends ChangeNotifier {
         captureNotice:
             result.disposition == PurchaseMutationDisposition.synchronized
             ? 'The product and line approval are synchronized.'
+            : result.disposition ==
+                  PurchaseMutationDisposition.confirmedAwaitingReadback
+            ? 'The server confirmed the line approval. Receipt details are refreshing.'
             : 'The product and line approval are saved locally and queued.',
         safeError: _state.safeError,
       );
@@ -748,8 +758,14 @@ final class PurchasingController extends ChangeNotifier {
         loading: _state.loading,
         capture: _state.capture,
         captureNotice:
-            result.disposition == PurchaseMutationDisposition.synchronized
+            result.disposition == PurchaseMutationDisposition.synchronized ||
+                _lastSynchronizedReceiptId == result.entityId
             ? 'The receipt change is synchronized.'
+            : _state.capture?.commitConfirmed == true
+            ? 'The server confirmed the receipt commit. Receipt details are refreshing.'
+            : result.disposition ==
+                  PurchaseMutationDisposition.confirmedAwaitingReadback
+            ? 'The server confirmed the receipt change. Receipt details are refreshing.'
             : queuedNotice,
         safeError: _state.safeError,
       );

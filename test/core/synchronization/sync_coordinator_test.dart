@@ -95,6 +95,151 @@ void main() {
     },
   );
 
+  for (final failure in <Exception>[
+    const FormatException('Malformed successful response.'),
+    TimeoutException('Response timed out.'),
+  ]) {
+    test(
+      'ambiguous $failure recovers the immutable status before retry',
+      () async {
+        await local.commitLocalMutation(_mutation());
+        final remote = _FakeGateway(
+          pushHandler: (_, _) async => throw failure,
+          operationStatusesHandler: (_, _, ids) async =>
+              OperationStatusResponse(
+                operations: [
+                  OperationStatusItem(
+                    operationId: ids.single,
+                    result: PushOperationResult(
+                      operationId: ids.single,
+                      kind: PushResultKind.acknowledged,
+                    ),
+                  ),
+                ],
+              ),
+        );
+        final outcome = await SyncCoordinator(
+          local: local,
+          remote: remote,
+          connectivity: const _OnlineProbe(),
+          clock: () => now,
+        ).synchronize('home-1');
+        expect(outcome.status, SyncRunStatus.completed);
+        expect(remote.pushedOperationIds, ['operation-1']);
+        expect(remote.statusOperationIds, hasLength(1));
+      },
+    );
+  }
+
+  test(
+    'restart and persisted retry defer unavailable status instead of dispatching again',
+    () async {
+      await local.commitLocalMutation(_mutation());
+      await local.markSyncing(['operation-1']);
+      var available = false;
+      final remote = _FakeGateway(
+        pushHandler: (_, _) async =>
+            throw StateError('Must not push known or ambiguous work.'),
+        operationStatusesHandler: (_, _, ids) async {
+          if (!available) {
+            throw const FormatException('Unreadable operation status.');
+          }
+          return OperationStatusResponse(
+            operations: [
+              OperationStatusItem(
+                operationId: ids.single,
+                result: PushOperationResult(
+                  operationId: ids.single,
+                  kind: PushResultKind.acknowledged,
+                ),
+              ),
+            ],
+          );
+        },
+      );
+      SyncCoordinator coordinator() => SyncCoordinator(
+        local: local,
+        remote: remote,
+        connectivity: const _OnlineProbe(),
+        clock: () => now,
+      );
+      expect(
+        (await coordinator().synchronize('home-1')).status,
+        SyncRunStatus.retryableFailure,
+      );
+      expect(remote.pushedOperationIds, isEmpty);
+      final stored = await database
+          .select(database.clientOperations)
+          .getSingle();
+      expect(stored.retryCount, 1);
+      now = now.add(const Duration(hours: 1));
+      available = true;
+      expect(
+        (await coordinator().synchronize('home-1')).status,
+        SyncRunStatus.completed,
+      );
+      expect(remote.pushedOperationIds, isEmpty);
+      expect(remote.statusOperationIds, hasLength(2));
+    },
+  );
+
+  for (final result in <PushOperationResult>[
+    PushOperationResult(
+      operationId: 'operation-1',
+      kind: PushResultKind.acknowledged,
+      entityId: 'foreign-entity',
+    ),
+    PushOperationResult(
+      operationId: 'operation-1',
+      kind: PushResultKind.acknowledged,
+      entityType: 'foreign-type',
+    ),
+    PushOperationResult(
+      operationId: 'operation-1',
+      kind: PushResultKind.acknowledged,
+      commandType: 'foreign-command',
+    ),
+    PushOperationResult(
+      operationId: 'operation-1',
+      kind: PushResultKind.acknowledged,
+      acceptedRevision: -1,
+    ),
+    PushOperationResult(
+      operationId: 'operation-1',
+      kind: PushResultKind.acknowledged,
+      remotePayload: {'homeId': 'foreign-home'},
+    ),
+  ]) {
+    test(
+      'status identity mismatch cannot acknowledge or resend ${result.entityId ?? result.entityType ?? result.commandType ?? result.acceptedRevision ?? result.remotePayload}',
+      () async {
+        await local.commitLocalMutation(_mutation());
+        final remote = _FakeGateway(
+          pushHandler: (_, _) async =>
+              throw const RetryableSyncException('Response lost.'),
+          operationStatusesHandler: (_, _, ids) async =>
+              OperationStatusResponse(
+                operations: [
+                  OperationStatusItem(operationId: ids.single, result: result),
+                ],
+              ),
+        );
+        final outcome = await SyncCoordinator(
+          local: local,
+          remote: remote,
+          connectivity: const _OnlineProbe(),
+          clock: () => now,
+        ).synchronize('home-1');
+        expect(outcome.status, SyncRunStatus.retryableFailure);
+        expect(remote.pushedOperationIds, ['operation-1']);
+        expect(
+          (await database.select(database.clientOperations).getSingle()).state,
+          ClientOperationState.retryWait.storageValue,
+        );
+      },
+    );
+  }
+
   test('lost response applies the immutable status receipt once', () async {
     await local.commitLocalMutation(_mutation());
     final remote = _FakeGateway(

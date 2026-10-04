@@ -16,7 +16,12 @@ enum PurchaseLineApprovalStatus {
 /// acknowledgement or authoritative snapshot.
 enum PurchaseSynchronizationState { synchronized, pending }
 
-enum PurchaseMutationDisposition { queued, alreadyQueued, synchronized }
+enum PurchaseMutationDisposition {
+  queued,
+  alreadyQueued,
+  confirmedAwaitingReadback,
+  synchronized,
+}
 
 final class PurchaseMutationResult {
   const PurchaseMutationResult({
@@ -30,6 +35,9 @@ final class PurchaseMutationResult {
   final PurchaseMutationDisposition disposition;
 
   bool get awaitsServerConfirmation =>
+      disposition == PurchaseMutationDisposition.queued ||
+      disposition == PurchaseMutationDisposition.alreadyQueued;
+  bool get requiresSynchronization =>
       disposition != PurchaseMutationDisposition.synchronized;
 }
 
@@ -240,6 +248,7 @@ final class PurchaseReceiptCapture {
     this.storeName,
     this.total,
     this.sourceReference,
+    this.commitConfirmed = false,
   }) : lines = List<PurchaseReceiptLineCapture>.unmodifiable(lines) {
     _requireText(id, 'id');
     _requireText(homeId, 'homeId');
@@ -261,6 +270,9 @@ final class PurchaseReceiptCapture {
   final Money? total;
   final String notes;
   final String? sourceReference;
+
+  /// An immutable operation result confirms the commit even if readback fails.
+  final bool commitConfirmed;
   final int revision;
   final PurchaseReceiptStatus status;
   final PurchaseSynchronizationState synchronizationState;
@@ -268,9 +280,11 @@ final class PurchaseReceiptCapture {
 
   bool get reviewComplete =>
       lines.isNotEmpty && lines.every((line) => line.reviewTerminal);
-  bool get commitAwaitingConfirmation =>
+  bool get commitAwaitingReadback =>
       status == PurchaseReceiptStatus.committed &&
       synchronizationState == PurchaseSynchronizationState.pending;
+  bool get commitAwaitingConfirmation =>
+      commitAwaitingReadback && !commitConfirmed;
 }
 
 final class PurchaseReceiptDraftRequest {

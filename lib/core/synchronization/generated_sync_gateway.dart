@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
+import 'package:providentia/core/synchronization/receipt_projection_validation.dart';
 import 'package:providentia/core/synchronization/sync_models.dart';
 import 'package:providentia/core/synchronization/sync_ports.dart';
 import 'package:providentia_api_client/providentia_api_client.dart'
@@ -148,6 +149,9 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
             );
           })
           .toList(growable: false);
+      for (final change in changes) {
+        validateReceiptProjection(change);
+      }
       return PullPage(
         protocolVersion: 1,
         // The first local cursor is absent. The repository deliberately
@@ -478,7 +482,7 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
           'Unsupported sync protocol version ${response.protocolVersion}.',
         );
       }
-      return PullPage(
+      final page = PullPage(
         protocolVersion: response.protocolVersion,
         // On the first pull the request omits `cursor`; the server responds
         // with its canonical encoded genesis cursor. The local repository
@@ -512,6 +516,10 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
             )
             .toList(growable: false),
       );
+      for (final change in page.changes) {
+        validateReceiptProjection(change);
+      }
+      return page;
     } on generated.ProvidentiaApiException catch (error) {
       if (error.statusCode == 401) {
         throw AuthenticationSyncException(_safeProblem(error));
@@ -601,7 +609,7 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
       );
     }
     final revision = json['revision'];
-    if (revision != null && revision is! int) {
+    if (revision != null && (revision is! int || revision < 0)) {
       throw const FormatException(
         'Operation status result revision must be an integer.',
       );
@@ -610,7 +618,8 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
     final conflict = _optionalStatusObject(json, 'conflict');
     final commandResult = _optionalStatusObject(json, 'result');
     final nestedRevision = commandResult?['revision'];
-    if (nestedRevision != null && nestedRevision is! int) {
+    if (nestedRevision != null &&
+        (nestedRevision is! int || nestedRevision < 0)) {
       throw const FormatException(
         'Operation status command result revision must be an integer.',
       );
@@ -628,6 +637,9 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
         ),
       },
       acceptedRevision: (revision as int?) ?? (nestedRevision as int?),
+      entityId: json['entityId'] as String?,
+      entityType: json['entityType'] as String?,
+      commandType: json['commandType'] as String?,
       changeCursor: json['changeCursor'] as String?,
       safeMessage: json['detail'] as String?,
       code: sanitizedSyncFailureCode(json['code'] as String?),

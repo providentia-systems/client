@@ -325,7 +325,9 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
           Text('Receipt revision ${capture.revision}'),
           const SizedBox(height: 4),
           Text(
-            pending
+            capture.commitConfirmed && pending
+                ? 'Commit confirmed by the server; receipt details are refreshing.'
+                : pending
                 ? 'Commit queued locally; awaiting server confirmation.'
                 : 'Commit synchronized.',
             key: const Key('purchase-commit-state'),
