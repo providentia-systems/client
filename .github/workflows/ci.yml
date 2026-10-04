@@ -160,7 +160,7 @@ jobs:
           sudo apt-get update &&
           sudo apt-get install -y
           clang cmake ninja-build pkg-config desktop-file-utils libgtk-3-dev liblzma-dev
-          libsecret-1-dev libgstreamer1.0-dev
+          libsecret-1-dev libgstreamer1.0-dev xdg-user-dirs
           libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-good
 
       - name: Install pinned Flutter SDK on Linux
@@ -210,7 +210,7 @@ jobs:
               export DEBIAN_FRONTEND=noninteractive
               apt-get update
               apt-get install -y --no-install-recommends \
-                /artifacts/providentia_0.0.0_amd64.deb xvfb
+                /artifacts/providentia_0.0.0_amd64.deb x11-utils xvfb
               PROVIDENTIA_LINUX_LAUNCH_SMOKE=true \
                 bash /source/tool/release/verify_linux_deb.sh \
                   /artifacts/providentia_0.0.0_amd64.deb
