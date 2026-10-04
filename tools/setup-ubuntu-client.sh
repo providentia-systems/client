@@ -136,8 +136,10 @@ if [[ "$install_packages" == true ]]; then
     libegl1 libgles2 libgstreamer1.0-dev \
     libgstreamer-plugins-base1.0-dev libgtk-3-dev liblzma-dev \
     libsecret-1-0 libsecret-1-dev libstdc++-12-dev \
-    ninja-build pkg-config unzip xz-utils zip
+    ninja-build pkg-config unzip xdg-user-dirs xz-utils zip
 fi
+command -v xdg-user-dir >/dev/null 2>&1 ||
+  fail 'Install xdg-user-dirs before building or launching the Linux client.'
 
 quarantine_runtime() {
   local path=$1
