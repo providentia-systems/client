@@ -31,6 +31,12 @@ creates another commit operation to repair a display error.
   completed capture and exposes synchronized purchase history. Other homes'
   records and acknowledgements never join this view.
 
+Receipt selection now allows independent drafts and submitted receipts to
+coexist. Selecting or starting another receipt never replaces an uncertain
+commit operation. Manual applied lines affect stock immediately and retain
+their conversion snapshots; readback replaces their projections and does not
+apply the quantity again. See [quick purchases](quick-purchase-workflow.md).
+
 Regression coverage: `receipt_confirmation_recovery_test.dart` drives real
 Drift persistence and the generated HTTP adapter through a four-command receipt,
 malformed commit response, immutable status recovery, invalid readback, actual

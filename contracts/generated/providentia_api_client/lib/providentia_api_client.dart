@@ -1,6 +1,6 @@
 // GENERATED FILE - DO NOT EDIT.
 // Source: contracts/providentia-v1.json
-// Contract SHA-256: ef5714a6298326d6fb449b966117e8b61c74de67d1bfc274ad8ec431aecd802d
+// Contract SHA-256: b6b7f8b5aed3c79c8cb751b21ab1c9dc21786124bb56ab08d21955ace8d7bd36
 // ignore_for_file: use_null_aware_elements
 
 library;
@@ -1147,6 +1147,12 @@ final class ProvidentiaApiClient {
       operationId: "pullHomeSynchronization",
       method: "GET",
       pathTemplate: "/api/v1/homes/{homeId}/sync/pull",
+      multipart: false,
+    ),
+    "purchaseReceiptLine": ApiOperation(
+      operationId: "purchaseReceiptLine",
+      method: "POST",
+      pathTemplate: "/api/v1/homes/{homeId}/receipts/{receiptId}/purchases",
       multipart: false,
     ),
     "pushHomeSynchronization": ApiOperation(
@@ -3191,6 +3197,25 @@ final class ProvidentiaApiClient {
     return invokeOperation(
       operationId: "proposeHomeOwnershipTransfer",
       pathParameters: <String, String>{"homeId": homeId},
+      query: query,
+      headers: headers,
+      body: body,
+    );
+  }
+
+  Future<ApiResponse> purchaseReceiptLine({
+    required String homeId,
+    required String receiptId,
+    required Map<String, Object?> body,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "purchaseReceiptLine",
+      pathParameters: <String, String>{
+        "homeId": homeId,
+        "receiptId": receiptId,
+      },
       query: query,
       headers: headers,
       body: body,

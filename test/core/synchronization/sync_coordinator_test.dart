@@ -780,6 +780,76 @@ void main() {
     },
   );
 
+  test('cursor recovery is bounded and retains blocked local intent', () async {
+    await local.commitLocalMutation(_mutation());
+    await local.applyPushResults(
+      results: <PushOperationResult>[
+        PushOperationResult(
+          operationId: 'operation-1',
+          kind: PushResultKind.validationError,
+          safeMessage: 'Review this saved change.',
+        ),
+      ],
+      now: now,
+      retryPolicy: RetryPolicy(),
+    );
+    await local.applyPullPage(
+      homeId: 'home-1',
+      page: const PullPage(
+        protocolVersion: 1,
+        fromCursor: null,
+        changes: <RemoteChange>[],
+        pageCursor: 'invalid-cursor',
+        highWaterCursor: 'invalid-cursor',
+        hasMore: false,
+        requestId: 'seed',
+      ),
+    );
+    var bootstrapCalls = 0;
+    var pullCalls = 0;
+    final remote = _FakeGateway(
+      pushHandler: (_, _) async =>
+          throw StateError('Blocked intent must not be pushed.'),
+      bootstrapHandler: (_) async {
+        bootstrapCalls++;
+        return const PullPage(
+          protocolVersion: 1,
+          fromCursor: 'new-cursor',
+          changes: <RemoteChange>[],
+          pageCursor: 'new-cursor',
+          highWaterCursor: 'new-cursor',
+          hasMore: false,
+          requestId: 'authorized-snapshot',
+        );
+      },
+      pullHandler: (_, _) async {
+        pullCalls++;
+        throw const ResyncRequiredSyncException('The cursor is invalid.');
+      },
+    );
+    final coordinator = SyncCoordinator(
+      local: local,
+      remote: remote,
+      connectivity: const _OnlineProbe(),
+      clock: () => now,
+    );
+    final result = await coordinator.synchronize('home-1');
+    expect(result.status, SyncRunStatus.retryableFailure);
+    expect(result.safeMessage, contains('changed again'));
+    expect(bootstrapCalls, 1);
+    expect(pullCalls, 2);
+    final operation = await database
+        .select(database.clientOperations)
+        .getSingle();
+    expect(operation.operationId, 'operation-1');
+    expect(operation.deviceId, 'device-1');
+    expect(
+      operation.state,
+      ClientOperationState.blockedValidation.storageValue,
+    );
+    expect(await database.select(database.localRecords).get(), hasLength(1));
+  });
+
   test('a paged response must advance its cursor', () async {
     await local.applyPullPage(
       homeId: 'home-1',

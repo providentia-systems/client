@@ -73,6 +73,30 @@ final class PurchasingController extends ChangeNotifier {
   final String homeId;
   StreamSubscription<List<PurchaseLine>>? _subscription;
   StreamSubscription<PurchaseReceiptCapture?>? _captureSubscription;
+  StreamSubscription<List<PurchaseReceiptCapture>>? _receiptsSubscription;
+  List<PurchaseReceiptCapture> _receipts = const [];
+  String? _selectedReceiptId;
+  List<PurchaseReceiptCapture> get receipts => _receipts;
+  bool get canSelectReceipts =>
+      _repository is PurchaseReceiptSelectionRepository;
+  bool get canQuickEntry =>
+      captureEnabled && _repository is PurchaseQuickEntryRepository;
+
+  void selectReceipt(String receiptId) {
+    _selectedReceiptId = receiptId;
+    for (final receipt in _receipts) {
+      if (receipt.id == receiptId) {
+        _receiveCapture(receipt);
+        return;
+      }
+    }
+  }
+
+  void startAnotherReceipt() {
+    _selectedReceiptId = '';
+    _receiveCapture(null);
+  }
+
   StreamSubscription<List<PurchaseMatchCandidate>>? _candidateSubscription;
   StreamSubscription<List<InventoryItem>>? _itemMasterSubscription;
   List<PurchaseMatchCandidate> _legacyMatchCandidates =
@@ -197,41 +221,42 @@ final class PurchasingController extends ChangeNotifier {
         );
     final captureRepository = _captureRepository;
     if (!captureEnabled || captureRepository == null) return;
-    _captureSubscription = captureRepository
-        .watchActiveReceiptCapture(homeId: homeId)
-        .listen(
-          (capture) {
-            if (capture != null && capture.homeId != homeId) {
-              _setCaptureError('Purchase capture access was rejected.');
-              return;
-            }
-            final confirmed =
-                _state.capture?.commitAwaitingReadback == true &&
-                capture == null;
-            if (confirmed) _lastSynchronizedReceiptId = _state.capture!.id;
-            _state = PurchasingState(
-              lines: _state.lines,
-              matchCandidates: _state.matchCandidates,
-              view: _state.view,
-              loading: _state.loading,
-              captureBusy: _state.captureBusy,
-              capture: capture,
-              captureNotice: confirmed
-                  ? 'The receipt commit is synchronized.'
-                  : capture?.commitConfirmed == true
-                  ? 'The server confirmed the receipt commit. Receipt details are refreshing.'
-                  : _state.captureNotice,
-              captureError: _captureReadFailed ? null : _state.captureError,
-              safeError: _state.safeError,
-            );
-            _captureReadFailed = false;
-            notifyListeners();
-          },
-          onError: (Object error) {
-            _captureReadFailed = true;
-            _setCaptureError(_captureSafeError(error));
-          },
-        );
+    if (_repository is PurchaseReceiptSelectionRepository) {
+      _receiptsSubscription =
+          (_repository as PurchaseReceiptSelectionRepository)
+              .watchReceiptCaptures(homeId: homeId)
+              .listen(
+                (receipts) {
+                  if (receipts.any((receipt) => receipt.homeId != homeId)) {
+                    _setCaptureError('Purchase capture access was rejected.');
+                    return;
+                  }
+                  _receipts = List.unmodifiable(receipts);
+                  PurchaseReceiptCapture? selected;
+                  for (final receipt in receipts) {
+                    if (receipt.id == _selectedReceiptId) selected = receipt;
+                  }
+                  selected ??= _selectedReceiptId == null && receipts.isNotEmpty
+                      ? receipts.first
+                      : null;
+                  _receiveCapture(selected);
+                },
+                onError: (Object error) {
+                  _captureReadFailed = true;
+                  _setCaptureError(_captureSafeError(error));
+                },
+              );
+    } else {
+      _captureSubscription = captureRepository
+          .watchActiveReceiptCapture(homeId: homeId)
+          .listen(
+            _receiveCapture,
+            onError: (Object error) {
+              _captureReadFailed = true;
+              _setCaptureError(_captureSafeError(error));
+            },
+          );
+    }
     _candidateSubscription = captureRepository
         .watchPurchaseMatchCandidates(homeId: homeId)
         .listen(
@@ -271,6 +296,38 @@ final class PurchasingController extends ChangeNotifier {
             },
           );
     }
+  }
+
+  void _receiveCapture(PurchaseReceiptCapture? capture) {
+    if (capture != null && capture.homeId != homeId) {
+      _setCaptureError('Purchase capture access was rejected.');
+      return;
+    }
+    final confirmed =
+        _state.capture?.commitAwaitingReadback == true &&
+        (capture == null ||
+            (capture.id == _state.capture!.id &&
+                capture.synchronizationState ==
+                    PurchaseSynchronizationState.synchronized));
+    if (confirmed) _lastSynchronizedReceiptId = _state.capture!.id;
+    _state = PurchasingState(
+      lines: _state.lines,
+      matchCandidates: _state.matchCandidates,
+      view: _state.view,
+      loading: _state.loading,
+      captureBusy: _state.captureBusy,
+      capture: capture,
+      captureNotice: confirmed
+          ? 'The receipt commit is synchronized.'
+          : capture?.commitConfirmed == true &&
+                capture?.commitAwaitingReadback == true
+          ? 'The server confirmed the receipt commit. Receipt details are refreshing.'
+          : _state.captureNotice,
+      captureError: _captureReadFailed ? null : _state.captureError,
+      safeError: _state.safeError,
+    );
+    _captureReadFailed = false;
+    notifyListeners();
   }
 
   void selectView(PurchaseView view) {
@@ -328,6 +385,7 @@ final class PurchasingController extends ChangeNotifier {
     required PurchaseReceiptLineCapture original,
     required String rawDescription,
     required double quantity,
+    String? quantityText,
     String? originalPackText,
     Money? unitPrice,
     Money? lineTotal,
@@ -344,13 +402,15 @@ final class PurchasingController extends ChangeNotifier {
           receiptId: original.receiptId,
           rawDescription: rawDescription,
           quantity: quantity,
+          quantityText: quantityText,
           originalPackText: originalPackText,
           unitPrice: unitPrice,
           lineTotal: lineTotal,
         ),
       ),
-      queuedNotice:
-          'Line changes are saved locally. Review the edited line before committing.',
+      queuedNotice: original.stockApplied
+          ? 'Purchase corrected. Stock is updated locally; synchronization is pending.'
+          : 'Line changes are saved locally. Review the edited line before committing.',
     );
   }
 
@@ -405,6 +465,7 @@ final class PurchasingController extends ChangeNotifier {
           sourceReference: sourceReference,
         ),
       ),
+      onResult: (result) => selectReceipt(result.entityId),
       queuedNotice:
           'The draft is saved locally and queued for synchronization.',
     );
@@ -435,6 +496,47 @@ final class PurchasingController extends ChangeNotifier {
       ),
       queuedNotice:
           'The receipt line is saved locally and queued for synchronization.',
+    );
+  }
+
+  Future<bool> addPurchasedLine({
+    required String homeProductId,
+    String? packId,
+    required String rawDescription,
+    required String quantityText,
+    String? originalPackText,
+    Money? unitPrice,
+    Money? lineTotal,
+  }) {
+    final receipt = _state.capture;
+    if (!canQuickEntry ||
+        receipt == null ||
+        receipt.status != PurchaseReceiptStatus.draft) {
+      return _rejectCapture('Start a receipt before adding purchases.');
+    }
+    if (!_state.matchCandidates.any(
+      (candidate) => candidate.homeProductId == homeProductId,
+    )) {
+      return _rejectCapture('Choose an existing product from this home.');
+    }
+    return _runCaptureMutation(
+      () =>
+          (_repository as PurchaseQuickEntryRepository).addPurchasedReceiptLine(
+            homeProductId: homeProductId,
+            packId: packId,
+            line: PurchaseReceiptLineRequest(
+              homeId: homeId,
+              receiptId: receipt.id,
+              rawDescription: rawDescription,
+              quantity: double.tryParse(quantityText) ?? double.nan,
+              quantityText: quantityText,
+              originalPackText: originalPackText,
+              unitPrice: unitPrice,
+              lineTotal: lineTotal,
+            ),
+          ),
+      queuedNotice:
+          'Purchase saved. Stock is updated locally; synchronization is pending.',
     );
   }
 
@@ -703,6 +805,10 @@ final class PurchasingController extends ChangeNotifier {
         productId: item.productId,
         packId: item.packId,
         brand: item.brand,
+        stockUnit: item.unit,
+        normalizedBaseAmount: item.normalizedBaseAmount,
+        normalizedBaseUnit: item.normalizedBaseUnit,
+        packStatus: item.packStatus,
         category: item.category,
         aliases: item.aliases,
       );
@@ -741,6 +847,7 @@ final class PurchasingController extends ChangeNotifier {
   Future<bool> _runCaptureMutation(
     Future<PurchaseMutationResult> Function() mutation, {
     required String queuedNotice,
+    void Function(PurchaseMutationResult)? onResult,
   }) async {
     if (!captureEnabled) {
       return _rejectCapture(
@@ -751,6 +858,7 @@ final class PurchasingController extends ChangeNotifier {
     _setCaptureBusy(true);
     try {
       final result = await mutation();
+      onResult?.call(result);
       _state = PurchasingState(
         lines: _state.lines,
         matchCandidates: _state.matchCandidates,
@@ -825,6 +933,7 @@ final class PurchasingController extends ChangeNotifier {
     _storesSubscription?.cancel();
     unawaited(_subscription?.cancel());
     unawaited(_captureSubscription?.cancel());
+    unawaited(_receiptsSubscription?.cancel());
     unawaited(_candidateSubscription?.cancel());
     unawaited(_itemMasterSubscription?.cancel());
     super.dispose();

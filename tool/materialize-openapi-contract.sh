@@ -9,8 +9,8 @@ set -Eeuo pipefail
 readonly root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly archive="$root/contracts/source/providentia-v1.json.gz"
 readonly output="$root/contracts/providentia-v1.json"
-readonly archive_sha256='d20ba3f9b769b5e30e59f38ecb83816ff6825a9bb646509440fb731cfc012ff1'
-readonly output_sha256='ef5714a6298326d6fb449b966117e8b61c74de67d1bfc274ad8ec431aecd802d'
+readonly archive_sha256='c7ca8e3b7ef29530fc64f5e47ed005202e85c931563bf794529b93f275432995'
+readonly output_sha256='b6b7f8b5aed3c79c8cb751b21ab1c9dc21786124bb56ab08d21955ace8d7bd36'
 
 sha256_file() {
   sha256sum "$1" | cut -d' ' -f1
@@ -43,9 +43,9 @@ node -e '
     0,
   );
   if (contract.info?.version !== "2.2.0"
-      || Object.keys(contract.paths ?? {}).length !== 194
-      || operations !== 235
-      || Object.keys(contract.components?.schemas ?? {}).length !== 285
+      || Object.keys(contract.paths ?? {}).length !== 195
+      || operations !== 236
+      || Object.keys(contract.components?.schemas ?? {}).length !== 287
       || contract.paths?.["/api/v1/auth/email-codes/verify"]?.post?.operationId
           !== "verifyEmailCode"
       || contract.paths?.["/api/v1/homes/{homeId}/memberships/{userId}"]?.delete?.operationId

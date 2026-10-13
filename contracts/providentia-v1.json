@@ -4085,7 +4085,7 @@
         "tags": [
           "Purchasing"
         ],
-        "description": "Replace editable draft receipt metadata. Source identity is retained. Revision conflicts fail without changing the receipt.",
+        "description": "Update draft metadata, or correct store, notes and total after purchases have affected stock. Purchase date and currency are fixed once stock is applied; store corrections do not create stock movements.",
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
@@ -4146,7 +4146,7 @@
         "tags": [
           "Purchasing"
         ],
-        "description": "Cancel an uncommitted draft. Retain its home-private rows for synchronization; committed receipts cannot be cancelled.",
+        "description": "Cancel a draft receipt and reverse any immediately applied purchase lines atomically. Parent receipt revision increments once.",
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
@@ -11713,7 +11713,7 @@
         "tags": [
           "Purchasing"
         ],
-        "description": "Replace editable draft line values and reset approval to unreviewed. Prior match decisions remain superseded history.",
+        "description": "Revisioned line correction. Applied purchases retain their product and conversion snapshot; quantity changes or removal append only the stock difference. Imported unreviewed draft lines continue to require review.",
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
@@ -11783,7 +11783,7 @@
         "tags": [
           "Purchasing"
         ],
-        "description": "Mark a draft line removed and clear its product match. Retain the row for synchronization and omit it from commit, counts and totals.",
+        "description": "Revisioned line correction. Applied purchases retain their product and conversion snapshot; quantity changes or removal append only the stock difference. Imported unreviewed draft lines continue to require review.",
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
@@ -11847,6 +11847,66 @@
             "$ref": "#/components/responses/Problem"
           }
         }
+      }
+    },
+    "/api/v1/homes/{homeId}/receipts/{receiptId}/purchases": {
+      "post": {
+        "operationId": "purchaseReceiptLine",
+        "tags": [
+          "Purchasing"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "name": "receiptId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PurchaseReceiptLineRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Purchase recorded and stock applied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiptLine"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "description": "Select and confirm an existing home product in one operation. Quantity is purchased packs for a packId, otherwise household stock units. Stock changes immediately; the receipt remains draft and later completion never repeats the addition."
       }
     }
   },
@@ -14607,7 +14667,8 @@
               "purchasing.receipt.update",
               "purchasing.receipt.cancel",
               "purchasing.receipt-line.update",
-              "purchasing.receipt-line.remove"
+              "purchasing.receipt-line.remove",
+              "purchasing.receipt-line.purchase"
             ]
           },
           "entityId": {
@@ -15290,6 +15351,32 @@
                 },
                 "payload": {
                   "$ref": "#/components/schemas/SyncReceiptLineRemovePayload"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "commandType": {
+                  "const": "purchasing.receipt-line.purchase"
+                }
+              },
+              "required": [
+                "commandType"
+              ]
+            },
+            "then": {
+              "required": [
+                "baseRevision"
+              ],
+              "properties": {
+                "baseRevision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "payload": {
+                  "$ref": "#/components/schemas/SyncReceiptLinePurchasePayload"
                 }
               }
             }
@@ -16226,7 +16313,9 @@
           "catalogName",
           "catalogPackText",
           "catalogCategoryId",
-          "catalogCategoryName"
+          "catalogCategoryName",
+          "normalizedBaseAmount",
+          "normalizedBaseUnit"
         ],
         "properties": {
           "productId": {
@@ -16382,6 +16471,29 @@
             ],
             "format": "uuid",
             "description": "Unmodified canonical category identity, separate from the household category selection."
+          },
+          "normalizedBaseAmount": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,8})?$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "normalizedBaseUnit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "g",
+              "ml",
+              "units",
+              null
+            ]
           }
         },
         "description": "Supported identities: private (productId and packId null), product family awaiting pack resolution (productId set, packId null), or an explicitly selected catalog pack (both set). Pack-only creation resolves the exact pack parent in persistence; response and sync always contain the normalized parent. Never select the first or infer a pack from an ambiguous family. Family records retain homeProductId, raw wording, balances and history.",
@@ -16721,7 +16833,8 @@
           },
           "quantity": {
             "type": "string",
-            "pattern": "^-?(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,8})?$"
+            "pattern": "^-?(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,8})?$",
+            "description": "Purchased pack count when an explicit packId was selected; otherwise quantity in the household stock unit. Historical reviewed imports retain their entered numeric quantity."
           },
           "originalPackText": {
             "oneOf": [
@@ -16777,6 +16890,46 @@
           "revision": {
             "type": "integer",
             "minimum": 1
+          },
+          "stockQuantity": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,8})?$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Applied inbound stock in the household unit. Null means not yet applied. Zero on removed purchases records a fully reversed effect."
+          },
+          "stockQuantityPerPack": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,8})?$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Exact snapshotted stock conversion per purchased pack; retained through later canonical pack changes."
+          },
+          "packId": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "receiptRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Current receipt revision returned after immediate purchase creation."
           }
         }
       },
@@ -24324,6 +24477,202 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 500
+          }
+        }
+      },
+      "PurchaseReceiptLineRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "expectedReceiptRevision",
+          "homeProductId",
+          "packId",
+          "rawDescription",
+          "quantity",
+          "originalPackText",
+          "unitPrice",
+          "lineTotal",
+          "unit",
+          "stockQuantityPerPack"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expectedReceiptRevision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "homeProductId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "packId": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rawDescription": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "quantity": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,8})?$"
+          },
+          "originalPackText": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 191
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unitPrice": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^(?:0|[1-9][0-9]{0,11})(?:\\.[0-9]{1,2})?$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lineTotal": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^(?:0|[1-9][0-9]{0,11})(?:\\.[0-9]{1,2})?$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "units",
+              "g",
+              "kg",
+              "ml",
+              "l"
+            ],
+            "description": "Expected household stock unit when the purchase was entered; a changed unit conflicts."
+          },
+          "stockQuantityPerPack": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,8})?$",
+            "description": "Expected exact conversion from cached catalog facts. Server recomputes and rejects changed pack measures instead of silently reinterpreting offline purchases."
+          }
+        },
+        "description": "Deliberate manual confirmation adds stock atomically while keeping the receipt open. Reuse id for a retry. At least one price is required. Explicit packs must be published for the selected product; mass/volume conversions are exact to eight decimals."
+      },
+      "SyncReceiptLinePurchasePayload": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "receiptId",
+          "homeProductId",
+          "packId",
+          "rawDescription",
+          "quantity",
+          "originalPackText",
+          "unitPrice",
+          "lineTotal",
+          "unit",
+          "stockQuantityPerPack"
+        ],
+        "properties": {
+          "receiptId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "homeProductId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "packId": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rawDescription": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "quantity": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,8})?$"
+          },
+          "originalPackText": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 191
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unitPrice": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^(?:0|[1-9][0-9]{0,11})(?:\\.[0-9]{1,2})?$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lineTotal": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^(?:0|[1-9][0-9]{0,11})(?:\\.[0-9]{1,2})?$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "units",
+              "g",
+              "kg",
+              "ml",
+              "l"
+            ],
+            "description": "Expected household stock unit when the purchase was entered; a changed unit conflicts."
+          },
+          "stockQuantityPerPack": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,8})?$",
+            "description": "Expected exact conversion from cached catalog facts. Server recomputes and rejects changed pack measures instead of silently reinterpreting offline purchases."
           }
         }
       }

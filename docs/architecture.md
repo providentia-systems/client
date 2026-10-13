@@ -62,8 +62,11 @@ paged item master and verified shopping suggestions retain last-verified
 offline caches. Startup, manual refresh, foreground mutation, and coalesced app
 resume drive synchronization; revoked homes are purged rather than resumed.
 
-Receipt and stock AI remain proposal-only until ordinary purchasing or count
-commands. Stock can prefer a verified native strict-local route; receipt
+Manual purchases use an atomic selected-product line command which updates the
+local stock projection immediately and keeps the receipt open. Drafts coexist;
+corrections and cancellations apply exact stock differences or reversals. See
+[quick purchases](quick-purchase-workflow.md). Receipt and stock AI remain
+proposal-only until ordinary purchasing or count commands. Stock can prefer a verified native strict-local route; receipt
 direct-local extraction is not composed. Shopping feedback, existing-line
 quantity edit, cross-device suggestion provenance, general sanitized catalog
 proposal creation, and global alias publication remain deferred. Operation-

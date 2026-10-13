@@ -80,6 +80,7 @@ final class MediaAcquisitionService {
     }
     final selected = await _imagePicker.pickMultiImage(limit: limit);
     final assets = <AiMediaAsset>[];
+    final previousSourceIds = _registry.registeredIds.toSet();
     try {
       for (var index = 0; index < selected.length; index++) {
         assets.add(
@@ -94,7 +95,7 @@ final class MediaAcquisitionService {
       return assets;
     } on Object {
       for (final asset in assets) {
-        _registry.remove(asset.id);
+        if (!previousSourceIds.contains(asset.id)) _registry.remove(asset.id);
       }
       rethrow;
     }
@@ -148,6 +149,7 @@ final class MediaAcquisitionService {
       );
     }
     final assets = <AiMediaAsset>[];
+    final previousSourceIds = _registry.registeredIds.toSet();
     try {
       for (final entry in selected) {
         final bytes = entry.file.bytes;
@@ -169,7 +171,7 @@ final class MediaAcquisitionService {
       return assets;
     } on Object {
       for (final asset in assets) {
-        _registry.remove(asset.id);
+        if (!previousSourceIds.contains(asset.id)) _registry.remove(asset.id);
       }
       rethrow;
     }

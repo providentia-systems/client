@@ -35,6 +35,7 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
     'purchasing.receipt-line.remove': 'purchasing-receipt-line',
     'purchasing.receipt.create': 'purchasing-receipt',
     'purchasing.receipt-line.create': 'purchasing-receipt-line',
+    'purchasing.receipt-line.purchase': 'purchasing-receipt-line',
     'purchasing.receipt-line.approve': 'purchasing-receipt-line',
     'purchasing.receipt-line.unresolve': 'purchasing-receipt-line',
     'purchasing.receipt.commit': 'purchasing-receipt',
@@ -57,6 +58,7 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
     'inventory.count-session.close',
     'inventory.count-session.cancel',
     'purchasing.receipt-line.create',
+    'purchasing.receipt-line.purchase',
     'purchasing.receipt-line.approve',
     'purchasing.receipt-line.unresolve',
     'purchasing.receipt.update',
@@ -529,6 +531,14 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
       }
       if (error.statusCode == 410 &&
           error.problem.type.endsWith('/sync_resync_required')) {
+        throw ResyncRequiredSyncException(_safeProblem(error));
+      }
+      if (afterCursor != null &&
+          error.statusCode == 422 &&
+          error.problem.type.endsWith('/sync_cursor_invalid')) {
+        // Only a typed cursor failure on the read feed authorizes bounded
+        // snapshot recovery. Other validation or home-binding failures retain
+        // the existing cursor and every saved operation unchanged.
         throw ResyncRequiredSyncException(_safeProblem(error));
       }
       throw RetryableSyncException(_safeProblem(error));

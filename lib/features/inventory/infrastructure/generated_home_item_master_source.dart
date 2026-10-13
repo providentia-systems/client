@@ -207,6 +207,9 @@ InventoryItem _item(Map<String, Object?> record, String homeId) {
     catalogCategoryId: _nullableIdentifier(record, 'catalogCategoryId'),
     catalogCategoryName: _nullableString(record, 'catalogCategoryName'),
     categorySource: categorySource,
+    normalizedBaseAmount: _nullableString(record, 'normalizedBaseAmount'),
+    normalizedBaseUnit: _nullableString(record, 'normalizedBaseUnit'),
+    packStatus: packStatus,
   );
 }
 

@@ -186,6 +186,9 @@ final class InventoryItem {
     this.catalogCategoryName,
     this.categorySource,
     this.revision,
+    this.normalizedBaseAmount,
+    this.normalizedBaseUnit,
+    this.packStatus,
   }) : aliases = List<String>.unmodifiable(aliases) {
     _requireText(id, 'id');
     _requireText(homeId, 'homeId');
@@ -217,6 +220,9 @@ final class InventoryItem {
   final String? catalogCategoryName;
   final InventoryCategorySource? categorySource;
   final int? revision;
+  final String? normalizedBaseAmount;
+  final String? normalizedBaseUnit;
+  final String? packStatus;
 
   bool get isCounted => currentQuantity != null;
 
@@ -252,6 +258,9 @@ final class InventoryItem {
       catalogCategoryName: catalogCategoryName,
       categorySource: categorySource,
       revision: revision,
+      normalizedBaseAmount: normalizedBaseAmount,
+      normalizedBaseUnit: normalizedBaseUnit,
+      packStatus: packStatus,
     );
   }
 }

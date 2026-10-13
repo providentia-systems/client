@@ -1029,6 +1029,9 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
           controller: _app,
           features: _features,
           catalogContributionPageBuilder: _catalogContributionPageBuilder,
+          receiptImportPageBuilder: widget.identityController.snapshot.isOffline
+              ? null
+              : _receiptImportPageBuilder,
           access: widget.access,
           navigatorKey: widget.workspaceNavigatorKey,
           onChangeHome: widget.identityController.snapshot.isOffline
@@ -1176,6 +1179,44 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
     );
   }
 
+  WidgetBuilder get _receiptImportPageBuilder => (_) {
+    final capabilities = AiHomeCapabilities.fromPermissions(
+      homeId: widget.home.id,
+      permissions: widget.homesController.snapshot.effectivePermissions,
+    );
+    if (!_bindingIsCurrent ||
+        !widget.identityController.snapshot.isAuthenticated ||
+        !widget.access.purchasesWrite) {
+      return const _ProtectedRouteUnavailable();
+    }
+    return ProductionServerAiRoute(
+      api: widget.api,
+      homeId: widget.home.id,
+      capabilities: capabilities,
+      protectedRouteRegistry: widget.protectedRouteRegistry,
+      onAuthorizationLost: _handleHomeAuthorizationLost,
+      purchaseRepository: _household,
+      mayWritePurchases:
+          widget.access.purchasesRead && widget.access.purchasesWrite,
+      receiptImportOnly: true,
+      reviewResumeStore: DriftAiReviewResumeStore(
+        widget.database,
+        homeId: widget.home.id,
+        accountId: widget.userId,
+      ),
+      onReceiptDraftReady: _openImportedReceipt,
+    );
+  };
+
+  void _openImportedReceipt(String receiptId) {
+    if (!_bindingIsCurrent) return;
+    _features.purchasing.selectReceipt(receiptId);
+    widget.workspaceNavigatorKey.currentState?.popUntil(
+      (route) => route.isFirst,
+    );
+    _app.selectSection(AppSection.purchases);
+  }
+
   WidgetBuilder get _connectedHouseholdAiPageBuilder => (_) {
     final permissions = widget.homesController.snapshot.effectivePermissions;
     final capabilities = AiHomeCapabilities.fromPermissions(
@@ -1212,12 +1253,7 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
         purchaseRepository: _household,
         mayWritePurchases:
             widget.access.purchasesRead && widget.access.purchasesWrite,
-        onReceiptDraftReady: (_) {
-          widget.workspaceNavigatorKey.currentState?.popUntil(
-            (route) => route.isFirst,
-          );
-          _app.selectSection(AppSection.purchases);
-        },
+        onReceiptDraftReady: _openImportedReceipt,
       ),
     );
   };
@@ -1879,6 +1915,7 @@ final class ProductionServerAiRoute extends StatefulWidget {
     this.onStockReviewReady,
     this.initialExtractionId,
     this.reviewResumeStore,
+    this.receiptImportOnly = false,
     super.key,
   });
 
@@ -1894,6 +1931,7 @@ final class ProductionServerAiRoute extends StatefulWidget {
   final VoidCallback? onStockReviewReady;
   final String? initialExtractionId;
   final AiReviewResumeStore? reviewResumeStore;
+  final bool receiptImportOnly;
 
   @override
   State<ProductionServerAiRoute> createState() =>
@@ -1962,12 +2000,14 @@ final class _ProductionServerAiRouteState
     discardLocalImages: _receiptEditor.discard,
     readPreparedImage: _prepared.read,
     onReviewHandoff: _handleReviewHandoff,
+    receiptImportOnly: widget.receiptImportOnly,
   );
 
   Future<AiMediaAsset?> _captureSingleImage(AiExtractionKind kind) async {
     if (_picking || _sensitiveStateCleared) return null;
     _picking = true;
-    _clearRegisteredSources();
+    final previousSourceIds = _sources.registeredIds.toSet();
+    if (kind != AiExtractionKind.receipt) _clearRegisteredSources();
     try {
       final captured = await showCameraCapture(context);
       if (captured == null) return null;
@@ -1981,7 +2021,7 @@ final class _ProductionServerAiRouteState
         purpose: kind,
       );
     } on Object {
-      _clearRegisteredSources();
+      _discardNewSources(previousSourceIds);
       if (mounted && !_sensitiveStateCleared) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -1998,20 +2038,25 @@ final class _ProductionServerAiRouteState
   Future<AiMediaAsset?> _pickSingleImage(AiExtractionKind kind) async {
     if (_picking || _sensitiveStateCleared) return null;
     _picking = true;
-    _clearRegisteredSources();
+    final previousSourceIds = _sources.registeredIds.toSet();
+    if (kind != AiExtractionKind.receipt) _clearRegisteredSources();
     try {
       final selected = await _acquisition.choosePhotos(
         homeId: widget.homeId,
         purpose: kind,
         limit: 1,
       );
-      if (!mounted || _sensitiveStateCleared || selected.length != 1) {
+      if (!mounted || _sensitiveStateCleared) {
         _clearRegisteredSources();
+        return null;
+      }
+      if (selected.length != 1) {
+        _discardNewSources(previousSourceIds);
         return null;
       }
       return selected.single;
     } on Object {
-      _clearRegisteredSources();
+      _discardNewSources(previousSourceIds);
       if (mounted && !_sensitiveStateCleared) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -2028,7 +2073,8 @@ final class _ProductionServerAiRouteState
   Future<AiMediaAsset?> _pickFileImage(AiExtractionKind kind) async {
     if (_picking || _sensitiveStateCleared) return null;
     _picking = true;
-    _clearRegisteredSources();
+    final previousSourceIds = _sources.registeredIds.toSet();
+    if (kind != AiExtractionKind.receipt) _clearRegisteredSources();
     try {
       final selected = await _acquisition.chooseFiles(
         homeId: widget.homeId,
@@ -2037,13 +2083,17 @@ final class _ProductionServerAiRouteState
         imagesOnly: true,
         limit: 1,
       );
-      if (!mounted || _sensitiveStateCleared || selected.length != 1) {
+      if (!mounted || _sensitiveStateCleared) {
         _clearRegisteredSources();
+        return null;
+      }
+      if (selected.length != 1) {
+        _discardNewSources(previousSourceIds);
         return null;
       }
       return selected.single;
     } on MediaAcquisitionException catch (error) {
-      _clearRegisteredSources();
+      _discardNewSources(previousSourceIds);
       if (mounted && !_sensitiveStateCleared) {
         ScaffoldMessenger.of(
           context,
@@ -2051,7 +2101,7 @@ final class _ProductionServerAiRouteState
       }
       return null;
     } catch (_) {
-      _clearRegisteredSources();
+      _discardNewSources(previousSourceIds);
       if (mounted && !_sensitiveStateCleared) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -2074,7 +2124,7 @@ final class _ProductionServerAiRouteState
       return const <AiMediaAsset>[];
     }
     _picking = true;
-    _clearRegisteredSources();
+    final previousSourceIds = _sources.registeredIds.toSet();
     try {
       final selected = await _acquisition.choosePhotos(
         homeId: widget.homeId,
@@ -2087,7 +2137,7 @@ final class _ProductionServerAiRouteState
       }
       return selected;
     } on Object {
-      _clearRegisteredSources();
+      _discardNewSources(previousSourceIds);
       if (mounted && !_sensitiveStateCleared) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -2108,7 +2158,7 @@ final class _ProductionServerAiRouteState
       return const <AiMediaAsset>[];
     }
     _picking = true;
-    _clearRegisteredSources();
+    final previousSourceIds = _sources.registeredIds.toSet();
     try {
       final selected = await _receiptPdfRasterizer.choose(
         homeId: widget.homeId,
@@ -2119,7 +2169,7 @@ final class _ProductionServerAiRouteState
       }
       return selected;
     } on MediaAcquisitionException catch (error) {
-      _clearRegisteredSources();
+      _discardNewSources(previousSourceIds);
       if (mounted && !_sensitiveStateCleared) {
         ScaffoldMessenger.of(
           context,
@@ -2127,7 +2177,7 @@ final class _ProductionServerAiRouteState
       }
       return const <AiMediaAsset>[];
     } catch (_) {
-      _clearRegisteredSources();
+      _discardNewSources(previousSourceIds);
       if (mounted && !_sensitiveStateCleared) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -2138,6 +2188,12 @@ final class _ProductionServerAiRouteState
       return const <AiMediaAsset>[];
     } finally {
       _picking = false;
+    }
+  }
+
+  void _discardNewSources(Set<String> previousSourceIds) {
+    for (final id in _sources.registeredIds.difference(previousSourceIds)) {
+      _sources.remove(id);
     }
   }
 
