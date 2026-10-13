@@ -41,6 +41,9 @@ void validateReceiptProjection(RemoteChange change) {
     _decimal(value, 'lineTotal', optional: true);
     _optionalText(value, 'originalPackText');
     _optionalText(value, 'homeProductId');
+    _optionalText(value, 'packId');
+    _decimal(value, 'stockQuantity', optional: true);
+    _decimal(value, 'stockQuantityPerPack', optional: true, positive: true);
     _oneOf(value, 'approvalStatus', {
       'unreviewed',
       'approved',
@@ -51,7 +54,14 @@ void validateReceiptProjection(RemoteChange change) {
     final approval = value['approvalStatus'];
     if (((approval == 'approved' || approval == 'approved-catalog') &&
             value['homeProductId'] == null) ||
-        (approval == 'unresolved' && value['homeProductId'] != null)) {
+        (approval == 'unresolved' && value['homeProductId'] != null) ||
+        (value['stockQuantity'] != null &&
+            (value['homeProductId'] == null ||
+                (approval != 'approved' &&
+                    approval != 'approved-catalog' &&
+                    approval != 'removed'))) ||
+        (value['stockQuantityPerPack'] != null &&
+            value['stockQuantity'] == null)) {
       throw const FormatException('Receipt line review binding was invalid.');
     }
   }

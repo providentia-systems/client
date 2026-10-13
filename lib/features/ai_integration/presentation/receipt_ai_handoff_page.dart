@@ -21,6 +21,8 @@ final class _ReceiptAiHandoffPageState extends State<ReceiptAiHandoffPage> {
   late final TextEditingController _purchaseDate;
   late final TextEditingController _currency;
   bool _understandsDraftOnly = false;
+  final Map<int, TextEditingController> _missingLineTotals =
+      <int, TextEditingController>{};
 
   @override
   void initState() {
@@ -31,12 +33,21 @@ final class _ReceiptAiHandoffPageState extends State<ReceiptAiHandoffPage> {
     _currency = TextEditingController(
       text: widget.controller.header?.currency ?? '',
     );
+    for (final (index, line) in widget.controller.lines.indexed) {
+      if (line.unitPriceMinorUnits == null &&
+          line.lineTotalMinorUnits == null) {
+        _missingLineTotals[index] = TextEditingController();
+      }
+    }
   }
 
   @override
   void dispose() {
     _purchaseDate.dispose();
     _currency.dispose();
+    for (final controller in _missingLineTotals.values) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
@@ -90,11 +101,35 @@ final class _ReceiptAiHandoffPageState extends State<ReceiptAiHandoffPage> {
             for (final (index, line) in widget.controller.lines.indexed)
               Card(
                 key: Key('receipt-ai-line-$index'),
-                child: ListTile(
-                  title: Text(line.description),
-                  subtitle: Text(
-                    '${line.quantity} × ${line.packText ?? 'pack not provided'}'
-                    '${_priceText(line.unitPriceMinorUnits, line.lineTotalMinorUnits)}',
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        line.description,
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                      Text(
+                        '${line.quantity} × ${line.packText ?? 'pack not provided'}'
+                        '${_priceText(line.unitPriceMinorUnits, line.lineTotalMinorUnits)}',
+                      ),
+                      if (_missingLineTotals[index] case final priceController?)
+                        TextField(
+                          key: Key('receipt-ai-line-total-$index'),
+                          controller: priceController,
+                          enabled:
+                              !widget.controller.isBusy &&
+                              !widget.controller.pricesConfirmed,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          decoration: const InputDecoration(
+                            labelText: 'Missing line total',
+                            hintText: 'Amount paid for this receipt item',
+                          ),
+                        ),
+                    ],
                   ),
                 ),
               ),
@@ -147,9 +182,25 @@ final class _ReceiptAiHandoffPageState extends State<ReceiptAiHandoffPage> {
       );
       return;
     }
+    final missingLineTotals = <int, int>{};
+    for (final entry in _missingLineTotals.entries) {
+      final total = _parseMinorUnits(entry.value.text.trim());
+      if (total == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Enter each missing line total with no more than two decimal places.',
+            ),
+          ),
+        );
+        return;
+      }
+      missingLineTotals[entry.key] = total;
+    }
     final completed = await widget.controller.confirm(
       purchaseDate: date,
       currency: _currency.text,
+      missingLineTotals: missingLineTotals,
     );
     if (!mounted || !completed) return;
     widget.onOpenPurchasingReview(widget.controller.receiptId!);
@@ -183,3 +234,13 @@ String _priceText(int? unitPrice, int? lineTotal) {
 
 String _minor(int value) =>
     '${value ~/ 100}.${(value % 100).toString().padLeft(2, '0')}';
+
+int? _parseMinorUnits(String value) {
+  final match = RegExp(r'^(\d+)(?:[.,](\d{1,2}))?$').firstMatch(value);
+  if (match == null) return null;
+  final whole = int.tryParse(match.group(1)!);
+  final fraction = int.tryParse((match.group(2) ?? '').padRight(2, '0'));
+  if (whole == null || fraction == null || whole > 90071992547409) return null;
+  final minorUnits = whole * 100 + fraction;
+  return minorUnits > 9007199254740991 ? null : minorUnits;
+}

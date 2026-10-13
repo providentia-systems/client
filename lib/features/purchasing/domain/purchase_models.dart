@@ -1,3 +1,5 @@
+import 'package:providentia/features/purchasing/domain/purchase_quantity.dart';
+
 enum PurchaseSource { recentReceipt, historicalImport }
 
 enum PurchaseDatePrecision { exactDay, monthOnly }
@@ -122,6 +124,10 @@ final class PurchaseMatchCandidate {
     this.productId,
     this.packId,
     this.brand = '',
+    this.stockUnit = 'units',
+    this.normalizedBaseAmount,
+    this.normalizedBaseUnit,
+    this.packStatus,
     this.category = 'Uncategorized',
     List<String> aliases = const <String>[],
   }) : homeProductId =
@@ -155,6 +161,10 @@ final class PurchaseMatchCandidate {
   final String? productId;
   final String? packId;
   final String brand;
+  final String stockUnit;
+  final String? normalizedBaseAmount;
+  final String? normalizedBaseUnit;
+  final String? packStatus;
   final String category;
   final List<String> aliases;
 
@@ -188,6 +198,10 @@ final class PurchaseReceiptLineCapture {
     this.unitPrice,
     this.lineTotal,
     this.homeProductId,
+    this.packId,
+    this.stockQuantity,
+    this.stockQuantityPerPack,
+    this.quantityText,
   }) {
     _requireText(id, 'id');
     _requireText(homeId, 'homeId');
@@ -221,6 +235,11 @@ final class PurchaseReceiptLineCapture {
   final Money? unitPrice;
   final Money? lineTotal;
   final String? homeProductId;
+  final String? packId;
+  final String? stockQuantity;
+  final String? stockQuantityPerPack;
+  final String? quantityText;
+  bool get stockApplied => stockQuantity != null;
   final int revision;
   final PurchaseLineApprovalStatus approvalStatus;
   final PurchaseSynchronizationState synchronizationState;
@@ -342,6 +361,7 @@ final class PurchaseReceiptLineRequest {
     this.unitPrice,
     this.lineTotal,
     this.clientLineId,
+    this.quantityText,
   }) {
     _requireText(homeId, 'homeId');
     _requireText(receiptId, 'receiptId');
@@ -354,6 +374,9 @@ final class PurchaseReceiptLineRequest {
       );
     }
     _requirePositive(quantity, 'quantity');
+    if (quantityText != null) {
+      PurchaseQuantity.parse(quantityText!, positive: true);
+    }
     if (originalPackText != null && originalPackText!.trim().length > 191) {
       throw ArgumentError.value(
         originalPackText,
@@ -382,6 +405,7 @@ final class PurchaseReceiptLineRequest {
   final Money? unitPrice;
   final Money? lineTotal;
   final String? clientLineId;
+  final String? quantityText;
 }
 
 final class PurchaseLine {

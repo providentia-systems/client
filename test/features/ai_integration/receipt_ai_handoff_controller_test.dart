@@ -75,6 +75,155 @@ void main() {
     expect(repository.commitCalls, 0);
   });
 
+  test(
+    'missing extracted prices require explicit totals before any purchase is saved',
+    () async {
+      final repository = _CaptureRepository();
+      final controller = _controller(repository, missingPrices: true);
+      addTearDown(controller.dispose);
+      expect(await controller.confirm(), isFalse);
+      expect(repository.draftCalls, 0);
+      expect(
+        await controller.confirm(missingLineTotals: <int, int>{0: -1, 1: 1000}),
+        isFalse,
+      );
+      expect(repository.draftCalls, 0);
+      expect(
+        await controller.confirm(
+          missingLineTotals: <int, int>{0: 1234, 1: 1000},
+        ),
+        isTrue,
+      );
+      expect(
+        repository.capture?.lines.map((line) => line.lineTotal?.minorUnits),
+        <int>[1234, 1000],
+      );
+      expect(repository.approvalCalls, 0);
+      expect(repository.commitCalls, 0);
+      expect(repository.stockMovementCalls, 0);
+    },
+  );
+
+  test(
+    'response-loss retry keeps the human-confirmed missing prices fixed',
+    () async {
+      final repository = _FailingSecondLineRepository();
+      final controller = _controller(repository, missingPrices: true);
+      addTearDown(controller.dispose);
+      expect(
+        await controller.confirm(
+          missingLineTotals: <int, int>{0: 1234, 1: 1000},
+        ),
+        isFalse,
+      );
+      expect(controller.pricesConfirmed, isTrue);
+      expect(repository.capture?.lines, hasLength(1));
+      expect(
+        await controller.confirm(
+          missingLineTotals: <int, int>{0: 9999, 1: 8888},
+        ),
+        isTrue,
+      );
+      expect(
+        repository.capture?.lines.map((line) => line.lineTotal?.minorUnits),
+        <int>[1234, 1000],
+      );
+      expect(repository.draftCalls, 1);
+      expect(repository.lineCalls, 2);
+      expect(repository.approvalCalls, 0);
+      expect(repository.commitCalls, 0);
+    },
+  );
+
+  testWidgets('import confirmation lets a person enter missing line prices', (
+    tester,
+  ) async {
+    final repository = _CaptureRepository();
+    final controller = _controller(repository, missingPrices: true);
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReceiptAiHandoffPage(
+          controller: controller,
+          onOpenPurchasingReview: (_) {},
+        ),
+      ),
+    );
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('receipt-ai-line-total-0')),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.enterText(
+      find.byKey(const Key('receipt-ai-line-total-0')),
+      '12.34',
+    );
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('receipt-ai-line-total-1')),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.enterText(
+      find.byKey(const Key('receipt-ai-line-total-1')),
+      '10,50',
+    );
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('receipt-ai-final-understanding')),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.byKey(const Key('receipt-ai-final-understanding')));
+    await tester.pump();
+    await tester.ensureVisible(
+      find.byKey(const Key('receipt-ai-final-confirm')),
+    );
+    await tester.tap(find.byKey(const Key('receipt-ai-final-confirm')));
+    await tester.pumpAndSettle();
+    expect(
+      repository.capture?.lines.map((line) => line.lineTotal?.minorUnits),
+      <int>[1234, 1050],
+    );
+    expect(repository.approvalCalls, 0);
+    expect(repository.commitCalls, 0);
+  });
+
+  test(
+    'another pending receipt does not block or receive imported lines',
+    () async {
+      final repository = _MultiReceiptCaptureRepository(
+        loseFirstDraftResponse: true,
+        loseFirstLineResponse: true,
+      );
+      final first = _controller(repository);
+      addTearDown(first.dispose);
+      expect(await first.confirm(), isTrue);
+      expect(repository.capture?.lines, hasLength(2));
+      expect(repository.otherReceipt.lines, isEmpty);
+      expect(repository.draftCalls, 1);
+
+      final replay = _controller(repository);
+      addTearDown(replay.dispose);
+      expect(await replay.confirm(), isTrue);
+      expect(repository.draftCalls, 1);
+      expect(repository.lineCalls, 2);
+      expect(repository.approvalCalls, 0);
+      expect(repository.commitCalls, 0);
+    },
+  );
+
+  test(
+    'unavailable receipt projection blocks unsafe import duplication',
+    () async {
+      final repository = _UnavailableReceiptCaptureRepository();
+      final controller = _controller(repository);
+      addTearDown(controller.dispose);
+      expect(await controller.confirm(), isFalse);
+      expect(controller.safeMessage, contains('Refresh purchases'));
+      expect(repository.draftCalls, 0);
+      expect(repository.lineCalls, 0);
+    },
+  );
+
   test('home or purchase-write loss permanently invalidates the draft', () {
     final foreignRepository = _CaptureRepository();
     final foreign = _controller(foreignRepository);
@@ -156,18 +305,23 @@ void main() {
   });
 }
 
-ReceiptAiHandoffController _controller(_CaptureRepository repository) =>
-    ReceiptAiHandoffController(
-      handoff: const AiReviewHandoffBuilder().build(
-        _review(AiCandidateReviewStatus.accepted),
-      ),
-      repository: repository,
-      activeHomeId: 'home-1',
-      mayWritePurchases: true,
-      recoveryTimeout: const Duration(milliseconds: 50),
-    );
+ReceiptAiHandoffController _controller(
+  _CaptureRepository repository, {
+  bool missingPrices = false,
+}) => ReceiptAiHandoffController(
+  handoff: const AiReviewHandoffBuilder().build(
+    _review(AiCandidateReviewStatus.accepted, missingPrices: missingPrices),
+  ),
+  repository: repository,
+  activeHomeId: 'home-1',
+  mayWritePurchases: true,
+  recoveryTimeout: const Duration(milliseconds: 50),
+);
 
-AiExtractionReview _review(AiCandidateReviewStatus status) {
+AiExtractionReview _review(
+  AiCandidateReviewStatus status, {
+  bool missingPrices = false,
+}) {
   final header = AiReceiptHeaderPayload(
     merchant: 'Home Market',
     receiptNumber: 'R-42',
@@ -186,7 +340,7 @@ AiExtractionReview _review(AiCandidateReviewStatus status) {
         position: 0,
         status: status,
         description: 'Rice',
-        lineTotalMinorUnits: 2000,
+        lineTotalMinorUnits: missingPrices ? null : 2000,
         header: header,
       ),
       if (status != AiCandidateReviewStatus.rejected)
@@ -194,7 +348,7 @@ AiExtractionReview _review(AiCandidateReviewStatus status) {
           position: 1,
           status: status,
           description: 'Beans',
-          lineTotalMinorUnits: 1500,
+          lineTotalMinorUnits: missingPrices ? null : 1500,
           header: header,
         ),
     ],
@@ -205,7 +359,7 @@ AiReviewCandidate _candidate({
   required int position,
   required AiCandidateReviewStatus status,
   required String description,
-  required int lineTotalMinorUnits,
+  required int? lineTotalMinorUnits,
   required AiReceiptHeaderPayload header,
 }) => AiReviewCandidate(
   homeId: 'home-1',
@@ -226,7 +380,7 @@ AiReviewCandidate _candidate({
   ),
 );
 
-final class _CaptureRepository implements PurchaseCaptureRepository {
+class _CaptureRepository implements PurchaseCaptureRepository {
   _CaptureRepository({
     this.loseFirstDraftResponse = false,
     this.loseFirstLineResponse = false,
@@ -375,4 +529,60 @@ final class _CaptureRepository implements PurchaseCaptureRepository {
   @override
   Stream<List<PurchaseLine>> watchPurchaseLines({required String homeId}) =>
       const Stream<List<PurchaseLine>>.empty();
+}
+
+final class _MultiReceiptCaptureRepository extends _CaptureRepository
+    implements PurchaseReceiptSelectionRepository {
+  _MultiReceiptCaptureRepository({
+    super.loseFirstDraftResponse,
+    super.loseFirstLineResponse,
+  });
+
+  final otherReceipt = PurchaseReceiptCapture(
+    id: 'other-receipt',
+    notes: '',
+    homeId: 'home-1',
+    purchaseDate: DateTime.utc(2026, 8, 10),
+    currency: 'NAD',
+    revision: 1,
+    status: PurchaseReceiptStatus.draft,
+    synchronizationState: PurchaseSynchronizationState.pending,
+    lines: const <PurchaseReceiptLineCapture>[],
+  );
+
+  @override
+  Stream<PurchaseReceiptCapture?> watchActiveReceiptCapture({
+    required String homeId,
+  }) => Stream<PurchaseReceiptCapture?>.value(otherReceipt);
+
+  @override
+  Stream<List<PurchaseReceiptCapture>> watchReceiptCaptures({
+    required String homeId,
+  }) => Stream<List<PurchaseReceiptCapture>>.value(<PurchaseReceiptCapture>[
+    otherReceipt,
+    ?capture,
+  ]);
+}
+
+final class _UnavailableReceiptCaptureRepository extends _CaptureRepository
+    implements PurchaseReceiptSelectionRepository {
+  @override
+  Stream<List<PurchaseReceiptCapture>> watchReceiptCaptures({
+    required String homeId,
+  }) => const Stream<List<PurchaseReceiptCapture>>.empty();
+}
+
+final class _FailingSecondLineRepository extends _CaptureRepository {
+  bool failSecondLine = true;
+
+  @override
+  Future<PurchaseMutationResult> addReceiptLine(
+    PurchaseReceiptLineRequest request,
+  ) async {
+    if (request.rawDescription.startsWith('Beans') && failSecondLine) {
+      failSecondLine = false;
+      throw const PurchaseCaptureException('Retry the partially saved import.');
+    }
+    return super.addReceiptLine(request);
+  }
 }

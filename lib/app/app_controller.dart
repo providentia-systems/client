@@ -32,12 +32,13 @@ final class AppController extends ChangeNotifier {
   SyncSummary _syncSummary = const SyncSummary.initial();
   bool _started = false;
   bool _refreshing = false;
+  bool _disposed = false;
 
   AppSection get section => _section;
   SyncSummary get syncSummary => _syncSummary;
 
   Future<void> start() async {
-    if (_started || _synchronization == null) {
+    if (_started || _synchronization == null || _disposed) {
       return;
     }
     _started = true;
@@ -47,8 +48,10 @@ final class AppController extends ChangeNotifier {
           _syncSummary = summary.copyWith(
             availability: _syncSummary.availability,
             lastSuccessfulSync: _syncSummary.lastSuccessfulSync,
+            isSynchronizing: _refreshing || summary.isSynchronizing,
+            lastSafeError: summary.lastSafeError ?? _syncSummary.lastSafeError,
           );
-          notifyListeners();
+          _notifyIfActive();
         });
     await refresh();
   }
@@ -58,31 +61,35 @@ final class AppController extends ChangeNotifier {
       return;
     }
     _section = section;
-    notifyListeners();
+    _notifyIfActive();
   }
 
   Future<void> refresh() async {
     final synchronization = _synchronization;
-    if (synchronization == null || _refreshing) {
+    if (synchronization == null || _refreshing || _disposed) {
       return;
     }
 
     _refreshing = true;
+    _syncSummary = _syncSummary.copyWith(isSynchronizing: true);
+    _notifyIfActive();
     try {
       final availability = await synchronization.connectivity();
+      if (_disposed) return;
       _syncSummary = _syncSummary.copyWith(
         availability: availability.availability,
-        isSynchronizing: availability.availability == SyncAvailability.online,
+        isSynchronizing: true,
         lastSafeError: availability.safeMessage,
         clearError: availability.safeMessage == null,
       );
-      notifyListeners();
+      _notifyIfActive();
 
       if (availability.availability != SyncAvailability.online) {
         return;
       }
 
       final outcome = await synchronization.synchronize(activeHomeId);
+      if (_disposed) return;
       final after = await synchronization.connectivity();
       final outcomeAvailability = switch (outcome.status) {
         SyncRunStatus.authenticationRequired =>
@@ -105,15 +112,27 @@ final class AppController extends ChangeNotifier {
             outcome.safeMessage == null &&
             after.safeMessage == null,
       );
-      notifyListeners();
+      _notifyIfActive();
+    } on Exception {
+      _syncSummary = _syncSummary.copyWith(
+        availability: SyncAvailability.temporarilyUnavailable,
+        lastSafeError: 'Synchronization was interrupted. Try again safely.',
+      );
     } finally {
       _refreshing = false;
+      _syncSummary = _syncSummary.copyWith(isSynchronizing: false);
+      _notifyIfActive();
     }
   }
 
   @override
   void dispose() {
+    _disposed = true;
     unawaited(_summarySubscription?.cancel());
     super.dispose();
+  }
+
+  void _notifyIfActive() {
+    if (!_disposed) notifyListeners();
   }
 }

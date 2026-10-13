@@ -39,6 +39,7 @@ final class ServerAiWorkspacePage extends StatefulWidget {
     this.discardLocalImages,
     this.readPreparedImage,
     this.onReviewHandoff,
+    this.receiptImportOnly = false,
     super.key,
   });
 
@@ -53,6 +54,7 @@ final class ServerAiWorkspacePage extends StatefulWidget {
   final AiLocalImageDiscarder? discardLocalImages;
   final AiPreparedImageReader? readPreparedImage;
   final ValueChanged<AiReviewHandoff>? onReviewHandoff;
+  final bool receiptImportOnly;
 
   @override
   State<ServerAiWorkspacePage> createState() => _ServerAiWorkspacePageState();
@@ -63,6 +65,7 @@ final class _ServerAiWorkspacePageState extends State<ServerAiWorkspacePage> {
   List<AiMediaAsset> _receiptDraftPages = <AiMediaAsset>[];
   List<Uint8List?> _receiptDraftPreviews = <Uint8List?>[];
   bool _editingReceiptPage = false;
+  bool _pickingMedia = false;
 
   @override
   void initState() {
@@ -97,7 +100,9 @@ final class _ServerAiWorkspacePageState extends State<ServerAiWorkspacePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Household AI'),
+        title: Text(
+          widget.receiptImportOnly ? 'Import receipt' : 'Household AI',
+        ),
         actions: <Widget>[
           IconButton(
             tooltip: 'Refresh AI settings',
@@ -151,12 +156,20 @@ final class _ServerAiWorkspacePageState extends State<ServerAiWorkspacePage> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: <Widget>[
-        if (controller.recentReviews.isNotEmpty) ...<Widget>[
+        if (controller.recentReviews.any(
+          (reference) =>
+              !widget.receiptImportOnly ||
+              reference.kind == AiExtractionKind.receipt,
+        )) ...<Widget>[
           const Text('Recent reviews on this device'),
           const Text(
             'Only references are saved here. Resume reloads authorized current evidence from the server.',
           ),
-          for (final reference in controller.recentReviews)
+          for (final reference in controller.recentReviews.where(
+            (reference) =>
+                !widget.receiptImportOnly ||
+                reference.kind == AiExtractionKind.receipt,
+          ))
             ListTile(
               title: Text(
                 '${reference.kind.name} · ${reference.extractionId.substring(0, 8)}',
@@ -194,245 +207,302 @@ final class _ServerAiWorkspacePageState extends State<ServerAiWorkspacePage> {
               ),
             ),
           ),
-        const SizedBox(height: 12),
-        Text(
-          'Provider profiles',
-          style: Theme.of(context).textTheme.titleLarge,
-        ),
-        const SizedBox(height: 8),
-        if (workspace.profiles.isEmpty)
-          const Card(
-            child: Padding(
-              padding: EdgeInsets.all(16),
-              child: Text(
-                'No provider profile is configured. A household AI manager must add one.',
-              ),
-            ),
+        if (widget.receiptImportOnly) ..._extractionWidgets(selected),
+        if (widget.receiptImportOnly)
+          ExpansionTile(
+            key: const Key('receipt-import-settings'),
+            title: const Text('AI setup'),
+            subtitle: const Text('Provider and household settings'),
+            initiallyExpanded: !_canExtract(selected),
+            children: _providerWidgets(context, workspace, selected),
           )
         else
-          RadioGroup<String>(
-            groupValue: selected?.id,
-            onChanged: (value) {
-              if (!controller.isBusy && value != null) {
-                setState(() => _selectedProfileId = value);
-              }
-            },
-            child: Column(
-              children: <Widget>[
-                for (final profile in workspace.profiles)
-                  RadioListTile<String>(
-                    key: Key('ai-profile-${profile.id}'),
-                    value: profile.id,
-                    enabled: !controller.isBusy,
-                    title: Text(profile.displayName),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text(
-                          '${profile.providerWireId} · ${profile.model} · revision ${profile.revision}',
-                        ),
-                        if (profile.endpoint != null)
-                          Text(
-                            'Endpoint: ${profile.endpoint}',
-                            key: Key('ai-profile-endpoint-${profile.id}'),
-                          ),
-                        const SizedBox(height: 4),
-                        Row(children: <Widget>[_ProfileScopeBadge(profile)]),
-                      ],
-                    ),
-                    secondary: Icon(
-                      profile.credentialConfigured
-                          ? Icons.key_outlined
-                          : Icons.key_off_outlined,
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        if (controller.capabilities.mayManage) ...<Widget>[
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: <Widget>[
-              OutlinedButton.icon(
-                key: const Key('ai-add-profile'),
-                onPressed: controller.isBusy
-                    ? null
-                    : () => _showProfileDialog(context),
-                icon: const Icon(Icons.add),
-                label: const Text('Add provider'),
-              ),
-              OutlinedButton.icon(
-                key: const Key('ai-edit-profile'),
-                onPressed: selected == null || controller.isBusy
-                    ? null
-                    : () => _showProfileDialog(context, profile: selected),
-                icon: const Icon(Icons.edit_outlined),
-                label: const Text('Edit profile'),
-              ),
-              OutlinedButton.icon(
-                key: const Key('ai-replace-credential'),
-                onPressed: selected == null || controller.isBusy
-                    ? null
-                    : () => _showCredentialDialog(context, selected),
-                icon: const Icon(Icons.password),
-                label: const Text('Replace credential'),
-              ),
-              OutlinedButton.icon(
-                key: const Key('ai-enable-profile'),
-                onPressed:
-                    selected == null ||
-                        controller.isBusy ||
-                        selected.availability !=
-                            AiProviderAvailability.available
-                    ? null
-                    : () => controller.updateSettings(
-                        AiSettingsUpdate(
-                          mode: AiServerMode.serverProxy,
-                          provider: selected.providerWireId,
-                          model: selected.model,
-                          expectedRevision: workspace.settings.revision,
-                        ),
-                      ),
-                icon: const Icon(Icons.toggle_on_outlined),
-                label: const Text('Use selected provider'),
-              ),
-              OutlinedButton.icon(
-                key: const Key('ai-single-profile-policy'),
-                onPressed:
-                    selected == null ||
-                        selected.ownerScope != AiProfileOwnerScope.home ||
-                        controller.isBusy ||
-                        selected.availability !=
-                            AiProviderAvailability.available
-                    ? null
-                    : () => controller.updatePolicy(
-                        AiOrchestrationPolicyUpdate(
-                          extractionProfileIds: <String>[selected.id],
-                          validationProfileId: null,
-                          maxAttempts: 1,
-                          maxTotalTokens: workspace.policy.maxTotalTokens,
-                          maxEstimatedCostMicros:
-                              workspace.policy.maxEstimatedCostMicros,
-                          expectedRevision: workspace.policy.revision,
-                        ),
-                      ),
-                icon: const Icon(Icons.account_tree_outlined),
-                label: const Text('Use shared profile in policy'),
-              ),
-            ],
-          ),
-        ],
-        const Padding(
-          padding: EdgeInsets.only(top: 8),
-          child: Text(
-            'Household policies use shared profiles only. Your private profile '
-            'may override the same provider for you; the confirmation shows '
-            'the exact effective recipients before anything is sent.',
-          ),
-        ),
-        const Divider(height: 32),
-        Text(
-          'Extract receipt pages or a stock image',
-          style: Theme.of(context).textTheme.titleLarge,
-        ),
-        const SizedBox(height: 8),
-        const Text(
-          'Receipt pages stay ordered and local while you preview, rotate, or crop them. Providentia then re-encodes every selected image, removes embedded metadata, and binds your confirmation to every exact prepared digest.',
-        ),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: <Widget>[
-            FilledButton.icon(
-              key: const Key('ai-pick-receipt'),
-              onPressed: _canExtract(selected)
-                  ? () => _pickReceiptPages(selected!)
-                  : null,
-              icon: const Icon(Icons.receipt_long_outlined),
-              label: const Text('Choose receipt'),
-            ),
-            if (widget.pickReceiptPdf != null)
-              OutlinedButton.icon(
-                key: const Key('ai-pick-receipt-pdf'),
-                onPressed: _canExtract(selected) ? _pickReceiptPdf : null,
-                icon: const Icon(Icons.picture_as_pdf_outlined),
-                label: const Text('Choose receipt PDF'),
-              ),
-            if (widget.captureSingleImage != null)
-              FilledButton.tonalIcon(
-                key: const Key('ai-capture-stock'),
-                onPressed: _canExtract(selected)
-                    ? () => _pickAndPrepare(
-                        selected!,
-                        AiExtractionKind.stockPhoto,
-                        picker: widget.captureSingleImage,
-                      )
-                    : null,
-                icon: const Icon(Icons.photo_camera_outlined),
-                label: const Text('Take stock photo'),
-              ),
-            OutlinedButton.icon(
-              key: const Key('ai-pick-stock'),
-              onPressed: _canExtract(selected)
-                  ? () =>
-                        _pickAndPrepare(selected!, AiExtractionKind.stockPhoto)
-                  : null,
-              icon: const Icon(Icons.photo_library_outlined),
-              label: const Text('Choose stock image'),
-            ),
-            if (widget.pickFileImage != null)
-              OutlinedButton.icon(
-                key: const Key('ai-upload-stock'),
-                onPressed: _canExtract(selected)
-                    ? () => _pickAndPrepare(
-                        selected!,
-                        AiExtractionKind.stockPhoto,
-                        picker: widget.pickFileImage,
-                      )
-                    : null,
-                icon: const Icon(Icons.upload_file_outlined),
-                label: const Text('Upload stock image'),
-              ),
-          ],
-        ),
-        if (_receiptDraftPages.isNotEmpty) ...<Widget>[
-          const SizedBox(height: 16),
-          _receiptDraftCard(selected!),
-        ],
-        if (controller.status == ServerAiWorkspaceStatus.preparing ||
-            controller.status ==
-                ServerAiWorkspaceStatus.processing) ...<Widget>[
-          const SizedBox(height: 16),
-          const LinearProgressIndicator(),
-        ],
-        if (controller.prepared != null) ...<Widget>[
-          const SizedBox(height: 16),
-          _ConsentCard(
-            key: ValueKey<String>(controller.prepared!.id),
-            controller: controller,
-            readPreparedImage: widget.readPreparedImage,
-          ),
-        ],
-        if (controller.status ==
-            ServerAiWorkspaceStatus.quarantined) ...<Widget>[
-          const SizedBox(height: 16),
-          const _MessagePane(
-            icon: Icons.gpp_bad_outlined,
-            title: 'Image quarantined',
-            message:
-                'No inventory, purchase, price, or catalog record was changed.',
-          ),
-        ],
-        if (controller.review != null) ...<Widget>[
-          const Divider(height: 32),
-          _CandidateReviewSection(controller: controller, onHandoff: _handoff),
-        ],
+          ..._providerWidgets(context, workspace, selected),
+        if (!widget.receiptImportOnly) ..._extractionWidgets(selected),
       ],
     );
   }
+
+  List<Widget> _providerWidgets(
+    BuildContext context,
+    AiServerWorkspace workspace,
+    AiProviderProfile? selected,
+  ) => <Widget>[
+    const SizedBox(height: 12),
+    Text('Provider profiles', style: Theme.of(context).textTheme.titleLarge),
+    const SizedBox(height: 8),
+    if (workspace.profiles.isEmpty)
+      const Card(
+        child: Padding(
+          padding: EdgeInsets.all(16),
+          child: Text(
+            'No provider profile is configured. A household AI manager must add one.',
+            key: Key('ai-no-provider-profile'),
+          ),
+        ),
+      )
+    else
+      RadioGroup<String>(
+        groupValue: selected?.id,
+        onChanged: (value) {
+          if (!widget.controller.isBusy && value != null) {
+            setState(() => _selectedProfileId = value);
+          }
+        },
+        child: Column(
+          children: <Widget>[
+            for (final profile in workspace.profiles)
+              RadioListTile<String>(
+                key: Key('ai-profile-${profile.id}'),
+                value: profile.id,
+                enabled: !widget.controller.isBusy,
+                title: Text(profile.displayName),
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      '${profile.providerWireId} · ${profile.model} · revision ${profile.revision}',
+                    ),
+                    if (profile.endpoint != null)
+                      Text(
+                        'Endpoint: ${profile.endpoint}',
+                        key: Key('ai-profile-endpoint-${profile.id}'),
+                      ),
+                    const SizedBox(height: 4),
+                    Row(children: <Widget>[_ProfileScopeBadge(profile)]),
+                  ],
+                ),
+                secondary: Icon(
+                  profile.credentialConfigured
+                      ? Icons.key_outlined
+                      : Icons.key_off_outlined,
+                ),
+              ),
+          ],
+        ),
+      ),
+    if (widget.controller.capabilities.mayManage) ...<Widget>[
+      const SizedBox(height: 8),
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: <Widget>[
+          OutlinedButton.icon(
+            key: const Key('ai-add-profile'),
+            onPressed: widget.controller.isBusy
+                ? null
+                : () => _showProfileDialog(context),
+            icon: const Icon(Icons.add),
+            label: const Text('Add provider'),
+          ),
+          OutlinedButton.icon(
+            key: const Key('ai-edit-profile'),
+            onPressed: selected == null || widget.controller.isBusy
+                ? null
+                : () => _showProfileDialog(context, profile: selected),
+            icon: const Icon(Icons.edit_outlined),
+            label: const Text('Edit profile'),
+          ),
+          OutlinedButton.icon(
+            key: const Key('ai-replace-credential'),
+            onPressed: selected == null || widget.controller.isBusy
+                ? null
+                : () => _showCredentialDialog(context, selected),
+            icon: const Icon(Icons.password),
+            label: const Text('Replace credential'),
+          ),
+          OutlinedButton.icon(
+            key: const Key('ai-enable-profile'),
+            onPressed:
+                selected == null ||
+                    widget.controller.isBusy ||
+                    selected.availability != AiProviderAvailability.available
+                ? null
+                : () => widget.controller.updateSettings(
+                    AiSettingsUpdate(
+                      mode: AiServerMode.serverProxy,
+                      provider: selected.providerWireId,
+                      model: selected.model,
+                      expectedRevision: workspace.settings.revision,
+                    ),
+                  ),
+            icon: const Icon(Icons.toggle_on_outlined),
+            label: const Text('Use selected provider'),
+          ),
+          OutlinedButton.icon(
+            key: const Key('ai-single-profile-policy'),
+            onPressed:
+                selected == null ||
+                    selected.ownerScope != AiProfileOwnerScope.home ||
+                    widget.controller.isBusy ||
+                    selected.availability != AiProviderAvailability.available
+                ? null
+                : () => widget.controller.updatePolicy(
+                    AiOrchestrationPolicyUpdate(
+                      extractionProfileIds: <String>[selected.id],
+                      validationProfileId: null,
+                      maxAttempts: 1,
+                      maxTotalTokens: workspace.policy.maxTotalTokens,
+                      maxEstimatedCostMicros:
+                          workspace.policy.maxEstimatedCostMicros,
+                      expectedRevision: workspace.policy.revision,
+                    ),
+                  ),
+            icon: const Icon(Icons.account_tree_outlined),
+            label: const Text('Use shared profile in policy'),
+          ),
+        ],
+      ),
+    ],
+    const Padding(
+      padding: EdgeInsets.only(top: 8),
+      child: Text(
+        'Household policies use shared profiles only. Your private profile '
+        'may override the same provider for you; the confirmation shows '
+        'the exact effective recipients before anything is sent.',
+      ),
+    ),
+  ];
+
+  List<Widget> _extractionWidgets(AiProviderProfile? selected) => <Widget>[
+    const Divider(height: 32),
+    Text(
+      widget.receiptImportOnly
+          ? 'Choose a receipt photo or PDF'
+          : 'Extract receipt pages or a stock image',
+      style: Theme.of(context).textTheme.titleLarge,
+    ),
+    const SizedBox(height: 8),
+    const Text(
+      'Receipt pages stay ordered and local while you preview, rotate, or crop them. Providentia then re-encodes every selected image, removes embedded metadata, and binds your confirmation to every exact prepared digest.',
+    ),
+    if (_extractionUnavailableReason(selected) case final reason?)
+      Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Text(reason, key: const Key('ai-extraction-unavailable')),
+      ),
+    const SizedBox(height: 12),
+    Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: <Widget>[
+        if (widget.captureSingleImage != null)
+          FilledButton.tonalIcon(
+            key: const Key('ai-capture-receipt'),
+            onPressed: _canExtract(selected)
+                ? () => _pickReceiptImage(widget.captureSingleImage!)
+                : null,
+            icon: const Icon(Icons.photo_camera_outlined),
+            label: const Text('Take receipt photo'),
+          ),
+        if (widget.pickFileImage != null)
+          OutlinedButton.icon(
+            key: const Key('ai-upload-receipt'),
+            onPressed: _canExtract(selected)
+                ? () => _pickReceiptImage(widget.pickFileImage!)
+                : null,
+            icon: const Icon(Icons.upload_file_outlined),
+            label: const Text('Upload receipt photo'),
+          ),
+        FilledButton.icon(
+          key: const Key('ai-pick-receipt'),
+          onPressed: _canExtract(selected)
+              ? () => _pickReceiptPages(selected!)
+              : null,
+          icon: const Icon(Icons.receipt_long_outlined),
+          label: const Text('Choose receipt'),
+        ),
+        if (widget.pickReceiptPdf != null)
+          OutlinedButton.icon(
+            key: const Key('ai-pick-receipt-pdf'),
+            onPressed: _canExtract(selected) ? _pickReceiptPdf : null,
+            icon: const Icon(Icons.picture_as_pdf_outlined),
+            label: const Text('Choose receipt PDF'),
+          ),
+        if (!widget.receiptImportOnly && widget.captureSingleImage != null)
+          FilledButton.tonalIcon(
+            key: const Key('ai-capture-stock'),
+            onPressed: _canExtract(selected)
+                ? () => _pickAndPrepare(
+                    selected!,
+                    AiExtractionKind.stockPhoto,
+                    picker: widget.captureSingleImage,
+                  )
+                : null,
+            icon: const Icon(Icons.photo_camera_outlined),
+            label: const Text('Take stock photo'),
+          ),
+        if (!widget.receiptImportOnly)
+          OutlinedButton.icon(
+            key: const Key('ai-pick-stock'),
+            onPressed: _canExtract(selected)
+                ? () => _pickAndPrepare(selected!, AiExtractionKind.stockPhoto)
+                : null,
+            icon: const Icon(Icons.photo_library_outlined),
+            label: const Text('Choose stock image'),
+          ),
+        if (!widget.receiptImportOnly && widget.pickFileImage != null)
+          OutlinedButton.icon(
+            key: const Key('ai-upload-stock'),
+            onPressed: _canExtract(selected)
+                ? () => _pickAndPrepare(
+                    selected!,
+                    AiExtractionKind.stockPhoto,
+                    picker: widget.pickFileImage,
+                  )
+                : null,
+            icon: const Icon(Icons.upload_file_outlined),
+            label: const Text('Upload stock image'),
+          ),
+      ],
+    ),
+    if (_receiptDraftPages.isNotEmpty) ...<Widget>[
+      const SizedBox(height: 16),
+      _receiptDraftCard(selected),
+    ],
+    if (_pickingMedia ||
+        widget.controller.status == ServerAiWorkspaceStatus.preparing ||
+        widget.controller.status ==
+            ServerAiWorkspaceStatus.processing) ...<Widget>[
+      const SizedBox(height: 16),
+      const LinearProgressIndicator(),
+      Text(
+        _pickingMedia
+            ? 'Opening selected images…'
+            : widget.controller.status == ServerAiWorkspaceStatus.preparing
+            ? 'Preparing receipt images…'
+            : widget.controller.prepared?.purpose == AiExtractionKind.stockPhoto
+            ? 'Reading stock items…'
+            : 'Reading receipt items…',
+        key: const Key('ai-import-progress'),
+      ),
+    ],
+    if (widget.controller.prepared != null) ...<Widget>[
+      const SizedBox(height: 16),
+      _ConsentCard(
+        key: ValueKey<String>(widget.controller.prepared!.id),
+        controller: widget.controller,
+        readPreparedImage: widget.readPreparedImage,
+      ),
+    ],
+    if (widget.controller.status ==
+        ServerAiWorkspaceStatus.quarantined) ...<Widget>[
+      const SizedBox(height: 16),
+      const _MessagePane(
+        icon: Icons.gpp_bad_outlined,
+        title: 'Image quarantined',
+        message:
+            'No inventory, purchase, price, or catalog record was changed.',
+      ),
+    ],
+    if (widget.controller.review != null) ...<Widget>[
+      const Divider(height: 32),
+      _CandidateReviewSection(
+        controller: widget.controller,
+        onHandoff: _handoff,
+      ),
+    ],
+  ];
 
   AiProviderProfile? _selectedProfile(AiServerWorkspace workspace) {
     if (_selectedProfileId != null) {
@@ -467,40 +537,113 @@ final class _ServerAiWorkspacePageState extends State<ServerAiWorkspacePage> {
             )) &&
         selected.availability == AiProviderAvailability.available &&
         widget.controller.capabilities.mayUse &&
-        !widget.controller.isBusy;
+        !widget.controller.isBusy &&
+        !_pickingMedia &&
+        !_editingReceiptPage;
+  }
+
+  String? _extractionUnavailableReason(AiProviderProfile? selected) {
+    final controller = widget.controller;
+    final workspace = controller.workspace;
+    if (!controller.capabilities.mayUse) {
+      return 'Your household role cannot import receipts with AI. You can continue entering purchases manually.';
+    }
+    if (workspace?.settings.mode != AiServerMode.serverProxy) {
+      return 'Receipt import needs household AI enabled. Open AI setup or ask the household owner.';
+    }
+    if (selected == null || workspace?.settings.transmissionPlan == null) {
+      return 'Receipt import needs an available provider and a saved household policy. Open AI setup or ask the household owner.';
+    }
+    if (workspace!.settings.transmissionPlan!.primary.profileId !=
+        selected.id) {
+      return 'Select the household policy’s primary provider before importing.';
+    }
+    if (!selected.enabled ||
+        selected.availability != AiProviderAvailability.available ||
+        (!selected.credentialConfigured &&
+            !workspace.settings.availableProviders.any(
+              (provider) =>
+                  provider.id == selected.providerWireId &&
+                  !provider.requiresCredential,
+            ))) {
+      return 'The receipt provider is unavailable or needs a credential. Open AI setup or ask the household owner.';
+    }
+    return null;
+  }
+
+  Future<void> _withMediaPicker(Future<void> Function() action) async {
+    if (_pickingMedia || widget.controller.isBusy) return;
+    setState(() => _pickingMedia = true);
+    try {
+      await action();
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'The selected receipt could not be opened safely. Try another photo or PDF.',
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _pickingMedia = false);
+    }
   }
 
   Future<void> _pickAndPrepare(
     AiProviderProfile provider,
     AiExtractionKind kind, {
     AiSingleImagePicker? picker,
-  }) async {
+  }) => _withMediaPicker(() async {
     final asset = await (picker ?? widget.pickSingleImage)(kind);
     if (!mounted || asset == null) return;
     await widget.controller.prepareOne(provider: provider, asset: asset);
-  }
+  });
 
-  Future<void> _pickReceiptPages(AiProviderProfile provider) async {
-    final multiPicker = widget.pickMultipleImages;
-    if (multiPicker == null) {
-      await _pickAndPrepare(provider, AiExtractionKind.receipt);
-      return;
-    }
-    final selected = await multiPicker(AiExtractionKind.receipt);
-    await _stageReceiptPages(selected);
-  }
+  Future<void> _pickReceiptImage(AiSingleImagePicker picker) =>
+      _withMediaPicker(() async {
+        final asset = await picker(AiExtractionKind.receipt);
+        if (!mounted || asset == null) return;
+        if (widget.readLocalImage == null) {
+          final provider = _selectedProfile(widget.controller.workspace!);
+          if (provider != null) {
+            await widget.controller.prepareOne(
+              provider: provider,
+              asset: asset,
+            );
+          }
+        } else {
+          await _stageReceiptPages(<AiMediaAsset>[asset]);
+        }
+      });
 
-  Future<void> _pickReceiptPdf() async {
+  Future<void> _pickReceiptPages(AiProviderProfile provider) =>
+      _withMediaPicker(() async {
+        final multiPicker = widget.pickMultipleImages;
+        if (multiPicker == null) {
+          final asset = await widget.pickSingleImage(AiExtractionKind.receipt);
+          if (!mounted || asset == null) return;
+          await widget.controller.prepareOne(provider: provider, asset: asset);
+          return;
+        }
+        final selected = await multiPicker(AiExtractionKind.receipt);
+        await _stageReceiptPages(selected);
+      });
+
+  Future<void> _pickReceiptPdf() => _withMediaPicker(() async {
     final picker = widget.pickReceiptPdf;
     if (picker == null) return;
     final selected = await picker();
     if (!mounted || selected.isEmpty) return;
     await _stageReceiptPages(selected);
-  }
+  });
 
   Future<void> _stageReceiptPages(List<AiMediaAsset> selected) async {
     if (!mounted || selected.isEmpty) return;
-    if (selected.length > 8 ||
+    if (!widget.controller.capabilities.mayRead ||
+        !widget.controller.capabilities.mayUse ||
+        selected.length > 8 ||
         selected.any(
           (asset) =>
               asset.homeId != widget.controller.capabilities.homeId ||
@@ -522,7 +665,14 @@ final class _ServerAiWorkspacePageState extends State<ServerAiWorkspacePage> {
       );
       return;
     }
-    await _clearReceiptDraft();
+    final selectedIds = selected.map((asset) => asset.id).toSet();
+    // A repeated selection can have the same digest-backed asset ID. Discard
+    // superseded pages only, so replacing it does not wipe the new bytes.
+    await _clearReceiptDraft(
+      pagesToDiscard: _receiptDraftPages.where(
+        (page) => !selectedIds.contains(page.id),
+      ),
+    );
     if (!mounted) {
       await _discardLocalReceiptPages(selected);
       return;
@@ -570,7 +720,7 @@ final class _ServerAiWorkspacePageState extends State<ServerAiWorkspacePage> {
     }
   }
 
-  Widget _receiptDraftCard(AiProviderProfile provider) {
+  Widget _receiptDraftCard(AiProviderProfile? provider) {
     final allPreviewed =
         _receiptDraftPreviews.length == _receiptDraftPages.length &&
         _receiptDraftPreviews.every((bytes) => bytes?.isNotEmpty ?? false);
@@ -662,9 +812,7 @@ final class _ServerAiWorkspacePageState extends State<ServerAiWorkspacePage> {
             FilledButton.icon(
               key: const Key('ai-prepare-receipt-pages'),
               onPressed:
-                  allPreviewed &&
-                      !_editingReceiptPage &&
-                      !widget.controller.isBusy
+                  allPreviewed && provider != null && _canExtract(provider)
                   ? () => _prepareReceiptDraft(provider)
                   : null,
               icon: const Icon(Icons.verified_user_outlined),

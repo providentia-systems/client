@@ -29,6 +29,129 @@ void main() {
     }
   });
 
+  testWidgets(
+    'receipt import shows photo and PDF sources without stock actions',
+    (tester) async {
+      final repository = _ServerRepository(_workspace());
+      final controller = _controller(repository: repository);
+      addTearDown(controller.dispose);
+      await controller.load();
+      AiExtractionKind? capturedKind;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ServerAiWorkspacePage(
+            controller: controller,
+            receiptImportOnly: true,
+            pickSingleImage: (_) async => _asset(),
+            captureSingleImage: (kind) async {
+              capturedKind = kind;
+              return _asset();
+            },
+            pickFileImage: (_) async => _asset(),
+            pickReceiptPdf: () async => <AiMediaAsset>[_asset()],
+            readLocalImage: (_) async => _transparentPixel,
+          ),
+        ),
+      );
+
+      expect(find.text('Import receipt'), findsOneWidget);
+      expect(find.byKey(const Key('ai-pick-stock')), findsNothing);
+      expect(find.byKey(const Key('ai-capture-stock')), findsNothing);
+      expect(find.byKey(const Key('ai-upload-stock')), findsNothing);
+      expect(find.byKey(const Key('ai-add-profile')), findsNothing);
+      await _scrollTo(tester, const Key('ai-capture-receipt'));
+      await tester.tap(find.byKey(const Key('ai-capture-receipt')));
+      await tester.pumpAndSettle();
+
+      expect(capturedKind, AiExtractionKind.receipt);
+      await _scrollTo(tester, const Key('ai-receipt-page-draft'));
+      expect(
+        find.byKey(const Key('ai-receipt-local-preview-0')),
+        findsOneWidget,
+      );
+      expect(controller.prepared, isNull);
+      expect(repository.inventoryOrPurchaseMutationCalls, 0);
+    },
+  );
+
+  testWidgets('PDF intake shows progress and cannot overlap another picker', (
+    tester,
+  ) async {
+    final controller = _controller(repository: _ServerRepository(_workspace()));
+    addTearDown(controller.dispose);
+    await controller.load();
+    final selected = Completer<List<AiMediaAsset>>();
+    var pickerCalls = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ServerAiWorkspacePage(
+          controller: controller,
+          receiptImportOnly: true,
+          pickSingleImage: (_) async => _asset(),
+          pickReceiptPdf: () {
+            pickerCalls++;
+            return selected.future;
+          },
+          readLocalImage: (_) async => _transparentPixel,
+        ),
+      ),
+    );
+    await _scrollTo(tester, const Key('ai-pick-receipt-pdf'));
+    await tester.tap(find.byKey(const Key('ai-pick-receipt-pdf')));
+    await tester.pump();
+    expect(find.byKey(const Key('ai-import-progress')), findsOneWidget);
+    expect(
+      tester
+          .widget<OutlinedButton>(find.byKey(const Key('ai-pick-receipt-pdf')))
+          .onPressed,
+      isNull,
+    );
+    expect(
+      tester
+          .widget<FilledButton>(find.byKey(const Key('ai-pick-receipt')))
+          .onPressed,
+      isNull,
+    );
+    expect(pickerCalls, 1);
+    selected.complete(<AiMediaAsset>[_asset()]);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('ai-import-progress')), findsNothing);
+    await _scrollTo(tester, const Key('ai-receipt-page-draft'));
+    expect(find.byKey(const Key('ai-receipt-local-preview-0')), findsOneWidget);
+    expect(controller.prepared, isNull);
+  });
+
+  testWidgets('unavailable receipt import explains how to repair AI setup', (
+    tester,
+  ) async {
+    final controller = _controller(
+      repository: _ServerRepository(_workspace(profiles: const [])),
+    );
+    addTearDown(controller.dispose);
+    await controller.load();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ServerAiWorkspacePage(
+          controller: controller,
+          receiptImportOnly: true,
+          pickSingleImage: (_) async => _asset(),
+          pickReceiptPdf: () async => <AiMediaAsset>[_asset()],
+        ),
+      ),
+    );
+    await _scrollTo(tester, const Key('ai-extraction-unavailable'));
+    expect(
+      find.textContaining('available provider and a saved household policy'),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<FilledButton>(find.byKey(const Key('ai-pick-receipt')))
+          .onPressed,
+      isNull,
+    );
+  });
+
   test(
     'removing personal AI credentials feature keeps read access and disables use',
     () {
@@ -1596,8 +1719,9 @@ void main() {
         );
         await _scrollTo(tester, const Key('ai-configuration-required'));
         await _captureStep2(tester, 'household-ai-setup-required');
-        await _scrollTo(tester, const Key('ai-add-profile'));
+        await _scrollTo(tester, const Key('ai-no-provider-profile'));
         expect(find.textContaining('No provider profile'), findsOneWidget);
+        await _scrollTo(tester, const Key('ai-add-profile'));
         await _scrollTo(tester, const Key('ai-pick-receipt'));
         expect(
           tester

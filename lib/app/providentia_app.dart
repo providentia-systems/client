@@ -73,6 +73,7 @@ class ProvidentiaApp extends StatefulWidget {
     this.onSignOut,
     this.accountPageBuilder,
     this.catalogContributionPageBuilder,
+    this.receiptImportPageBuilder,
     this.syncConflictController,
     this.onCountReconciliation,
     this.onDispose,
@@ -80,6 +81,7 @@ class ProvidentiaApp extends StatefulWidget {
   });
 
   final WidgetBuilder? catalogContributionPageBuilder;
+  final WidgetBuilder? receiptImportPageBuilder;
   final AppController controller;
   final HouseholdFeatures? features;
   final HouseholdWorkspaceAccess access;
@@ -154,6 +156,7 @@ class _ProvidentiaAppState extends State<ProvidentiaApp> {
             accountPageBuilder: widget.accountPageBuilder,
             catalogContributionPageBuilder:
                 widget.catalogContributionPageBuilder,
+            receiptImportPageBuilder: widget.receiptImportPageBuilder,
             syncConflictController: widget.syncConflictController,
             onCountReconciliation: widget.onCountReconciliation,
           );
@@ -172,6 +175,7 @@ class _AdaptiveShell extends StatelessWidget {
     required this.onSignOut,
     required this.accountPageBuilder,
     required this.catalogContributionPageBuilder,
+    required this.receiptImportPageBuilder,
     required this.syncConflictController,
     required this.onCountReconciliation,
   });
@@ -183,6 +187,7 @@ class _AdaptiveShell extends StatelessWidget {
   final Future<void> Function()? onSignOut;
   final WidgetBuilder? accountPageBuilder;
   final WidgetBuilder? catalogContributionPageBuilder;
+  final WidgetBuilder? receiptImportPageBuilder;
   final SyncConflictController? syncConflictController;
   final SyncCountReconciliationHandler? onCountReconciliation;
 
@@ -197,6 +202,7 @@ class _AdaptiveShell extends StatelessWidget {
         final content = _ContentViewport(
           controller: controller,
           catalogContributionPageBuilder: catalogContributionPageBuilder,
+          receiptImportPageBuilder: receiptImportPageBuilder,
           features: features,
           access: access,
           syncConflictController: syncConflictController,
@@ -343,6 +349,7 @@ class _ContentViewport extends StatelessWidget {
   const _ContentViewport({
     required this.controller,
     required this.catalogContributionPageBuilder,
+    required this.receiptImportPageBuilder,
     required this.features,
     required this.access,
     required this.syncConflictController,
@@ -350,6 +357,7 @@ class _ContentViewport extends StatelessWidget {
   });
 
   final WidgetBuilder? catalogContributionPageBuilder;
+  final WidgetBuilder? receiptImportPageBuilder;
   final AppController controller;
   final HouseholdFeatures? features;
   final HouseholdWorkspaceAccess access;
@@ -386,7 +394,16 @@ class _ContentViewport extends StatelessWidget {
             : !access.purchasesRead
             ? const _AccessDeniedWorkspace(title: 'Purchases')
             : access.purchasesWrite
-            ? PurchasingWorkspace(controller: features!.purchasing)
+            ? PurchasingWorkspace(
+                controller: features!.purchasing,
+                onImportReceipt: receiptImportPageBuilder == null
+                    ? null
+                    : () => Navigator.of(context).push<void>(
+                        MaterialPageRoute<void>(
+                          builder: receiptImportPageBuilder!,
+                        ),
+                      ),
+              )
             : _ReadOnlyPurchasingWorkspace(controller: features!.purchasing),
       AppSection.lists =>
         features == null
@@ -695,7 +712,7 @@ class _SyncStatusCard extends StatelessWidget {
         : (
             Icons.cloud_done_outlined,
             'Up to date',
-            'Local data is ready and the service is available.',
+            'Home stock and shared product details are current.',
             ProvidentiaColors.mint,
             ProvidentiaColors.forest,
           );
@@ -712,43 +729,81 @@ class _SyncStatusCard extends StatelessWidget {
         ),
         child: Padding(
           padding: const EdgeInsets.all(16),
-          child: Row(
-            children: <Widget>[
-              Icon(icon, color: foreground, size: 28),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Text(
-                      title,
-                      style: Theme.of(
-                        context,
-                      ).textTheme.titleMedium?.copyWith(color: foreground),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final status = Row(
+                children: <Widget>[
+                  Icon(icon, color: foreground, size: 28),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          title,
+                          style: Theme.of(
+                            context,
+                          ).textTheme.titleMedium?.copyWith(color: foreground),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(detail),
+                        if (summary.lastSuccessfulSync
+                            case final DateTime lastSync)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Text(
+                              'Last successful sync: '
+                              '${MaterialLocalizations.of(context).formatMediumDate(lastSync.toLocal())} '
+                              '${MaterialLocalizations.of(context).formatTimeOfDay(TimeOfDay.fromDateTime(lastSync.toLocal()))}',
+                              key: const Key('last-successful-sync'),
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ),
+                      ],
                     ),
-                    const SizedBox(height: 2),
-                    Text(detail),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              if (conflict && onReviewConflicts != null)
-                IconButton(
-                  key: const Key('review-sync-conflicts'),
-                  tooltip: 'Review synchronization conflicts',
-                  onPressed: onReviewConflicts,
-                  icon: const Icon(Icons.fact_check_outlined),
-                ),
-              if (!summary.isSynchronizing)
-                IconButton(
-                  key: const Key('manual-sync'),
-                  tooltip: 'Retry synchronization',
-                  onPressed: () async {
-                    await onRetry();
-                  },
-                  icon: const Icon(Icons.refresh_rounded),
-                ),
-            ],
+                  ),
+                ],
+              );
+              final actions = Wrap(
+                alignment: WrapAlignment.end,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: <Widget>[
+                  if (conflict && onReviewConflicts != null)
+                    IconButton(
+                      key: const Key('review-sync-conflicts'),
+                      tooltip: 'Review synchronization conflicts',
+                      onPressed: onReviewConflicts,
+                      icon: const Icon(Icons.fact_check_outlined),
+                    ),
+                  TextButton.icon(
+                    key: const Key('manual-sync'),
+                    onPressed: summary.isSynchronizing
+                        ? null
+                        : () async {
+                            await onRetry();
+                          },
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: const Text('Sync now'),
+                  ),
+                ],
+              );
+              return constraints.maxWidth < 560
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: <Widget>[
+                        status,
+                        const SizedBox(height: 8),
+                        actions,
+                      ],
+                    )
+                  : Row(
+                      children: <Widget>[
+                        Expanded(child: status),
+                        const SizedBox(width: 8),
+                        actions,
+                      ],
+                    );
+            },
           ),
         ),
       ),

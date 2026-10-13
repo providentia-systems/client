@@ -62,3 +62,20 @@ abstract interface class PurchaseIntakeRecoveryRepository {
     required String sourceReference,
   });
 }
+
+/// Atomic manual confirmation and stock application, with the ordinary receipt
+/// left open so the next purchase belongs to the same receipt.
+abstract interface class PurchaseQuickEntryRepository {
+  Future<PurchaseMutationResult> addPurchasedReceiptLine({
+    required PurchaseReceiptLineRequest line,
+    required String homeProductId,
+    String? packId,
+  });
+}
+
+/// Several independent drafts and submitted receipts may coexist in one home.
+abstract interface class PurchaseReceiptSelectionRepository {
+  Stream<List<PurchaseReceiptCapture>> watchReceiptCaptures({
+    required String homeId,
+  });
+}

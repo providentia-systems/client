@@ -109,6 +109,26 @@ void main() {
     expect(find.text('Sign in to continue'), findsNothing);
   });
 
+  testWidgets(
+    'sync action is labelled and the last successful refresh is visible',
+    (tester) async {
+      final summary = const SyncSummary.initial().copyWith(
+        availability: SyncAvailability.online,
+        lastSuccessfulSync: DateTime.utc(2026, 10, 13, 8, 15),
+      );
+      await tester.pumpWidget(
+        ProvidentiaApp(controller: AppController.preview(summary: summary)),
+      );
+      expect(find.text('Sync now'), findsOneWidget);
+      expect(find.byKey(const Key('last-successful-sync')), findsOneWidget);
+      expect(find.textContaining('Last successful sync:'), findsOneWidget);
+      expect(
+        find.textContaining('shared product details are current'),
+        findsOneWidget,
+      );
+    },
+  );
+
   testWidgets('a pull failure never presents the client as up to date', (
     tester,
   ) async {

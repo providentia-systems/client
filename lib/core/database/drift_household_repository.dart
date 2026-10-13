@@ -15,6 +15,7 @@ import 'package:providentia/features/purchasing/application/purchase_draft_maint
 import 'package:providentia/features/purchasing/application/purchase_repository.dart';
 import 'package:providentia/features/purchasing/application/purchase_store_repository.dart';
 import 'package:providentia/features/purchasing/domain/purchase_models.dart';
+import 'package:providentia/features/purchasing/domain/purchase_quantity.dart';
 import 'package:providentia/features/shopping/application/online_shopping_suggestion_repository.dart';
 import 'package:providentia/features/shopping/application/shopping_repository.dart';
 import 'package:providentia/features/shopping/domain/online_shopping_suggestion_models.dart';
@@ -59,6 +60,8 @@ final class DriftHouseholdRepository
         PurchaseStoreRepository,
         StockPreferenceRepository,
         PurchaseCaptureRepository,
+        PurchaseQuickEntryRepository,
+        PurchaseReceiptSelectionRepository,
         PurchaseIntakeRecoveryRepository,
         PurchaseDraftMaintenanceRepository,
         ShoppingRepository,
@@ -1276,6 +1279,20 @@ final class DriftHouseholdRepository
   @override
   Stream<PurchaseReceiptCapture?> watchActiveReceiptCapture({
     required String homeId,
+  }) => watchReceiptCaptures(homeId: homeId).map(
+    (receipts) => receipts
+        .where(
+          (receipt) =>
+              receipt.status == PurchaseReceiptStatus.draft ||
+              receipt.synchronizationState ==
+                  PurchaseSynchronizationState.pending,
+        )
+        .firstOrNull,
+  );
+
+  @override
+  Stream<List<PurchaseReceiptCapture>> watchReceiptCaptures({
+    required String homeId,
   }) {
     final records = _database.localRecords;
     final operations = _database.clientOperations;
@@ -1310,11 +1327,25 @@ final class DriftHouseholdRepository
           confirmed.add(record.entityId);
         }
       }
-      return _projectActiveReceiptCapture(
-        homeId,
-        projections.values.toList(growable: false),
-        confirmedCommits: confirmed,
-      );
+      final all = projections.values.toList(growable: false);
+      final receipts = <PurchaseReceiptCapture>[];
+      for (final receipt in all.where(
+        (row) => row.entityType == _receiptType,
+      )) {
+        final capture = _projectActiveReceiptCapture(
+          homeId,
+          all,
+          confirmedCommits: confirmed,
+          selectedReceiptId: receipt.entityId,
+          includeCompleted: true,
+        );
+        if (capture != null) receipts.add(capture);
+      }
+      receipts.sort((left, right) {
+        final date = right.purchaseDate.compareTo(left.purchaseDate);
+        return date != 0 ? date : right.id.compareTo(left.id);
+      });
+      return receipts;
     });
   }
 
@@ -1381,92 +1412,92 @@ final class DriftHouseholdRepository
     final clientId = request.clientReceiptId;
     if (clientId != null) _requireUuid(clientId, 'intake receipt');
     final at = _clock().toUtc();
-    final result = await _database.transaction<PurchaseMutationResult>(() async {
-      if (clientId != null) {
-        final prior = await _record(
-          homeId: request.homeId,
-          entityType: _receiptType,
-          entityId: clientId,
-        );
-        if (prior != null) {
-          if (_validatedProjection(prior, request.homeId)['sourceReference'] !=
-              sourceReference) {
-            throw const PurchaseCaptureException(
-              'The intake receipt has a different source.',
+    final result = await _database.transaction<PurchaseMutationResult>(
+      () async {
+        if (clientId != null) {
+          final prior = await _record(
+            homeId: request.homeId,
+            entityType: _receiptType,
+            entityId: clientId,
+          );
+          if (prior != null) {
+            if (_validatedProjection(
+                  prior,
+                  request.homeId,
+                )['sourceReference'] !=
+                sourceReference) {
+              throw const PurchaseCaptureException(
+                'The intake receipt has a different source.',
+              );
+            }
+            return _existingMutationResult(
+              row: prior,
+              entityId: clientId,
+              commandType: 'purchasing.receipt.create',
             );
           }
-          return _existingMutationResult(
-            row: prior,
-            entityId: clientId,
-            commandType: 'purchasing.receipt.create',
-          );
         }
-      }
-      if (await _activeReceiptRecord(homeId: request.homeId) != null) {
-        throw const PurchaseCaptureException(
-          'Finish or synchronize the current receipt before starting another.',
-        );
-      }
-      if (storeId != null) {
-        final store = await _record(
-          homeId: request.homeId,
-          entityType: _storeType,
-          entityId: storeId,
-        );
-        if (store == null ||
-            _optionalString(
-                  _validatedProjection(store, request.homeId)['status'],
-                  fallback: 'active',
-                ) !=
-                'active') {
-          throw const PurchaseCaptureException(
-            'The selected store is unavailable in this home.',
+        if (storeId != null) {
+          final store = await _record(
+            homeId: request.homeId,
+            entityType: _storeType,
+            entityId: storeId,
           );
+          if (store == null ||
+              _optionalString(
+                    _validatedProjection(store, request.homeId)['status'],
+                    fallback: 'active',
+                  ) !=
+                  'active') {
+            throw const PurchaseCaptureException(
+              'The selected store is unavailable in this home.',
+            );
+          }
         }
-      }
-      final receiptId = clientId ?? _nextUuid('purchase receipt');
-      final representation = <String, Object?>{
-        'storeId': storeId,
-        'purchaseDate': purchaseDate,
-        'currency': currency,
-        'totalAmount': totalAmount,
-        'status': 'draft',
-        'source': 'manual',
-        'sourceReference': sourceReference,
-        // Receipt text is written only to this home-scoped private resource.
-        'notes': notes,
-        '_clientCreatedAt': at.toIso8601String(),
-      };
-      await _writeProjection(
-        homeId: request.homeId,
-        entityType: _receiptType,
-        entityId: receiptId,
-        revision: 1,
-        representation: representation,
-        at: at,
-      );
-      await _insertGeneratedCommand(
-        homeId: request.homeId,
-        entityType: _receiptType,
-        entityId: receiptId,
-        commandType: 'purchasing.receipt.create',
-        baseRevision: null,
-        payload: <String, Object?>{
+        final receiptId = clientId ?? _nextUuid('purchase receipt');
+        final representation = <String, Object?>{
           'storeId': storeId,
           'purchaseDate': purchaseDate,
           'currency': currency,
           'totalAmount': totalAmount,
-          'notes': notes,
+          'status': 'draft',
+          'source': 'manual',
           'sourceReference': sourceReference,
-        },
-        at: at,
-      );
-      return PurchaseMutationResult(
-        entityId: receiptId,
-        revision: 1,
-        disposition: PurchaseMutationDisposition.queued,
-      );
-    });
+          // Receipt text is written only to this home-scoped private resource.
+          'notes': notes,
+          '_clientCreatedAt': at.toIso8601String(),
+        };
+        await _writeProjection(
+          homeId: request.homeId,
+          entityType: _receiptType,
+          entityId: receiptId,
+          revision: 1,
+          representation: representation,
+          at: at,
+        );
+        await _insertGeneratedCommand(
+          homeId: request.homeId,
+          entityType: _receiptType,
+          entityId: receiptId,
+          commandType: 'purchasing.receipt.create',
+          baseRevision: null,
+          payload: <String, Object?>{
+            'storeId': storeId,
+            'purchaseDate': purchaseDate,
+            'currency': currency,
+            'totalAmount': totalAmount,
+            'notes': notes,
+            'sourceReference': sourceReference,
+          },
+          at: at,
+        );
+        return PurchaseMutationResult(
+          entityId: receiptId,
+          revision: 1,
+          disposition: PurchaseMutationDisposition.queued,
+        );
+      },
+    );
     _triggerForegroundSync();
     return result;
   }
@@ -1524,7 +1555,7 @@ final class DriftHouseholdRepository
         'receiptId': request.receiptId,
         // Raw text remains within this home-private receipt projection.
         'rawDescription': rawDescription,
-        'quantity': _decimal(request.quantity),
+        'quantity': request.quantityText ?? _decimal(request.quantity),
         'originalPackText': originalPackText,
         'unitPrice': unitPrice,
         'lineTotal': lineTotal,
@@ -1556,7 +1587,7 @@ final class DriftHouseholdRepository
         payload: <String, Object?>{
           'receiptId': request.receiptId,
           'rawDescription': rawDescription,
-          'quantity': _decimal(request.quantity),
+          'quantity': request.quantityText ?? _decimal(request.quantity),
           'originalPackText': originalPackText,
           'unitPrice': unitPrice,
           'lineTotal': lineTotal,
@@ -1571,6 +1602,258 @@ final class DriftHouseholdRepository
     });
     _triggerForegroundSync();
     return result;
+  }
+
+  @override
+  Future<PurchaseMutationResult> addPurchasedReceiptLine({
+    required PurchaseReceiptLineRequest line,
+    required String homeProductId,
+    String? packId,
+  }) async {
+    _requireSynchronizedPurchasing();
+    _requireHomeUuid(line.homeId);
+    _requireUuid(homeProductId, 'purchase home product');
+    _requireUuid(line.receiptId, 'purchase receipt');
+    if (packId != null) _requireUuid(packId, 'purchase pack');
+    final at = _clock().toUtc();
+    final result = await _transaction(() async {
+      final id = line.clientLineId ?? _nextUuid('purchase receipt line');
+      if (line.clientLineId != null) {
+        final previous = await _record(
+          homeId: line.homeId,
+          entityType: _receiptLineType,
+          entityId: id,
+        );
+        if (previous != null) {
+          final value = _validatedProjection(previous, line.homeId);
+          if (value['receiptId'] != line.receiptId ||
+              value['homeProductId'] != homeProductId) {
+            throw const PurchaseCaptureException(
+              'The saved purchase belongs to another receipt or product.',
+            );
+          }
+          return _existingMutationResult(
+            row: previous,
+            entityId: id,
+            commandType: 'purchasing.receipt-line.purchase',
+          );
+        }
+      }
+      final receipt = await _requiredDraftReceipt(
+        homeId: line.homeId,
+        receiptId: line.receiptId,
+      );
+      final receiptValue = _validatedProjection(receipt, line.homeId);
+      final currency = _requiredString(receiptValue, 'currency');
+      _requireRequestMoneyCurrency(line.unitPrice, currency);
+      _requireRequestMoneyCurrency(line.lineTotal, currency);
+      final product = await _record(
+        homeId: line.homeId,
+        entityType: _homeProductType,
+        entityId: homeProductId,
+      );
+      if (product == null) {
+        throw const PurchaseCaptureException(
+          'Choose a product from this home.',
+        );
+      }
+      final productValue = _validatedProjection(product, line.homeId);
+      if (productValue['status'] != 'active') {
+        throw const PurchaseCaptureException(
+          'The selected product is unavailable in this home.',
+        );
+      }
+      final quantity = PurchaseQuantity.parse(
+        line.quantityText ?? _decimal(line.quantity),
+        positive: true,
+      );
+      final factor = await _purchasePackFactor(
+        homeId: line.homeId,
+        product: productValue,
+        packId: packId,
+      );
+      final stock = quantity * factor;
+      final command = <String, Object?>{
+        'receiptId': line.receiptId,
+        'homeProductId': homeProductId,
+        'packId': packId,
+        'unit': _optionalString(productValue['unit'], fallback: 'units'),
+        'stockQuantityPerPack': factor.toString(),
+        'rawDescription': line.rawDescription.trim(),
+        'quantity': quantity.toString(),
+        'originalPackText': _trimToNull(line.originalPackText),
+        'unitPrice': line.unitPrice == null
+            ? null
+            : _moneyDecimal(line.unitPrice!),
+        'lineTotal': line.lineTotal == null
+            ? null
+            : _moneyDecimal(line.lineTotal!),
+      };
+      await _writeProjection(
+        homeId: line.homeId,
+        entityType: _receiptLineType,
+        entityId: id,
+        revision: 1,
+        representation: {
+          ...command,
+          'approvalStatus': 'approved',
+          'stockQuantity': stock.toString(),
+          'stockQuantityPerPack': factor.toString(),
+        },
+        at: at,
+      );
+      await _writeProjection(
+        homeId: line.homeId,
+        entityType: _receiptType,
+        entityId: line.receiptId,
+        revision: receipt.revision + 1,
+        representation: _withoutProjectionMetadata(receiptValue),
+        at: at,
+      );
+      await _applyPurchaseStockDelta(
+        homeId: line.homeId,
+        homeProductId: homeProductId,
+        delta: stock,
+        at: at,
+      );
+      await _insertGeneratedCommand(
+        homeId: line.homeId,
+        entityType: _receiptLineType,
+        entityId: id,
+        commandType: 'purchasing.receipt-line.purchase',
+        baseRevision: receipt.revision,
+        payload: command,
+        at: at,
+      );
+      return PurchaseMutationResult(
+        entityId: id,
+        revision: 1,
+        disposition: PurchaseMutationDisposition.queued,
+      );
+    });
+    if (result.requiresSynchronization) _triggerForegroundSync();
+    return result;
+  }
+
+  Future<PurchaseQuantity> _purchasePackFactor({
+    required String homeId,
+    required Map<String, Object?> product,
+    String? packId,
+  }) async {
+    if (packId == null) return PurchaseQuantity.parse('1');
+    final rows =
+        await (_database.select(_database.localRecords)..where(
+              (row) =>
+                  row.homeId.equals(homeId) &
+                  row.entityType.equals(_catalogItemType),
+            ))
+            .get();
+    InventoryItem? pack;
+    for (final row in rows) {
+      final item = _decodeInventoryItem(row.payload);
+      if (item.packId == packId && item.productId == product['productId']) {
+        pack = item;
+      }
+    }
+    if (pack == null) {
+      throw const PurchaseCaptureException(
+        'Refresh the catalog before using this pack.',
+      );
+    }
+    if (pack.packStatus != 'published') {
+      throw const PurchaseCaptureException(
+        'Refresh the catalog and choose a published pack.',
+      );
+    }
+    final unit = _optionalString(product['unit'], fallback: 'units');
+    if (unit == 'units') {
+      final basePackId = _nullableString(product['packId']);
+      if (basePackId == packId) return PurchaseQuantity.parse('1');
+      InventoryItem? basePack;
+      for (final row in rows) {
+        final item = _decodeInventoryItem(row.payload);
+        if (item.packId == basePackId &&
+            item.productId == product['productId']) {
+          basePack = item;
+        }
+      }
+      if (basePack == null) {
+        if (pack.normalizedBaseUnit != 'units' ||
+            pack.normalizedBaseAmount == null) {
+          throw const PurchaseCaptureException(
+            'Choose a stock measurement or a base pack before buying a differently sized pack.',
+          );
+        }
+        return PurchaseQuantity.parse(
+          pack.normalizedBaseAmount!,
+          positive: true,
+        );
+      }
+      if (basePack.normalizedBaseUnit != pack.normalizedBaseUnit ||
+          basePack.normalizedBaseAmount == null ||
+          pack.normalizedBaseAmount == null) {
+        throw const PurchaseCaptureException(
+          'This pack does not use the same measurement as the home product base pack.',
+        );
+      }
+      return PurchaseQuantity.parse(
+            pack.normalizedBaseAmount!,
+            positive: true,
+          ) /
+          PurchaseQuantity.parse(
+            basePack.normalizedBaseAmount!,
+            positive: true,
+          );
+    }
+    final amount = pack.normalizedBaseAmount;
+    final baseUnit = pack.normalizedBaseUnit;
+    if (amount == null ||
+        (unit == 'g' || unit == 'kg'
+            ? baseUnit != 'g'
+            : (unit == 'ml' || unit == 'l')
+            ? baseUnit != 'ml'
+            : true)) {
+      throw const PurchaseCaptureException(
+        'This pack cannot be converted to the stock unit. Enter the quantity in stock units instead.',
+      );
+    }
+    final value = PurchaseQuantity.parse(amount, positive: true);
+    return unit == 'kg' || unit == 'l' ? value.divideByThousand() : value;
+  }
+
+  Future<void> _applyPurchaseStockDelta({
+    required String homeId,
+    required String homeProductId,
+    required PurchaseQuantity delta,
+    required DateTime at,
+  }) async {
+    final balance = await _record(
+      homeId: homeId,
+      entityType: _balanceType,
+      entityId: homeProductId,
+    );
+    final previous = balance == null
+        ? PurchaseQuantity.parse('0')
+        : PurchaseQuantity.parse(
+            _requiredString(_validatedProjection(balance, homeId), 'quantity'),
+          );
+    final next = previous + delta;
+    if (next.isNegative) {
+      throw const PurchaseCaptureException(
+        'This correction exceeds the available stock. Adjust the receipt quantity before removing it.',
+      );
+    }
+    await _writeProjection(
+      homeId: homeId,
+      entityType: _balanceType,
+      entityId: homeProductId,
+      revision: balance?.revision ?? 0,
+      representation: {
+        'homeProductId': homeProductId,
+        'quantity': next.toString(),
+      },
+      at: at,
+    );
   }
 
   @override
@@ -1616,63 +1899,92 @@ final class DriftHouseholdRepository
     _requireHomeUuid(homeId);
     _requireUuid(receiptId, 'purchase receipt');
     final at = _clock().toUtc();
-    final result = await _database.transaction<PurchaseMutationResult>(
-      () async {
-        final receipt = await _requiredDraftReceipt(
-          homeId: homeId,
-          receiptId: receiptId,
+    final result = await _database.transaction<PurchaseMutationResult>(() async {
+      final receipt = await _requiredDraftReceipt(
+        homeId: homeId,
+        receiptId: receiptId,
+        allowCommitted: commandType == 'purchasing.receipt.update',
+      );
+      if (receipt.revision != expectedRevision) {
+        throw const PurchaseCaptureException(
+          'This draft changed. Reopen it before saving.',
         );
-        if (receipt.revision != expectedRevision) {
+      }
+      final storeId = fields['storeId'];
+      if (storeId is String) {
+        _requireUuid(storeId, 'purchase store');
+        final store = await _record(
+          homeId: homeId,
+          entityType: _storeType,
+          entityId: storeId,
+        );
+        if (store == null ||
+            _optionalString(
+                  _validatedProjection(store, homeId)['status'],
+                  fallback: 'active',
+                ) !=
+                'active') {
           throw const PurchaseCaptureException(
-            'This draft changed. Reopen it before saving.',
+            'Choose an active store from this home.',
           );
         }
-        final storeId = fields['storeId'];
-        if (storeId is String) {
-          _requireUuid(storeId, 'purchase store');
-          final store = await _record(
+      }
+      final payload = _validatedProjection(receipt, homeId);
+      final lines = await _receiptLineRecords(
+        homeId: homeId,
+        receiptId: receiptId,
+      );
+      final applied = lines.values
+          .map((row) => _validatedProjection(row, homeId))
+          .where(
+            (line) =>
+                line['stockQuantity'] != null &&
+                line['approvalStatus'] != 'removed',
+          )
+          .toList();
+      if (applied.isNotEmpty &&
+          commandType == 'purchasing.receipt.update' &&
+          (fields['purchaseDate'] != payload['purchaseDate'] ||
+              fields['currency'] != payload['currency'])) {
+        throw const PurchaseCaptureException(
+          'The purchase date and currency cannot change after an item has updated stock. Store, notes and total remain editable.',
+        );
+      }
+      if (commandType == 'purchasing.receipt.cancel') {
+        for (final line in applied) {
+          await _applyPurchaseStockDelta(
             homeId: homeId,
-            entityType: _storeType,
-            entityId: storeId,
+            homeProductId: _requiredString(line, 'homeProductId'),
+            delta:
+                PurchaseQuantity.parse('0') -
+                PurchaseQuantity.parse(_requiredString(line, 'stockQuantity')),
+            at: at,
           );
-          if (store == null ||
-              _optionalString(
-                    _validatedProjection(store, homeId)['status'],
-                    fallback: 'active',
-                  ) !=
-                  'active') {
-            throw const PurchaseCaptureException(
-              'Choose an active store from this home.',
-            );
-          }
         }
-        final payload = _validatedProjection(receipt, homeId);
-        await _writeProjection(
-          homeId: homeId,
-          entityType: _receiptType,
-          entityId: receiptId,
-          revision: receipt.revision + 1,
-          representation: {..._withoutProjectionMetadata(payload), ...fields},
-          at: at,
-        );
-        await _insertGeneratedCommand(
-          homeId: homeId,
-          entityType: _receiptType,
-          entityId: receiptId,
-          commandType: commandType,
-          baseRevision: expectedRevision,
-          payload: commandType == 'purchasing.receipt.cancel'
-              ? const {}
-              : fields,
-          at: at,
-        );
-        return PurchaseMutationResult(
-          entityId: receiptId,
-          revision: receipt.revision + 1,
-          disposition: PurchaseMutationDisposition.queued,
-        );
-      },
-    );
+      }
+      await _writeProjection(
+        homeId: homeId,
+        entityType: _receiptType,
+        entityId: receiptId,
+        revision: receipt.revision + 1,
+        representation: {..._withoutProjectionMetadata(payload), ...fields},
+        at: at,
+      );
+      await _insertGeneratedCommand(
+        homeId: homeId,
+        entityType: _receiptType,
+        entityId: receiptId,
+        commandType: commandType,
+        baseRevision: expectedRevision,
+        payload: commandType == 'purchasing.receipt.cancel' ? const {} : fields,
+        at: at,
+      );
+      return PurchaseMutationResult(
+        entityId: receiptId,
+        revision: receipt.revision + 1,
+        disposition: PurchaseMutationDisposition.queued,
+      );
+    });
     _triggerForegroundSync();
     return result;
   }
@@ -1746,7 +2058,7 @@ final class DriftHouseholdRepository
           _requireRequestMoneyCurrency(request.lineTotal, currency);
           fields.addAll({
             'rawDescription': request.rawDescription.trim(),
-            'quantity': _decimal(request.quantity),
+            'quantity': request.quantityText ?? _decimal(request.quantity),
             'originalPackText': _trimToNull(request.originalPackText),
             'unitPrice': request.unitPrice == null
                 ? null
@@ -1756,6 +2068,30 @@ final class DriftHouseholdRepository
                 : _moneyDecimal(request.lineTotal!),
           });
         }
+        final applied = payload['stockQuantity'] != null;
+        String? stockQuantity;
+        if (applied) {
+          final prior = PurchaseQuantity.parse(
+            _requiredString(payload, 'stockQuantity'),
+          );
+          final next = request == null
+              ? PurchaseQuantity.parse('0')
+              : PurchaseQuantity.parse(
+                      request.quantityText ?? _decimal(request.quantity),
+                      positive: true,
+                    ) *
+                    PurchaseQuantity.parse(
+                      _requiredString(payload, 'stockQuantityPerPack'),
+                      positive: true,
+                    );
+          await _applyPurchaseStockDelta(
+            homeId: homeId,
+            homeProductId: _requiredString(payload, 'homeProductId'),
+            delta: next - prior,
+            at: at,
+          );
+          stockQuantity = next.toString();
+        }
         await _writeProjection(
           homeId: homeId,
           entityType: _receiptLineType,
@@ -1764,8 +2100,13 @@ final class DriftHouseholdRepository
           representation: {
             ..._withoutProjectionMetadata(payload),
             ...fields,
-            'homeProductId': null,
-            'approvalStatus': request == null ? 'removed' : 'unreviewed',
+            'homeProductId': applied ? payload['homeProductId'] : null,
+            if (applied) 'stockQuantity': stockQuantity,
+            'approvalStatus': request == null
+                ? 'removed'
+                : applied
+                ? 'approved'
+                : 'unreviewed',
           },
           at: at,
         );
@@ -1950,6 +2291,11 @@ final class DriftHouseholdRepository
           );
         }
         final approvalStatus = _requiredString(linePayload, 'approvalStatus');
+        if (linePayload['stockQuantity'] != null) {
+          throw const PurchaseCaptureException(
+            'Edit or remove the saved purchase to correct stock.',
+          );
+        }
         if (approvalStatus == 'unresolved') {
           return _existingMutationResult(
             row: line,
@@ -2081,6 +2427,35 @@ final class DriftHouseholdRepository
                 'active') {
           throw const PurchaseCaptureException(
             'An approved receipt product is unavailable in this home.',
+          );
+        }
+      }
+      for (final line in lines.values) {
+        final value = _validatedProjection(line, homeId);
+        if (value['homeProductId'] != null &&
+            value['stockQuantity'] == null &&
+            value['approvalStatus'] != 'unresolved') {
+          final quantity = PurchaseQuantity.parse(
+            _requiredString(value, 'quantity'),
+            positive: true,
+          );
+          await _applyPurchaseStockDelta(
+            homeId: homeId,
+            homeProductId: _requiredString(value, 'homeProductId'),
+            delta: quantity,
+            at: at,
+          );
+          await _writeProjection(
+            homeId: homeId,
+            entityType: _receiptLineType,
+            entityId: line.entityId,
+            revision: line.revision,
+            representation: {
+              ..._withoutProjectionMetadata(value),
+              'stockQuantity': quantity.toString(),
+              'stockQuantityPerPack': '1',
+            },
+            at: at,
           );
         }
       }
@@ -2362,17 +2737,21 @@ final class DriftHouseholdRepository
       _requireUuid(productId, 'cached item-master product');
       _requireUuid(packId, 'cached item-master pack');
       final globalCategoryId =
-          item.categorySource == InventoryCategorySource.global
-          ? item.categoryId
-          : null;
+          item.catalogCategoryId ??
+          (item.categorySource == InventoryCategorySource.global
+              ? item.categoryId
+              : null);
       final normalized = InventoryItem(
         id: packId,
         homeId: homeId,
-        canonicalName: item.canonicalName,
-        packSize: item.packSize,
-        category: item.category,
+        canonicalName: item.catalogName ?? item.canonicalName,
+        packSize: item.catalogPackText ?? item.packSize,
+        category: item.catalogCategoryName ?? item.category,
         brand: item.brand,
         unit: item.unit,
+        normalizedBaseAmount: item.normalizedBaseAmount,
+        normalizedBaseUnit: item.normalizedBaseUnit,
+        packStatus: item.packStatus,
         aliases: item.aliases,
         productId: productId,
         packId: packId,
@@ -2452,6 +2831,9 @@ final class DriftHouseholdRepository
                 : 'Product ${productId.substring(0, 8)}'),
         packSize:
             originalPackText ?? catalogItem?.packSize ?? 'Unspecified pack',
+        normalizedBaseAmount: catalogItem?.normalizedBaseAmount,
+        normalizedBaseUnit: catalogItem?.normalizedBaseUnit,
+        packStatus: catalogItem?.packStatus,
         category: category,
         unit: _optionalString(payload['unit'], fallback: 'units'),
         brand: catalogItem?.brand ?? _optionalString(payload['brandName']),
@@ -2594,6 +2976,8 @@ final class DriftHouseholdRepository
     String homeId,
     List<LocalRecord> rows, {
     Set<String> confirmedCommits = const {},
+    String? selectedReceiptId,
+    bool includeCompleted = false,
   }) {
     final stores = <String, String>{};
     for (final row in rows.where((row) => row.entityType == _storeType)) {
@@ -2605,6 +2989,9 @@ final class DriftHouseholdRepository
 
     final activeReceipts = <LocalRecord>[];
     for (final row in rows.where((row) => row.entityType == _receiptType)) {
+      if (selectedReceiptId != null && row.entityId != selectedReceiptId) {
+        continue;
+      }
       final payload = _validatedProjection(row, homeId);
       final status = _requiredString(payload, 'status');
       final hasPendingLines = rows.any(
@@ -2614,6 +3001,7 @@ final class DriftHouseholdRepository
             _validatedProjection(line, homeId)['receiptId'] == row.entityId,
       );
       if (status == 'draft' ||
+          (status == 'committed' && includeCompleted) ||
           (status == 'committed' &&
               (row.synchronizedAt == null || hasPendingLines))) {
         activeReceipts.add(row);
@@ -2622,13 +3010,10 @@ final class DriftHouseholdRepository
       }
     }
     if (activeReceipts.isEmpty) return null;
-    if (activeReceipts.length > 1) {
-      throw const PurchaseCaptureException(
-        'Multiple unfinished receipts require synchronization before editing.',
-      );
-    }
-
-    final receipt = activeReceipts.single;
+    activeReceipts.sort(
+      (left, right) => right.updatedAt.compareTo(left.updatedAt),
+    );
+    final receipt = activeReceipts.first;
     final payload = _validatedProjection(receipt, homeId);
     final currency = _requiredString(payload, 'currency');
     final lines = <PurchaseReceiptLineCapture>[];
@@ -2657,6 +3042,7 @@ final class DriftHouseholdRepository
           receiptId: receipt.entityId,
           rawDescription: _requiredString(linePayload, 'rawDescription'),
           quantity: _requiredDecimal(linePayload, 'quantity'),
+          quantityText: _requiredString(linePayload, 'quantity'),
           originalPackText: _nullableString(linePayload['originalPackText']),
           unitPrice: unitPrice == null
               ? null
@@ -2671,6 +3057,11 @@ final class DriftHouseholdRepository
                   currency: currency,
                 ),
           homeProductId: _nullableString(linePayload['homeProductId']),
+          packId: _nullableString(linePayload['packId']),
+          stockQuantity: _nullableString(linePayload['stockQuantity']),
+          stockQuantityPerPack: _nullableString(
+            linePayload['stockQuantityPerPack'],
+          ),
           revision: row.revision,
           approvalStatus: approvalStatus,
           synchronizationState: row.synchronizedAt == null
@@ -2743,6 +3134,7 @@ final class DriftHouseholdRepository
           packSize:
               _nullableString(payload['originalPackText']) ??
               'Unspecified pack',
+          stockUnit: _optionalString(payload['unit'], fallback: 'units'),
         ),
       );
     }
@@ -2798,12 +3190,12 @@ final class DriftHouseholdRepository
         );
       }
       final receiptStatus = _requiredString(receipt, 'status');
-      if (receiptStatus == 'draft' ||
+      if ((receiptStatus == 'draft' && payload['stockQuantity'] == null) ||
           receiptStatus == 'cancelled' ||
           payload['approvalStatus'] == 'removed') {
         continue;
       }
-      if (receiptStatus != 'committed') {
+      if (receiptStatus != 'committed' && receiptStatus != 'draft') {
         throw FormatException(
           'Unsupported purchase-history receipt status "$receiptStatus".',
         );
@@ -3988,34 +4380,10 @@ final class DriftHouseholdRepository
     }
   }
 
-  Future<LocalRecord?> _activeReceiptRecord({required String homeId}) async {
-    final rows =
-        await (_database.select(_database.localRecords)..where(
-              (row) =>
-                  row.homeId.equals(homeId) &
-                  row.entityType.equals(_receiptType),
-            ))
-            .get();
-    final active = <LocalRecord>[];
-    for (final row in rows) {
-      final payload = _validatedProjection(row, homeId);
-      final status = _requiredString(payload, 'status');
-      if (status == 'draft' ||
-          (status == 'committed' && row.synchronizedAt == null)) {
-        active.add(row);
-      }
-    }
-    if (active.length > 1) {
-      throw const PurchaseCaptureException(
-        'Multiple unfinished receipts require synchronization before editing.',
-      );
-    }
-    return active.isEmpty ? null : active.single;
-  }
-
   Future<LocalRecord> _requiredDraftReceipt({
     required String homeId,
     required String receiptId,
+    bool allowCommitted = false,
   }) async {
     final receipt = await _record(
       homeId: homeId,
@@ -4027,8 +4395,11 @@ final class DriftHouseholdRepository
         'The receipt is unavailable in this home.',
       );
     }
-    if (_requiredString(_validatedProjection(receipt, homeId), 'status') !=
-        'draft') {
+    final status = _requiredString(
+      _validatedProjection(receipt, homeId),
+      'status',
+    );
+    if (status != 'draft' && !(allowCommitted && status == 'committed')) {
       throw const PurchaseCaptureException(
         'Only a draft receipt can be changed.',
       );
@@ -4380,6 +4751,11 @@ Map<String, Object?> _encodeInventoryItem(
   'category': item.category,
   'brand': item.brand,
   'unit': item.unit,
+  if (item.normalizedBaseAmount != null)
+    'normalizedBaseAmount': item.normalizedBaseAmount,
+  if (item.normalizedBaseUnit != null)
+    'normalizedBaseUnit': item.normalizedBaseUnit,
+  if (item.packStatus != null) 'packStatus': item.packStatus,
   'aliases': item.aliases,
   'currentQuantity': item.currentQuantity,
   'isHomeProduct': item.isHomeProduct,
@@ -4444,6 +4820,9 @@ InventoryItem _decodeInventoryItem(String encoded) {
     catalogPackText: _nullableString(json['catalogPackText']),
     catalogCategoryId: _nullableString(json['catalogCategoryId']),
     catalogCategoryName: _nullableString(json['catalogCategoryName']),
+    normalizedBaseAmount: _nullableString(json['normalizedBaseAmount']),
+    normalizedBaseUnit: _nullableString(json['normalizedBaseUnit']),
+    packStatus: _nullableString(json['packStatus']),
   );
 }
 

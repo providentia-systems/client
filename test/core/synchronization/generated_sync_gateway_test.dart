@@ -712,6 +712,113 @@ void main() {
     expect(response.results, isEmpty);
   });
 
+  for (final scenario in <(String, int, String?, bool)>[
+    ('sync_cursor_invalid', 422, 'invalid-cursor', true),
+    ('sync_cursor_invalid', 422, null, false),
+    ('validation_error', 422, 'invalid-cursor', false),
+    ('sync_cursor_binding_mismatch', 422, 'invalid-cursor', false),
+    ('sync_cursor_invalid', 503, 'invalid-cursor', false),
+  ]) {
+    test('pull cursor recovery is limited to $scenario', () async {
+      final client = generated.ProvidentiaApiClient(
+        baseUri: Uri.parse('https://api.example.test'),
+        httpClient: MockClient(
+          (_) async => http.Response(
+            jsonEncode(<String, Object?>{
+              'type': 'https://providentia.invalid/problems/${scenario.$1}',
+              'title': 'Synchronization request failed',
+              'status': scenario.$2,
+              'detail': 'The synchronization cursor is invalid.',
+              'requestId': 'cursor-recovery-request',
+            }),
+            scenario.$2,
+          ),
+        ),
+      );
+      await expectLater(
+        GeneratedSyncGateway(
+          client,
+        ).pull(homeId: homeId, afterCursor: scenario.$3),
+        throwsA(
+          scenario.$4
+              ? isA<ResyncRequiredSyncException>()
+              : isA<RetryableSyncException>(),
+        ),
+      );
+    });
+  }
+
+  test('quick purchase keeps its immutable protocol-two command', () async {
+    late Map<String, Object?> body;
+    const lineId = '0198a0b1-c2d3-7e4f-b456-789abcdef012';
+    const payload = <String, Object?>{
+      'receiptId': '0198a0b1-c2d3-7e4f-b456-789abcdef013',
+      'homeProductId': '0198a0b1-c2d3-7e4f-b456-789abcdef014',
+      'packId': null,
+      'rawDescription': 'Apples',
+      'quantity': '5',
+      'unit': 'kg',
+      'stockQuantityPerPack': '1',
+      'originalPackText': null,
+      'unitPrice': null,
+      'lineTotal': '50',
+    };
+    final client = generated.ProvidentiaApiClient(
+      baseUri: Uri.parse('https://api.example.test'),
+      httpClient: MockClient((request) async {
+        body = jsonDecode(request.body) as Map<String, Object?>;
+        return http.Response(
+          jsonEncode(<String, Object?>{
+            'protocolVersion': 2,
+            'batchId': body['batchId'],
+            'requestId': 'purchase-push',
+            'serverTime': '2026-10-13T08:00:00Z',
+            'results': <Object?>[
+              <String, Object?>{
+                'operationId': operationId,
+                'status': 'accepted',
+                'result': <String, Object?>{
+                  'id': lineId,
+                  'revision': 1,
+                  'stockQuantity': '5',
+                },
+              },
+            ],
+            'highWaterCursor': 'purchase-cursor',
+          }),
+          200,
+        );
+      }),
+    );
+    final result = await GeneratedSyncGateway(client).push(
+      homeId: homeId,
+      lastPulledCursor: 'cursor-before-purchase',
+      operations: <PendingClientOperation>[
+        PendingClientOperation(
+          operationId: operationId,
+          deviceId: deviceId,
+          homeId: homeId,
+          entityType: 'purchasing-receipt-line',
+          entityId: lineId,
+          operationType: 'purchasing.receipt-line.purchase',
+          baseRevision: 3,
+          clientTimestamp: DateTime.utc(2026, 10, 13, 8),
+          payloadSchemaVersion: 1,
+          payload: payload,
+          retryCount: 0,
+        ),
+      ],
+    );
+    expect(body['protocolVersion'], 2);
+    final command =
+        (body['operations'] as List<Object?>).single as Map<String, Object?>;
+    expect(command['commandType'], 'purchasing.receipt-line.purchase');
+    expect(command['entityId'], lineId);
+    expect(command['baseRevision'], 3);
+    expect(command['payload'], payload);
+    expect(result.results.single.kind, PushResultKind.acknowledged);
+  });
+
   test(
     'push rejects cross-home and mixed-device batches before HTTP',
     () async {
