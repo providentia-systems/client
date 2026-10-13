@@ -19,6 +19,8 @@ const _canonical = '10000000-0000-4000-8000-000000000004';
 const _packOne = '10000000-0000-4000-8000-000000000005';
 const _packFour = '10000000-0000-4000-8000-000000000006';
 const _line = '10000000-0000-4000-8000-000000000007';
+const _legacyReceipt = '10000000-0000-4000-8000-000000000008';
+const _unresolvedLine = '10000000-0000-4000-8000-000000000009';
 
 void main() {
   late AppDatabase database;
@@ -584,6 +586,167 @@ void main() {
     expect(imports, 1);
   });
 
+  test(
+    'confirmed legacy committed lines correct and remove using factor one',
+    () async {
+      await _seedLegacyCommitted(database);
+      final capture =
+          (await repository.watchReceiptCaptures(homeId: _home).first).single;
+      expect(capture.commitConfirmed, isTrue);
+      expect(
+        capture.lines.firstWhere((line) => line.id == _line).stockQuantity,
+        '5',
+      );
+      expect(
+        capture.lines
+            .firstWhere((line) => line.id == _line)
+            .stockQuantityPerPack,
+        '1',
+      );
+      await repository.updateReceiptDraftLine(
+        lineId: _line,
+        expectedRevision: 1,
+        line: _request(_legacyReceipt, '4'),
+      );
+      expect(await _stock(database), '6');
+      final retry = await repository.commitReceipt(
+        homeId: _home,
+        receiptId: _legacyReceipt,
+      );
+      expect(
+        retry.disposition,
+        PurchaseMutationDisposition.confirmedAwaitingReadback,
+      );
+      expect(
+        (await database.select(database.clientOperations).get()).where(
+          (operation) => operation.operationType == 'purchasing.receipt.commit',
+        ),
+        isEmpty,
+      );
+      await repository.removeReceiptDraftLine(
+        homeId: _home,
+        receiptId: _legacyReceipt,
+        lineId: _line,
+        expectedRevision: 2,
+      );
+      expect(await _stock(database), '2');
+      expect(
+        (await _payload(
+          database,
+          'purchasing-receipt-line',
+          _line,
+        ))['approvalStatus'],
+        'removed',
+      );
+    },
+  );
+
+  test(
+    'old uncertain local commit never gains confirmation or inferred stock',
+    () async {
+      await _seedLegacyCommitted(database, uncertain: true);
+      final beforeOperations = await database
+          .select(database.clientOperations)
+          .get();
+      final capture =
+          (await repository.watchReceiptCaptures(homeId: _home).first).single;
+      expect(capture.commitConfirmed, isFalse);
+      expect(capture.commitAwaitingConfirmation, isTrue);
+      expect(
+        capture.lines.firstWhere((line) => line.id == _line).stockApplied,
+        isFalse,
+      );
+      await expectLater(
+        repository.updateReceiptDraftLine(
+          lineId: _line,
+          expectedRevision: 1,
+          line: _request(_legacyReceipt, '4'),
+        ),
+        throwsA(isA<PurchaseCaptureException>()),
+      );
+      await expectLater(
+        repository.removeReceiptDraftLine(
+          homeId: _home,
+          receiptId: _legacyReceipt,
+          lineId: _line,
+          expectedRevision: 1,
+        ),
+        throwsA(isA<PurchaseCaptureException>()),
+      );
+      expect(await _stock(database), '2');
+      expect(
+        await database.select(database.clientOperations).get(),
+        hasLength(beforeOperations.length),
+      );
+      final retried = await repository.commitReceipt(
+        homeId: _home,
+        receiptId: _legacyReceipt,
+      );
+      expect(retried.disposition, PurchaseMutationDisposition.alreadyQueued);
+      expect(await _stock(database), '2');
+      expect(
+        await database.select(database.clientOperations).get(),
+        hasLength(beforeOperations.length),
+      );
+    },
+  );
+
+  testWidgets(
+    'confirmed legacy committed purchases expose working Edit and Remove controls',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1000, 1800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await _seedLegacyCommitted(database);
+      final controller = PurchasingController(
+        repository: repository,
+        homeId: _home,
+        mayWrite: true,
+        productCreationRepository: repository,
+      );
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: PurchasingWorkspace(controller: controller)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('purchase-edit-line-$_unresolvedLine')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const Key('purchase-remove-line-$_unresolvedLine')),
+        findsNothing,
+      );
+      final edit = find.byKey(const Key('purchase-edit-line-$_line'));
+      await tester.ensureVisible(edit);
+      await tester.tap(edit);
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('receipt-edit-quantity')),
+        '4',
+      );
+      await tester.tap(find.byKey(const Key('receipt-edit-save')));
+      await tester.pumpAndSettle();
+      expect(await _stock(database), '6');
+      expect(controller.state.capture!.commitConfirmed, isTrue);
+      expect(
+        find.text(
+          'Commit confirmed by the server; receipt details are refreshing.',
+        ),
+        findsOneWidget,
+      );
+      final remove = find.byKey(const Key('purchase-remove-line-$_line'));
+      await tester.ensureVisible(remove);
+      await tester.tap(remove);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('purchase-confirm-removal')));
+      await tester.pumpAndSettle();
+      expect(await _stock(database), '2');
+      expect(find.byKey(const Key('purchase-edit-line-$_line')), findsNothing);
+    },
+  );
+
   test('volume and count conversions preserve exact measurements', () {
     expect(
       purchasePackConversionFactor(
@@ -729,3 +892,62 @@ Future<Map<String, Object?>> _payload(
 Future<String> _stock(AppDatabase database) async =>
     (await _payload(database, 'inventory-balance', _product))['quantity']
         as String;
+
+Future<void> _seedLegacyCommitted(
+  AppDatabase database, {
+  bool uncertain = false,
+}) async {
+  await _seed(database, 'purchasing-receipt', _legacyReceipt, {
+    'status': 'committed',
+    'purchaseDate': '2026-10-13',
+    'currency': 'NAD',
+    'notes': '',
+  });
+  await _seed(database, 'purchasing-receipt-line', _line, {
+    'receiptId': _legacyReceipt,
+    'rawDescription': 'Apples',
+    'quantity': '5',
+    'approvalStatus': 'approved',
+    'homeProductId': _product,
+    'originalPackText': '5 kg',
+    'lineTotal': '50',
+  });
+  await _seed(database, 'purchasing-receipt-line', _unresolvedLine, {
+    'receiptId': _legacyReceipt,
+    'rawDescription': 'Unknown receipt item',
+    'quantity': '1',
+    'approvalStatus': 'unresolved',
+    'homeProductId': null,
+    'lineTotal': '1',
+  });
+  await _seed(database, 'inventory-balance', _product, {
+    'homeProductId': _product,
+    'quantity': uncertain ? '2' : '7',
+  });
+  if (uncertain) {
+    await (database.update(database.localRecords)..where(
+          (row) =>
+              row.homeId.equals(_home) &
+              row.entityType.equals('purchasing-receipt') &
+              row.entityId.equals(_legacyReceipt),
+        ))
+        .write(const LocalRecordsCompanion(synchronizedAt: Value(null)));
+    await database
+        .into(database.clientOperations)
+        .insert(
+          ClientOperationsCompanion.insert(
+            operationId: '10000000-0000-4000-8000-000000000010',
+            homeId: _home,
+            deviceId: _device,
+            entityType: 'purchasing-receipt',
+            entityId: _legacyReceipt,
+            operationType: 'purchasing.receipt.commit',
+            baseRevision: const Value(1),
+            clientTimestamp: DateTime.utc(2026, 10, 13),
+            payloadSchemaVersion: const Value(2),
+            payload: '{}',
+            state: 'pending',
+          ),
+        );
+  }
+}

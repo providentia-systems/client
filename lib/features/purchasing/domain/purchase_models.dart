@@ -292,7 +292,8 @@ final class PurchaseReceiptCapture {
   final String notes;
   final String? sourceReference;
 
-  /// An immutable operation result confirms the commit even if readback fails.
+  /// An immutable operation result or previously validated committed server
+  /// receipt confirms the commit even while later corrections await readback.
   final bool commitConfirmed;
   final int revision;
   final PurchaseReceiptStatus status;
