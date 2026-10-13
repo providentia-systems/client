@@ -79,3 +79,15 @@ abstract interface class PurchaseReceiptSelectionRepository {
     required String homeId,
   });
 }
+
+/// Reviewed import quantities explicitly refer to a selected pack or stock unit.
+/// Approval remains non-mutating for stock until the receipt is finished.
+abstract interface class PurchasePackReviewRepository {
+  Future<PurchaseMutationResult> approveReceiptLineWithPack({
+    required String homeId,
+    required String receiptId,
+    required String lineId,
+    required String homeProductId,
+    String? packId,
+  });
+}

@@ -42,6 +42,11 @@ void validateReceiptProjection(RemoteChange change) {
     _optionalText(value, 'originalPackText');
     _optionalText(value, 'homeProductId');
     _optionalText(value, 'packId');
+    _optionalText(value, 'stockUnit');
+    if (value['stockUnit'] != null &&
+        !const {'units', 'g', 'kg', 'ml', 'l'}.contains(value['stockUnit'])) {
+      throw const FormatException('Receipt stock unit was invalid.');
+    }
     _decimal(value, 'stockQuantity', optional: true);
     _decimal(value, 'stockQuantityPerPack', optional: true, positive: true);
     _oneOf(value, 'approvalStatus', {
@@ -59,9 +64,7 @@ void validateReceiptProjection(RemoteChange change) {
             (value['homeProductId'] == null ||
                 (approval != 'approved' &&
                     approval != 'approved-catalog' &&
-                    approval != 'removed'))) ||
-        (value['stockQuantityPerPack'] != null &&
-            value['stockQuantity'] == null)) {
+                    approval != 'removed')))) {
       throw const FormatException('Receipt line review binding was invalid.');
     }
   }

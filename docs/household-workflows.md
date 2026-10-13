@@ -30,7 +30,7 @@ Product and quantity forms retain explicit field spacing and scrolling with narr
 
 Complete category and item-master snapshots are cached atomically. Malformed, duplicate or failed pages do not replace the previous complete cache. Public category endpoint failures do not prove loss of home membership. Existing operation IDs, queue barriers and originating-account safeguards remain unchanged. This feature does not repair or erase historical queued operations.
 
-The canonical JSON SHA-256 is `b6b7f8b5aed3c79c8cb751b21ab1c9dc21786124bb56ab08d21955ace8d7bd36`. Both clients regenerate bindings from the exact backend artifact, never manual generated-code edits.
+The canonical JSON SHA-256 is `75701b9ef65edc964f50762ba428ca425bfad40f574cb1abc0ce03086ca19cc1`. Both clients regenerate bindings from the exact backend artifact, never manual generated-code edits.
 
 Deploy the backend first and run the normal migration command, `php bin/doctrine-migrations migrations:migrate --no-interaction`. Migration Version20260922000100 adds nullable global_category_id and unit defaulting to units. It neither rewrites stock quantities nor deletes history. Preserve recoverable database/application backups; do not reset existing data. Then rebuild/install the matching Client and Admin against the intended API origin. A merged source branch alone does not update an installed executable.
 

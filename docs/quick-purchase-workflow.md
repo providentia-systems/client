@@ -46,7 +46,10 @@ validated receipt readback, including the existing response-loss recovery.
 permissions, ephemeral media, sanitization, consent, progress and extraction
 errors remain visible. Extraction is a proposal. Reviewed intake creates an
 ordinary home receipt; selected products and packs are reviewed before the
-receipt is explicitly finished. Importing does not itself change stock.
+receipt is explicitly finished. Each imported line shows its bought quantity,
+an explicit **Quantity refers to** pack/stock measurement choice, and the stock
+addition which will occur on finish. Approval preserves the exact conversion
+snapshot without changing stock; finishing applies it once. Importing does not itself change stock.
 
 The implementation is covered by exact pack conversion, additive stock,
 idempotent retry, correction/reversal, multiple-receipt selection, cross-unit

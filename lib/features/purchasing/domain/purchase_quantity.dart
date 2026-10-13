@@ -67,3 +67,47 @@ final class PurchaseQuantity {
     return '${_scaled.isNegative ? '-' : ''}$whole${fraction.isEmpty ? '' : '.$fraction'}';
   }
 }
+
+/// Convert a published pack to the home stock measurement without interpreting
+/// packaging text. Both sides use catalog normalized measurement snapshots.
+PurchaseQuantity purchasePackConversionFactor({
+  required String stockUnit,
+  required String? selectedAmount,
+  required String? selectedUnit,
+  String? baseAmount,
+  String? baseUnit,
+  bool selectedIsBasePack = false,
+}) {
+  if (stockUnit == 'units') {
+    if (selectedIsBasePack) return PurchaseQuantity.parse('1');
+    if (baseAmount != null) {
+      if (baseUnit != selectedUnit || selectedAmount == null) {
+        throw ArgumentError(
+          'Choose a pack with the same measurement as the stock base pack.',
+        );
+      }
+      return PurchaseQuantity.parse(selectedAmount, positive: true) /
+          PurchaseQuantity.parse(baseAmount, positive: true);
+    }
+    if (selectedUnit != 'units' || selectedAmount == null) {
+      throw ArgumentError(
+        'Choose a stock measurement or a base pack before using this pack.',
+      );
+    }
+    return PurchaseQuantity.parse(selectedAmount, positive: true);
+  }
+  if (selectedAmount == null ||
+      ((stockUnit == 'g' || stockUnit == 'kg')
+          ? selectedUnit != 'g'
+          : (stockUnit == 'ml' || stockUnit == 'l')
+          ? selectedUnit != 'ml'
+          : true)) {
+    throw ArgumentError(
+      'This pack cannot be converted to the stock measurement.',
+    );
+  }
+  final amount = PurchaseQuantity.parse(selectedAmount, positive: true);
+  return stockUnit == 'kg' || stockUnit == 'l'
+      ? amount.divideByThousand()
+      : amount;
+}

@@ -26,6 +26,9 @@ Receipt photo capture, gallery/file selection and PDF selection are visible in
 that workflow. Provider management is under **AI setup**; a disabled import
 explains the missing permission, provider, credential or household policy.
 Opening/rasterizing, sanitizing and extracting each show a progress message.
+Cancelling a replacement picker keeps the staged pages available. A failed
+replacement discards only its new bytes; reselecting an identical page does not
+wipe the current selection.
 Receipt import requires an online authorized session; manual purchases remain
 available offline.
 

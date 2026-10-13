@@ -7,6 +7,7 @@ import 'package:providentia/features/purchasing/application/purchase_draft_maint
 import 'package:providentia/features/purchasing/application/purchase_repository.dart';
 import 'package:providentia/features/purchasing/application/purchase_store_repository.dart';
 import 'package:providentia/features/purchasing/domain/purchase_models.dart';
+import 'package:providentia/features/purchasing/domain/purchase_quantity.dart';
 import 'package:providentia/features/purchasing/domain/purchase_services.dart';
 
 enum PurchaseView { recent, history }
@@ -79,6 +80,7 @@ final class PurchasingController extends ChangeNotifier {
   List<PurchaseReceiptCapture> get receipts => _receipts;
   bool get canSelectReceipts =>
       _repository is PurchaseReceiptSelectionRepository;
+  bool get canReviewPacks => _repository is PurchasePackReviewRepository;
   bool get canQuickEntry =>
       captureEnabled && _repository is PurchaseQuickEntryRepository;
 
@@ -239,6 +241,9 @@ final class PurchasingController extends ChangeNotifier {
                   selected ??= _selectedReceiptId == null && receipts.isNotEmpty
                       ? receipts.first
                       : null;
+                  if (_selectedReceiptId == null && selected != null) {
+                    _selectedReceiptId = selected.id;
+                  }
                   _receiveCapture(selected);
                 },
                 onError: (Object error) {
@@ -573,6 +578,8 @@ final class PurchasingController extends ChangeNotifier {
   Future<bool> approveCandidate({
     required String lineId,
     required String candidateId,
+    String? purchasedPackId,
+    bool quantityInStockUnits = false,
   }) async {
     final line = _captureLine(lineId);
     if (line == null) {
@@ -592,9 +599,25 @@ final class PurchasingController extends ChangeNotifier {
       );
     }
     final selectedCandidate = candidate;
-    final homeProductId = selectedCandidate.homeProductId;
+    final homeProductId = reviewTargetForCandidate(
+      selectedCandidate,
+    ).homeProductId;
     if (homeProductId != null) {
-      return approveLine(lineId: lineId, homeProductId: homeProductId);
+      return _runCaptureMutation(
+        () => _approveSelectedLine(
+          receiptId: _state.capture!.id,
+          lineId: lineId,
+          homeProductId: homeProductId,
+          packId: quantityInStockUnits
+              ? null
+              : purchasedPackId ??
+                    (selectedCandidate.packStatus == 'published'
+                        ? selectedCandidate.packId
+                        : null),
+        ),
+        queuedNotice:
+            'The reviewed product and quantity are saved locally; stock changes when the receipt is finished.',
+      );
     }
     return _createProductAndApprove(
       lineId: lineId,
@@ -615,6 +638,9 @@ final class PurchasingController extends ChangeNotifier {
       unavailableMessage:
           'Adding a published pack is unavailable in this workspace.',
       supported: canAddPublishedPack,
+      reviewedPackId: quantityInStockUnits
+          ? null
+          : purchasedPackId ?? selectedCandidate.packId,
     );
   }
 
@@ -708,6 +734,7 @@ final class PurchasingController extends ChangeNotifier {
     required Future<InventoryProductCreationResult> Function() create,
     required String unavailableMessage,
     required bool supported,
+    String? reviewedPackId,
   }) async {
     final capture = _state.capture;
     final line = _captureLine(lineId);
@@ -732,11 +759,11 @@ final class PurchasingController extends ChangeNotifier {
         homeProductId = result.homeProductId;
         _createdHomeProductIds[pendingKey] = homeProductId;
       }
-      final result = await _captureRepository!.approveReceiptLine(
-        homeId: homeId,
+      final result = await _approveSelectedLine(
         receiptId: capture.id,
         lineId: lineId,
         homeProductId: homeProductId,
+        packId: reviewedPackId,
       );
       _state = PurchasingState(
         lines: _state.lines,
@@ -767,6 +794,103 @@ final class PurchasingController extends ChangeNotifier {
     } catch (_) {
       _setCaptureError('The product match could not be saved safely.');
       return false;
+    }
+  }
+
+  Future<PurchaseMutationResult> _approveSelectedLine({
+    required String receiptId,
+    required String lineId,
+    required String homeProductId,
+    String? packId,
+  }) => canReviewPacks
+      ? (_repository as PurchasePackReviewRepository)
+            .approveReceiptLineWithPack(
+              homeId: homeId,
+              receiptId: receiptId,
+              lineId: lineId,
+              homeProductId: homeProductId,
+              packId: packId,
+            )
+      : _captureRepository!.approveReceiptLine(
+          homeId: homeId,
+          receiptId: receiptId,
+          lineId: lineId,
+          homeProductId: homeProductId,
+        );
+
+  PurchaseMatchCandidate reviewTargetForCandidate(
+    PurchaseMatchCandidate candidate,
+  ) {
+    if (!candidate.requiresHomeSelection || candidate.productId == null) {
+      return candidate;
+    }
+    final existing = _state.matchCandidates
+        .where(
+          (value) =>
+              value.homeProductId != null &&
+              value.productId == candidate.productId,
+        )
+        .toList();
+    return existing.length == 1 ? existing.single : candidate;
+  }
+
+  String approvedStockPreview(PurchaseReceiptLineCapture line) {
+    try {
+      final quantity = PurchaseQuantity.parse(
+        line.quantityText ??
+            line.quantity
+                .toStringAsFixed(8)
+                .replaceFirst(RegExp(r'\.?0+$'), ''),
+        positive: true,
+      );
+      final factor = PurchaseQuantity.parse(
+        line.stockQuantityPerPack ?? '1',
+        positive: true,
+      );
+      return 'On finish: +${quantity * factor} ${line.stockUnit ?? 'stock units'}';
+    } on ArgumentError {
+      return 'Review the quantity before finishing this receipt.';
+    }
+  }
+
+  String reviewedStockPreview({
+    required PurchaseReceiptLineCapture line,
+    required PurchaseMatchCandidate product,
+    String? packId,
+    bool quantityInStockUnits = false,
+  }) {
+    try {
+      final quantity = PurchaseQuantity.parse(
+        line.quantityText ??
+            line.quantity
+                .toStringAsFixed(8)
+                .replaceFirst(RegExp(r'\.?0+$'), ''),
+        positive: true,
+      );
+      final target = reviewTargetForCandidate(product);
+      final unit = target.requiresHomeSelection ? 'units' : target.stockUnit;
+      if (quantityInStockUnits || packId == null) {
+        return 'On finish: +$quantity $unit';
+      }
+      final selected = _state.matchCandidates
+          .where(
+            (candidate) =>
+                candidate.productId == product.productId &&
+                candidate.packId == packId,
+          )
+          .firstOrNull;
+      if (selected == null) return 'Choose a published pack.';
+      final factor = purchasePackConversionFactor(
+        stockUnit: unit,
+        selectedAmount: selected.normalizedBaseAmount,
+        selectedUnit: selected.normalizedBaseUnit,
+        baseAmount: target.normalizedBaseAmount,
+        baseUnit: target.normalizedBaseUnit,
+        selectedIsBasePack: target.packId == selected.packId,
+      );
+      return 'On finish: +${quantity * factor} $unit';
+    } on ArgumentError {
+      return 'Choose a compatible pack or use quantity in stock units.';
     }
   }
 

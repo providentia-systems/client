@@ -174,6 +174,9 @@ void main() {
     expect(source, contains('ReceiptPdfRasterizer(sources: _sources)'));
     expect(source, contains('pickMultipleImages: _pickMultipleImages'));
     expect(source, contains('pickReceiptPdf: _pickReceiptPdf'));
+    expect(source, contains('receiptImportPageBuilder:'));
+    expect(source, contains('receiptImportOnly: true'));
+    expect(source, contains('_features.purchasing.selectReceipt(receiptId)'));
     expect(
       RegExp(
         r'_receiptPdfRasterizer\s*\.choose\(\s*homeId:\s*widget\.homeId',

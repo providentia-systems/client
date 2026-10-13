@@ -30,6 +30,43 @@ void main() {
   });
 
   testWidgets(
+    'reselecting an identical receipt page keeps its new local bytes',
+    (tester) async {
+      final controller = _controller(
+        repository: _ServerRepository(_workspace()),
+      );
+      addTearDown(controller.dispose);
+      await controller.load();
+      final discarded = <String>[];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ServerAiWorkspacePage(
+            controller: controller,
+            receiptImportOnly: true,
+            pickSingleImage: (_) async => _asset(),
+            pickReceiptPdf: () async => <AiMediaAsset>[_asset()],
+            readLocalImage: (_) async => _transparentPixel,
+            discardLocalImages: (pages) async {
+              discarded.addAll(pages.map((page) => page.id));
+            },
+          ),
+        ),
+      );
+      await _scrollTo(tester, const Key('ai-pick-receipt-pdf'));
+      await tester.tap(find.byKey(const Key('ai-pick-receipt-pdf')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('ai-pick-receipt-pdf')));
+      await tester.pumpAndSettle();
+      expect(discarded, isEmpty);
+      await _scrollTo(tester, const Key('ai-receipt-page-draft'));
+      expect(
+        find.byKey(const Key('ai-receipt-local-preview-0')),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
     'receipt import shows photo and PDF sources without stock actions',
     (tester) async {
       final repository = _ServerRepository(_workspace());

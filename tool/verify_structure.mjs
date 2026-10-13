@@ -437,7 +437,7 @@ assert(
   generatedManifest.clientProfile === 'homeowner' &&
     generatedManifest.contractVersion === '2.2.0' &&
     generatedManifest.contractSha256 ===
-      'b6b7f8b5aed3c79c8cb751b21ab1c9dc21786124bb56ab08d21955ace8d7bd36' &&
+      '75701b9ef65edc964f50762ba428ca425bfad40f574cb1abc0ce03086ca19cc1' &&
     generatedManifest.canonicalOperationCount === 236 &&
     generatedManifest.generatedOperationCount === 168,
   'Generated client manifest must distinguish the canonical and homeowner surfaces.',

@@ -29,6 +29,17 @@ void main() {
           'packId': 'pack-1',
           'stockQuantity': '4.000',
           'stockQuantityPerPack': '1.000',
+          'stockUnit': 'kg',
+        }),
+      );
+      // Human-reviewed imported lines retain their selected conversion before
+      // stock is applied by the ordinary receipt commit.
+      validateReceiptProjection(
+        line(<String, Object?>{
+          'packId': 'pack-1',
+          'stockQuantity': null,
+          'stockQuantityPerPack': '4',
+          'stockUnit': 'kg',
         }),
       );
       validateReceiptProjection(
@@ -46,10 +57,12 @@ void main() {
     <String, Object?>{'stockQuantity': '-4'},
     <String, Object?>{'stockQuantity': 'NaN'},
     <String, Object?>{'stockQuantity': '4', 'stockQuantityPerPack': '0'},
-    <String, Object?>{'stockQuantityPerPack': '1'},
+    <String, Object?>{'stockQuantityPerPack': 1},
     <String, Object?>{'stockQuantity': '4', 'homeProductId': null},
     <String, Object?>{'stockQuantity': '4', 'approvalStatus': 'unreviewed'},
     <String, Object?>{'stockQuantity': '4', 'packId': 1},
+    <String, Object?>{'stockQuantity': '4', 'stockUnit': 'bag'},
+    <String, Object?>{'stockQuantity': '4', 'stockUnit': 1},
   ]) {
     test('malformed applied-line readback is rejected: $fields', () {
       expect(
