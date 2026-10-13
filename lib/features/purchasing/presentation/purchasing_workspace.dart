@@ -155,6 +155,8 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
   final _unitPrice = TextEditingController();
   final _lineTotal = TextEditingController();
   final Map<String, String> _selectedProducts = <String, String>{};
+  final Map<String, String> _selectedReviewPacks = <String, String>{};
+  final Map<String, bool> _reviewInStockUnits = <String, bool>{};
   bool _showDraftForm = false;
   String? _storeId;
   String? _entryProductId;
@@ -908,8 +910,8 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
         title: Text(line.rawDescription),
         subtitle: Text(
           line.stockApplied
-              ? 'Stock added: ${line.stockQuantity} ${match?.stockUnit ?? 'stock units'} · ${line.synchronizationState == PurchaseSynchronizationState.pending ? 'synchronization pending' : 'synchronized'}'
-              : 'Approved: ${match?.name ?? 'Private home product'} · revision ${line.revision}',
+              ? 'Stock added: ${line.stockQuantity} ${line.stockUnit ?? match?.stockUnit ?? 'stock units'} · ${line.synchronizationState == PurchaseSynchronizationState.pending ? 'synchronization pending' : 'synchronized'}'
+              : 'Approved: ${match?.name ?? 'Private home product'} · revision ${line.revision}${line.stockQuantityPerPack == null ? '' : ' · ${widget.controller.approvedStockPreview(line)}'}',
         ),
         trailing: line.stockApplied
             ? const Icon(Icons.check_circle_outline)
@@ -940,6 +942,9 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
             Text(line.rawDescription),
+            Text(
+              'Bought quantity: ${line.quantityText ?? _quantityValue(line.quantity)} · ${line.originalPackText ?? "Unspecified packaging"}',
+            ),
             if (line.unresolved)
               Text(
                 'Intentionally unresolved · revision ${line.revision}. You may still approve it later.',
@@ -965,6 +970,8 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
                   )
                   .toList(growable: false),
               onChanged: (value) => setState(() {
+                _selectedReviewPacks.remove(line.id);
+                _reviewInStockUnits.remove(line.id);
                 if (value == null) {
                   _selectedProducts.remove(line.id);
                 } else {
@@ -982,6 +989,65 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
                 key: Key('purchase-match-basis-${line.id}'),
               ),
             ],
+            if (widget.controller.canReviewPacks && selected != null) ...[
+              DropdownButtonFormField<String>(
+                key: ValueKey(
+                  'purchase-review-measurement-${line.id}-${selected.candidate.id}',
+                ),
+                initialValue:
+                    _reviewInStockUnits[line.id] == true ||
+                        selected.candidate.packStatus != 'published'
+                    ? ''
+                    : _selectedReviewPacks[line.id] ??
+                          selected.candidate.packId ??
+                          '',
+                decoration: const InputDecoration(
+                  labelText: 'Quantity refers to',
+                ),
+                isExpanded: true,
+                items: [
+                  DropdownMenuItem(
+                    value: '',
+                    child: Text(
+                      'Stock measurement (${widget.controller.reviewTargetForCandidate(selected.candidate).stockUnit})',
+                    ),
+                  ),
+                  for (final pack
+                      in widget.controller.state.matchCandidates.where(
+                        (candidate) =>
+                            candidate.productId != null &&
+                            candidate.productId ==
+                                selected!.candidate.productId &&
+                            candidate.packId != null &&
+                            candidate.packStatus == 'published',
+                      ))
+                    DropdownMenuItem(
+                      value: pack.packId!,
+                      child: Text('Packs: ${pack.packSize}'),
+                    ),
+                ],
+                onChanged: widget.controller.state.captureBusy
+                    ? null
+                    : (value) => setState(() {
+                        _reviewInStockUnits[line.id] = value == '';
+                        if (value != null && value != '') {
+                          _selectedReviewPacks[line.id] = value;
+                        }
+                      }),
+              ),
+              Text(
+                widget.controller.reviewedStockPreview(
+                  line: line,
+                  product: selected.candidate,
+                  packId:
+                      _selectedReviewPacks[line.id] ??
+                      (selected.candidate.packStatus == 'published'
+                          ? selected.candidate.packId
+                          : null),
+                  quantityInStockUnits: _reviewInStockUnits[line.id] == true,
+                ),
+              ),
+            ],
             const SizedBox(height: 8),
             FilledButton.tonal(
               key: Key('purchase-approve-line-${line.id}'),
@@ -992,8 +1058,19 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
                   : () => widget.controller.approveCandidate(
                       lineId: line.id,
                       candidateId: _selectedProducts[line.id]!,
+                      purchasedPackId: _selectedReviewPacks[line.id],
+                      quantityInStockUnits:
+                          _reviewInStockUnits[line.id] == true,
                     ),
-              child: Text(_matchActionLabel(selected?.candidate)),
+              child: Text(
+                _matchActionLabel(
+                  selected == null
+                      ? null
+                      : widget.controller.reviewTargetForCandidate(
+                          selected.candidate,
+                        ),
+                ),
+              ),
             ),
             const SizedBox(height: 8),
             OutlinedButton.icon(
@@ -1239,6 +1316,8 @@ String _matchBasisLabel(PurchaseMatchBasis basis) => switch (basis) {
 
 String _money(Money money) =>
     '${money.currency} ${(money.minorUnits / 100).toStringAsFixed(2)}';
+
+String _quantityValue(double value) => _quantity(value);
 
 String _quantity(double value) =>
     value.toStringAsFixed(value == value.roundToDouble() ? 0 : 3);

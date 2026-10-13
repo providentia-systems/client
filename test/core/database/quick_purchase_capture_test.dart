@@ -2,14 +2,15 @@ import 'dart:convert';
 
 import 'package:drift/drift.dart' hide isNull, isNotNull;
 import 'package:drift/native.dart';
-import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/material.dart';
-import 'package:providentia/features/purchasing/presentation/purchasing_workspace.dart';
+import 'package:flutter_test/flutter_test.dart';
 import 'package:providentia/core/database/app_database.dart';
 import 'package:providentia/core/database/drift_household_repository.dart';
+import 'package:providentia/features/inventory/domain/inventory_models.dart';
 import 'package:providentia/features/purchasing/domain/purchase_models.dart';
 import 'package:providentia/features/purchasing/domain/purchase_quantity.dart';
 import 'package:providentia/features/purchasing/presentation/purchasing_controller.dart';
+import 'package:providentia/features/purchasing/presentation/purchasing_workspace.dart';
 
 const _home = '10000000-0000-4000-8000-000000000001';
 const _device = '10000000-0000-4000-8000-000000000002';
@@ -130,6 +131,57 @@ void main() {
   );
 
   test(
+    'catalog refresh retains verified pack conversions in durable cache',
+    () async {
+      await repository.replaceCatalogItemMaster(
+        homeId: _home,
+        items: [
+          InventoryItem(
+            id: _packOne,
+            homeId: _home,
+            productId: _canonical,
+            packId: _packOne,
+            canonicalName: 'Apples',
+            packSize: '1 kg',
+            category: 'Fruit',
+            normalizedBaseAmount: '1000',
+            normalizedBaseUnit: 'g',
+            packStatus: 'published',
+          ),
+          InventoryItem(
+            id: _packFour,
+            homeId: _home,
+            productId: _canonical,
+            packId: _packFour,
+            canonicalName: 'Apples',
+            packSize: '4 kg',
+            category: 'Fruit',
+            normalizedBaseAmount: '4000',
+            normalizedBaseUnit: 'g',
+            packStatus: 'published',
+          ),
+        ],
+      );
+      final items = await repository.watchItems(homeId: _home).first;
+      expect(
+        items.firstWhere((item) => item.id == _product).normalizedBaseAmount,
+        '1000',
+      );
+      expect(
+        items.firstWhere((item) => item.packId == _packFour).packStatus,
+        'published',
+      );
+      final receipt = await _draft(repository);
+      await repository.addPurchasedReceiptLine(
+        homeProductId: _product,
+        packId: _packFour,
+        line: _request(receipt.entityId, '1', pack: '4 kg'),
+      );
+      expect(await _stock(database), '6');
+    },
+  );
+
+  test(
     'alternative packs convert into the selected home base pack unit',
     () async {
       await _seed(database, 'inventory-home-product', _product, {
@@ -151,6 +203,124 @@ void main() {
       expect(command['unit'], 'units');
       expect(command['stockQuantityPerPack'], '4');
       expect(command['quantity'], '1');
+    },
+  );
+
+  test(
+    'reviewed imported pack affects stock only on finish using immutable conversion',
+    () async {
+      final receipt = await _draft(repository);
+      final imported = await repository.addReceiptLine(
+        _request(receipt.entityId, '1', pack: '4 kg'),
+      );
+      await repository.approveReceiptLineWithPack(
+        homeId: _home,
+        receiptId: receipt.entityId,
+        lineId: imported.entityId,
+        homeProductId: _product,
+        packId: _packFour,
+      );
+      expect(await _stock(database), '2');
+      final reviewed =
+          (await repository.watchReceiptCaptures(homeId: _home).first)
+              .single
+              .lines
+              .single;
+      expect(reviewed.stockApplied, isFalse);
+      expect(reviewed.stockQuantityPerPack, '4');
+      expect(reviewed.stockUnit, 'kg');
+      await _seed(database, 'inventory-item-master-product', _packFour, {
+        'id': _packFour,
+        'homeId': _home,
+        'canonicalName': 'Apples',
+        'packSize': '8 kg',
+        'category': 'Fruit',
+        'brand': '',
+        'unit': 'units',
+        'aliases': <String>[],
+        'productId': _canonical,
+        'packId': _packFour,
+        'normalizedBaseAmount': '8000',
+        'normalizedBaseUnit': 'g',
+        'packStatus': 'published',
+      });
+      final retry = await repository.approveReceiptLineWithPack(
+        homeId: _home,
+        receiptId: receipt.entityId,
+        lineId: imported.entityId,
+        homeProductId: _product,
+        packId: _packFour,
+      );
+      expect(retry.disposition, PurchaseMutationDisposition.alreadyQueued);
+      await repository.commitReceipt(
+        homeId: _home,
+        receiptId: receipt.entityId,
+      );
+      expect(await _stock(database), '6');
+      expect(
+        (await repository.watchReceiptCaptures(homeId: _home).first)
+            .single
+            .lines
+            .single
+            .stockQuantity,
+        '4',
+      );
+    },
+  );
+
+  test(
+    'import matching reuses the single home product with an alternative pack',
+    () async {
+      final receipt = await _draft(repository);
+      final imported = await repository.addReceiptLine(
+        _request(receipt.entityId, '1', pack: '4 kg'),
+      );
+      final controller = PurchasingController(
+        repository: repository,
+        homeId: _home,
+        mayWrite: true,
+        productCreationRepository: repository,
+      )..start();
+      await pumpEventQueue();
+      final selected = controller.state.matchCandidates.firstWhere(
+        (candidate) => candidate.packId == _packFour,
+      );
+      expect(
+        controller.reviewTargetForCandidate(selected).homeProductId,
+        _product,
+      );
+      expect(
+        controller.reviewedStockPreview(
+          line: controller.state.capture!.lines.single,
+          product: selected,
+          packId: _packFour,
+        ),
+        'On finish: +4 kg',
+      );
+      expect(
+        await controller.approveCandidate(
+          lineId: imported.entityId,
+          candidateId: selected.id,
+        ),
+        isTrue,
+      );
+      await pumpEventQueue();
+      expect(await _stock(database), '2');
+      expect(controller.state.capture!.lines.single.stockQuantityPerPack, '4');
+      expect(
+        controller.approvedStockPreview(controller.state.capture!.lines.single),
+        'On finish: +4 kg',
+      );
+      expect(
+        (await database.select(database.clientOperations).get()).where(
+          (operation) =>
+              operation.operationType == 'inventory.home-product.create',
+        ),
+        isEmpty,
+      );
+      expect(await controller.commitDraft(), isTrue);
+      expect(await _stock(database), '6');
+      controller.dispose();
     },
   );
 
@@ -412,6 +582,67 @@ void main() {
     );
     await tester.tap(find.byKey(const Key('purchase-import-receipt')));
     expect(imports, 1);
+  });
+
+  test('volume and count conversions preserve exact measurements', () {
+    expect(
+      purchasePackConversionFactor(
+        stockUnit: 'l',
+        selectedAmount: '250',
+        selectedUnit: 'ml',
+      ).toString(),
+      '0.25',
+    );
+    expect(
+      purchasePackConversionFactor(
+        stockUnit: 'ml',
+        selectedAmount: '250',
+        selectedUnit: 'ml',
+      ).toString(),
+      '250',
+    );
+    expect(
+      purchasePackConversionFactor(
+        stockUnit: 'units',
+        selectedAmount: '12',
+        selectedUnit: 'units',
+      ).toString(),
+      '12',
+    );
+    expect(
+      purchasePackConversionFactor(
+        stockUnit: 'g',
+        selectedAmount: '1000',
+        selectedUnit: 'g',
+      ).toString(),
+      '1000',
+    );
+    expect(
+      () => purchasePackConversionFactor(
+        stockUnit: 'kg',
+        selectedAmount: '250',
+        selectedUnit: 'ml',
+      ),
+      throwsArgumentError,
+    );
+    expect(
+      () => purchasePackConversionFactor(
+        stockUnit: 'units',
+        selectedAmount: '250',
+        selectedUnit: 'g',
+      ),
+      throwsArgumentError,
+    );
+    expect(
+      () => purchasePackConversionFactor(
+        stockUnit: 'units',
+        selectedAmount: '250',
+        selectedUnit: 'g',
+        baseAmount: '500',
+        baseUnit: 'ml',
+      ),
+      throwsArgumentError,
+    );
   });
 
   test('decimal arithmetic rejects precision loss and adds tenths exactly', () {

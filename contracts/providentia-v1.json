@@ -4462,7 +4462,8 @@
           "409": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "description": "Confirm imported product matching. Optional packId, unit and stockQuantityPerPack must be supplied together; the server validates and snapshots their exact conversion for later commit."
       }
     },
     "/api/v1/homes/{homeId}/receipts/{receiptId}/lines/{lineId}/unresolve": {
@@ -15712,8 +15713,50 @@
           "homeProductId": {
             "type": "string",
             "format": "uuid"
+          },
+          "packId": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "units",
+              "g",
+              "kg",
+              "ml",
+              "l"
+            ],
+            "description": "Expected household stock unit when the purchase was entered; a changed unit conflicts."
+          },
+          "stockQuantityPerPack": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,8})?$",
+            "description": "Expected exact conversion from cached catalog facts. Server recomputes and rejects changed pack measures instead of silently reinterpreting offline purchases."
           }
-        }
+        },
+        "dependentRequired": {
+          "packId": [
+            "unit",
+            "stockQuantityPerPack"
+          ],
+          "unit": [
+            "packId",
+            "stockQuantityPerPack"
+          ],
+          "stockQuantityPerPack": [
+            "packId",
+            "unit"
+          ]
+        },
+        "description": "Optional explicit pack review snapshots selected packaging and exact stock conversion together. It remains unapplied until receipt completion. Legacy selection without pack metadata retains entered stock-unit quantities."
       },
       "SyncReceiptLineUnresolvePayload": {
         "type": "object",
@@ -16930,6 +16973,21 @@
             "type": "integer",
             "minimum": 1,
             "description": "Current receipt revision returned after immediate purchase creation."
+          },
+          "stockUnit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "units",
+              "g",
+              "kg",
+              "ml",
+              "l",
+              null
+            ],
+            "description": "Snapshotted stock unit at purchase/review. Reviewed imports conflict if the home unit changes before commit."
           }
         }
       },
@@ -17507,8 +17565,50 @@
           "expectedRevision": {
             "type": "integer",
             "minimum": 1
+          },
+          "packId": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "units",
+              "g",
+              "kg",
+              "ml",
+              "l"
+            ],
+            "description": "Expected household stock unit when the purchase was entered; a changed unit conflicts."
+          },
+          "stockQuantityPerPack": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,8})?$",
+            "description": "Expected exact conversion from cached catalog facts. Server recomputes and rejects changed pack measures instead of silently reinterpreting offline purchases."
           }
-        }
+        },
+        "dependentRequired": {
+          "packId": [
+            "unit",
+            "stockQuantityPerPack"
+          ],
+          "unit": [
+            "packId",
+            "stockQuantityPerPack"
+          ],
+          "stockQuantityPerPack": [
+            "packId",
+            "unit"
+          ]
+        },
+        "description": "Optional explicit pack review snapshots selected packaging and exact stock conversion together. It remains unapplied until receipt completion. Legacy selection without pack metadata retains entered stock-unit quantities."
       },
       "CreateShoppingListRequest": {
         "type": "object",

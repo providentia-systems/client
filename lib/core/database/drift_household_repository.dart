@@ -61,6 +61,7 @@ final class DriftHouseholdRepository
         StockPreferenceRepository,
         PurchaseCaptureRepository,
         PurchaseQuickEntryRepository,
+        PurchasePackReviewRepository,
         PurchaseReceiptSelectionRepository,
         PurchaseIntakeRecoveryRepository,
         PurchaseDraftMaintenanceRepository,
@@ -1016,6 +1017,9 @@ final class DriftHouseholdRepository
           category: item.catalogCategoryName ?? item.category,
           brand: item.brand,
           unit: 'units',
+          normalizedBaseAmount: item.normalizedBaseAmount,
+          normalizedBaseUnit: item.normalizedBaseUnit,
+          packStatus: item.packStatus,
           aliases: item.aliases,
           productId: item.productId,
           packId: item.packId,
@@ -1699,6 +1703,7 @@ final class DriftHouseholdRepository
           'approvalStatus': 'approved',
           'stockQuantity': stock.toString(),
           'stockQuantityPerPack': factor.toString(),
+          'stockUnit': command['unit'],
         },
         at: at,
       );
@@ -1766,59 +1771,28 @@ final class DriftHouseholdRepository
       );
     }
     final unit = _optionalString(product['unit'], fallback: 'units');
-    if (unit == 'units') {
-      final basePackId = _nullableString(product['packId']);
-      if (basePackId == packId) return PurchaseQuantity.parse('1');
-      InventoryItem? basePack;
-      for (final row in rows) {
-        final item = _decodeInventoryItem(row.payload);
-        if (item.packId == basePackId &&
-            item.productId == product['productId']) {
-          basePack = item;
-        }
+    InventoryItem? basePack;
+    for (final row in rows) {
+      final item = _decodeInventoryItem(row.payload);
+      if (item.packId == product['packId'] &&
+          item.productId == product['productId']) {
+        basePack = item;
       }
-      if (basePack == null) {
-        if (pack.normalizedBaseUnit != 'units' ||
-            pack.normalizedBaseAmount == null) {
-          throw const PurchaseCaptureException(
-            'Choose a stock measurement or a base pack before buying a differently sized pack.',
-          );
-        }
-        return PurchaseQuantity.parse(
-          pack.normalizedBaseAmount!,
-          positive: true,
-        );
-      }
-      if (basePack.normalizedBaseUnit != pack.normalizedBaseUnit ||
-          basePack.normalizedBaseAmount == null ||
-          pack.normalizedBaseAmount == null) {
-        throw const PurchaseCaptureException(
-          'This pack does not use the same measurement as the home product base pack.',
-        );
-      }
-      return PurchaseQuantity.parse(
-            pack.normalizedBaseAmount!,
-            positive: true,
-          ) /
-          PurchaseQuantity.parse(
-            basePack.normalizedBaseAmount!,
-            positive: true,
-          );
     }
-    final amount = pack.normalizedBaseAmount;
-    final baseUnit = pack.normalizedBaseUnit;
-    if (amount == null ||
-        (unit == 'g' || unit == 'kg'
-            ? baseUnit != 'g'
-            : (unit == 'ml' || unit == 'l')
-            ? baseUnit != 'ml'
-            : true)) {
+    try {
+      return purchasePackConversionFactor(
+        stockUnit: unit,
+        selectedAmount: pack.normalizedBaseAmount,
+        selectedUnit: pack.normalizedBaseUnit,
+        baseAmount: basePack?.normalizedBaseAmount,
+        baseUnit: basePack?.normalizedBaseUnit,
+        selectedIsBasePack: packId == product['packId'],
+      );
+    } on ArgumentError {
       throw const PurchaseCaptureException(
-        'This pack cannot be converted to the stock unit. Enter the quantity in stock units instead.',
+        'This pack cannot be converted exactly to the stock unit. Choose a compatible pack or enter the quantity in stock units.',
       );
     }
-    final value = PurchaseQuantity.parse(amount, positive: true);
-    return unit == 'kg' || unit == 'l' ? value.divideByThousand() : value;
   }
 
   Future<void> _applyPurchaseStockDelta({
@@ -2101,6 +2075,10 @@ final class DriftHouseholdRepository
             ..._withoutProjectionMetadata(payload),
             ...fields,
             'homeProductId': applied ? payload['homeProductId'] : null,
+            if (!applied) 'packId': null,
+            if (!applied) 'unit': null,
+            if (!applied) 'stockUnit': null,
+            if (!applied) 'stockQuantityPerPack': null,
             if (applied) 'stockQuantity': stockQuantity,
             'approvalStatus': request == null
                 ? 'removed'
@@ -2141,17 +2119,48 @@ final class DriftHouseholdRepository
   }
 
   @override
+  Future<PurchaseMutationResult> approveReceiptLineWithPack({
+    required String homeId,
+    required String receiptId,
+    required String lineId,
+    required String homeProductId,
+    String? packId,
+  }) => _approveReceiptLine(
+    homeId: homeId,
+    receiptId: receiptId,
+    lineId: lineId,
+    homeProductId: homeProductId,
+    packId: packId,
+    explicitMeasurement: true,
+  );
+
+  @override
   Future<PurchaseMutationResult> approveReceiptLine({
     required String homeId,
     required String receiptId,
     required String lineId,
     required String homeProductId,
+  }) => _approveReceiptLine(
+    homeId: homeId,
+    receiptId: receiptId,
+    lineId: lineId,
+    homeProductId: homeProductId,
+  );
+
+  Future<PurchaseMutationResult> _approveReceiptLine({
+    required String homeId,
+    required String receiptId,
+    required String lineId,
+    required String homeProductId,
+    String? packId,
+    bool explicitMeasurement = false,
   }) async {
     _requireSynchronizedPurchasing();
     _requireHomeUuid(homeId);
     _requireUuid(receiptId, 'purchase receipt');
     _requireUuid(lineId, 'purchase receipt line');
     _requireUuid(homeProductId, 'purchase home product');
+    if (packId != null) _requireUuid(packId, 'purchase pack');
     final at = _clock().toUtc();
     final result = await _database.transaction<PurchaseMutationResult>(
       () async {
@@ -2190,6 +2199,7 @@ final class DriftHouseholdRepository
             'The selected product is unavailable in this home.',
           );
         }
+        final productValue = _validatedProjection(product, homeId);
         final approvalStatus = _requiredString(linePayload, 'approvalStatus');
         if (approvalStatus == 'approved' ||
             approvalStatus == 'approved-catalog') {
@@ -2209,6 +2219,20 @@ final class DriftHouseholdRepository
             'The receipt line has an unsupported review state.',
           );
         }
+        final measurement = explicitMeasurement
+            ? <String, Object?>{
+                'packId': packId,
+                'unit': _optionalString(
+                  productValue['unit'],
+                  fallback: 'units',
+                ),
+                'stockQuantityPerPack': (await _purchasePackFactor(
+                  homeId: homeId,
+                  product: productValue,
+                  packId: packId,
+                )).toString(),
+              }
+            : <String, Object?>{};
         final receiptPayload = _validatedProjection(receipt, homeId);
         await _writeProjection(
           homeId: homeId,
@@ -2219,6 +2243,8 @@ final class DriftHouseholdRepository
             ..._withoutProjectionMetadata(linePayload),
             'homeProductId': homeProductId,
             'approvalStatus': 'approved',
+            ...measurement,
+            if (explicitMeasurement) 'stockUnit': measurement['unit'],
           },
           at: at,
         );
@@ -2241,6 +2267,7 @@ final class DriftHouseholdRepository
           payload: <String, Object?>{
             'receiptId': receiptId,
             'homeProductId': homeProductId,
+            ...measurement,
           },
           at: at,
         );
@@ -2435,10 +2462,31 @@ final class DriftHouseholdRepository
         if (value['homeProductId'] != null &&
             value['stockQuantity'] == null &&
             value['approvalStatus'] != 'unresolved') {
-          final quantity = PurchaseQuantity.parse(
-            _requiredString(value, 'quantity'),
+          final product = await _record(
+            homeId: homeId,
+            entityType: _homeProductType,
+            entityId: _requiredString(value, 'homeProductId'),
+          );
+          final unit = _optionalString(
+            _validatedProjection(product!, homeId)['unit'],
+            fallback: 'units',
+          );
+          if ((value['stockUnit'] ?? value['unit']) != null &&
+              (value['stockUnit'] ?? value['unit']) != unit) {
+            throw const PurchaseCaptureException(
+              'The stock unit changed after this line was reviewed. Edit and review it again.',
+            );
+          }
+          final factor = PurchaseQuantity.parse(
+            _nullableString(value['stockQuantityPerPack']) ?? '1',
             positive: true,
           );
+          final quantity =
+              PurchaseQuantity.parse(
+                _requiredString(value, 'quantity'),
+                positive: true,
+              ) *
+              factor;
           await _applyPurchaseStockDelta(
             homeId: homeId,
             homeProductId: _requiredString(value, 'homeProductId'),
@@ -2453,7 +2501,7 @@ final class DriftHouseholdRepository
             representation: {
               ..._withoutProjectionMetadata(value),
               'stockQuantity': quantity.toString(),
-              'stockQuantityPerPack': '1',
+              'stockQuantityPerPack': factor.toString(),
             },
             at: at,
           );
@@ -3059,6 +3107,7 @@ final class DriftHouseholdRepository
           homeProductId: _nullableString(linePayload['homeProductId']),
           packId: _nullableString(linePayload['packId']),
           stockQuantity: _nullableString(linePayload['stockQuantity']),
+          stockUnit: _nullableString(linePayload['stockUnit']),
           stockQuantityPerPack: _nullableString(
             linePayload['stockQuantityPerPack'],
           ),

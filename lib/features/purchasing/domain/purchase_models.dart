@@ -202,6 +202,7 @@ final class PurchaseReceiptLineCapture {
     this.stockQuantity,
     this.stockQuantityPerPack,
     this.quantityText,
+    this.stockUnit,
   }) {
     _requireText(id, 'id');
     _requireText(homeId, 'homeId');
@@ -239,6 +240,7 @@ final class PurchaseReceiptLineCapture {
   final String? stockQuantity;
   final String? stockQuantityPerPack;
   final String? quantityText;
+  final String? stockUnit;
   bool get stockApplied => stockQuantity != null;
   final int revision;
   final PurchaseLineApprovalStatus approvalStatus;

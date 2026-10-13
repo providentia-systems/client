@@ -10,6 +10,54 @@ import 'package:providentia/features/ai_integration/infrastructure/sanitizing_im
 
 void main() {
   test(
+    'failed replacement preserves previously staged identical receipt pages',
+    () async {
+      final registry = RegisteredMediaSourceReader();
+      final original = MediaAcquisitionService(
+        registry: registry,
+        imagePicker: _FakeImagePicker(
+          images: <XFile>[_file('original.jpg', 32)],
+        ),
+      );
+      final pages = await original.choosePhotos(
+        homeId: 'home-1',
+        purpose: AiExtractionKind.receipt,
+        limit: 8,
+      );
+      final replacement = MediaAcquisitionService(
+        registry: registry,
+        imagePicker: _FakeImagePicker(
+          images: <XFile>[_file('same.jpg', 32), _file('invalid.jpg', 1)],
+        ),
+      );
+      await expectLater(
+        replacement.choosePhotos(
+          homeId: 'home-1',
+          purpose: AiExtractionKind.receipt,
+          limit: 8,
+        ),
+        throwsA(isA<MediaAcquisitionException>()),
+      );
+      expect(registry.registeredIds, <String>{pages.single.id});
+      expect(await registry.read(pages.single), _raw(32));
+
+      final cancelled = MediaAcquisitionService(
+        registry: registry,
+        imagePicker: _FakeImagePicker(),
+      );
+      expect(
+        await cancelled.choosePhotos(
+          homeId: 'home-1',
+          purpose: AiExtractionKind.receipt,
+          limit: 8,
+        ),
+        isEmpty,
+      );
+      expect(await registry.read(pages.single), _raw(32));
+    },
+  );
+
+  test(
     'camera, gallery, and video bytes become registered local assets',
     () async {
       final registry = RegisteredMediaSourceReader();
