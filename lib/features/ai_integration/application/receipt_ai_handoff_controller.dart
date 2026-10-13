@@ -60,12 +60,14 @@ final class ReceiptAiHandoffController extends ChangeNotifier {
   ReceiptAiHandoffStatus _status = ReceiptAiHandoffStatus.awaitingConfirmation;
   String? _safeMessage;
   String? _receiptId;
+  List<AiReceiptCandidatePayload>? _confirmedLines;
 
   ReceiptAiHandoffStatus get status => _status;
   String? get safeMessage => _safeMessage;
   String? get receiptId => _receiptId;
   String get sourceReference => 'ai-extraction:${handoff.extractionId}';
   bool get isBusy => _status == ReceiptAiHandoffStatus.confirming;
+  bool get pricesConfirmed => _confirmedLines != null;
   bool get canConfirm =>
       (_status == ReceiptAiHandoffStatus.awaitingConfirmation ||
           _status == ReceiptAiHandoffStatus.failed) &&
@@ -90,7 +92,11 @@ final class ReceiptAiHandoffController extends ChangeNotifier {
     }
   }
 
-  Future<bool> confirm({DateTime? purchaseDate, String? currency}) async {
+  Future<bool> confirm({
+    DateTime? purchaseDate,
+    String? currency,
+    Map<int, int> missingLineTotals = const <int, int>{},
+  }) async {
     if (_status == ReceiptAiHandoffStatus.readyForPurchasingReview) return true;
     if (!canConfirm) return false;
     final resolvedDate = purchaseDate ?? header?.purchaseDate;
@@ -105,15 +111,54 @@ final class ReceiptAiHandoffController extends ChangeNotifier {
       );
       return false;
     }
-    if (lines.any(
+    final confirmedLines = _confirmedLines;
+    if (confirmedLines == null &&
+        missingLineTotals.entries.any(
+          (entry) =>
+              entry.key < 0 ||
+              entry.key >= lines.length ||
+              entry.value < 0 ||
+              lines[entry.key].unitPriceMinorUnits != null ||
+              lines[entry.key].lineTotalMinorUnits != null,
+        )) {
+      _fail(
+        'Enter a valid nonnegative line total only for a missing extracted price.',
+      );
+      return false;
+    }
+    final resolvedLines =
+        confirmedLines ??
+        <AiReceiptCandidatePayload>[
+          for (final (index, line) in lines.indexed)
+            if (line.unitPriceMinorUnits == null &&
+                line.lineTotalMinorUnits == null &&
+                missingLineTotals.containsKey(index))
+              AiReceiptCandidatePayload(
+                rawText: line.rawText,
+                description: line.description,
+                quantity: line.quantity,
+                packText: line.packText,
+                unitPriceMinorUnits: null,
+                lineTotalMinorUnits: missingLineTotals[index],
+                header: line.header,
+              )
+            else
+              line,
+        ];
+    if (resolvedLines.any(
       (line) =>
           line.unitPriceMinorUnits == null && line.lineTotalMinorUnits == null,
     )) {
       _fail(
-        'Every accepted receipt line needs a unit price or line total before handoff.',
+        'Enter the missing line total for every accepted receipt item before creating the draft.',
       );
       return false;
     }
+    // Retries reuse the values from the first explicit ordinary purchase
+    // confirmation, even when a draft or line was saved before response loss.
+    _confirmedLines ??= List<AiReceiptCandidatePayload>.unmodifiable(
+      resolvedLines,
+    );
 
     final epoch = _accessEpoch;
     _status = ReceiptAiHandoffStatus.confirming;
@@ -181,12 +226,12 @@ final class ReceiptAiHandoffController extends ChangeNotifier {
       }
       if (!_stillAuthorized(epoch)) return false;
       final receiptCurrency = capture?.currency ?? resolvedCurrency;
-      for (var index = 0; index < lines.length; index++) {
+      for (var index = 0; index < resolvedLines.length; index++) {
         await _ensureLine(
           receiptId: receiptId,
           currency: receiptCurrency,
-          line: lines[index],
-          desiredOccurrence: _desiredOccurrence(index),
+          line: resolvedLines[index],
+          desiredOccurrence: _desiredOccurrence(index, resolvedLines),
           position: handoff.acceptedCandidates[index].position,
         );
         if (!_stillAuthorized(epoch)) return false;
@@ -265,11 +310,14 @@ final class ReceiptAiHandoffController extends ChangeNotifier {
         : Money(minorUnits: line.lineTotalMinorUnits!, currency: currency),
   );
 
-  int _desiredOccurrence(int index) {
+  int _desiredOccurrence(
+    int index,
+    List<AiReceiptCandidatePayload> resolvedLines,
+  ) {
     var count = 0;
-    final target = lines[index];
+    final target = resolvedLines[index];
     for (var candidateIndex = 0; candidateIndex <= index; candidateIndex++) {
-      if (_samePayload(lines[candidateIndex], target)) count++;
+      if (_samePayload(resolvedLines[candidateIndex], target)) count++;
     }
     return count;
   }
@@ -308,12 +356,36 @@ final class ReceiptAiHandoffController extends ChangeNotifier {
 
   Future<PurchaseReceiptCapture?> _activeCapture() async {
     try {
+      final repository = _repository;
+      if (repository is PurchaseReceiptSelectionRepository) {
+        final captures =
+            await (repository as PurchaseReceiptSelectionRepository)
+                .watchReceiptCaptures(homeId: handoff.homeId)
+                .first
+                .timeout(recoveryTimeout);
+        final matches = captures
+            .where(
+              (capture) =>
+                  capture.homeId == handoff.homeId &&
+                  capture.sourceReference == sourceReference,
+            )
+            .toList();
+        if (matches.length > 1) {
+          throw const PurchaseCaptureException(
+            'This import has conflicting receipt records. Refresh purchases before retrying.',
+          );
+        }
+        return matches.isEmpty ? null : matches.single;
+      }
       return await _repository
           .watchActiveReceiptCapture(homeId: handoff.homeId)
           .first
           .timeout(recoveryTimeout);
-    } on TimeoutException {
-      return null;
+    } catch (error) {
+      if (error is! TimeoutException && error is! StateError) rethrow;
+      throw const PurchaseCaptureException(
+        'Saved purchases are not available yet. Refresh purchases before retrying this import.',
+      );
     }
   }
 

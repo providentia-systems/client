@@ -5,9 +5,14 @@ import 'package:providentia/features/purchasing/presentation/purchasing_controll
 import 'package:providentia/features/purchasing/presentation/receipt_draft_editor.dart';
 
 class PurchasingWorkspace extends StatefulWidget {
-  const PurchasingWorkspace({required this.controller, super.key});
+  const PurchasingWorkspace({
+    required this.controller,
+    this.onImportReceipt,
+    super.key,
+  });
 
   final PurchasingController controller;
+  final VoidCallback? onImportReceipt;
 
   @override
   State<PurchasingWorkspace> createState() => _PurchasingWorkspaceState();
@@ -91,7 +96,10 @@ class _PurchasingWorkspaceState extends State<PurchasingWorkspace> {
             const SizedBox(height: 12),
             if (state.safeError != null) Text(state.safeError!),
             if (state.view == PurchaseView.recent) ...<Widget>[
-              _PurchaseCapturePanel(controller: widget.controller),
+              _PurchaseCapturePanel(
+                controller: widget.controller,
+                onImportReceipt: widget.onImportReceipt,
+              ),
               const SizedBox(height: 12),
               Card(
                 child: ListTile(
@@ -127,9 +135,10 @@ class _PurchasingWorkspaceState extends State<PurchasingWorkspace> {
 }
 
 class _PurchaseCapturePanel extends StatefulWidget {
-  const _PurchaseCapturePanel({required this.controller});
+  const _PurchaseCapturePanel({required this.controller, this.onImportReceipt});
 
   final PurchasingController controller;
+  final VoidCallback? onImportReceipt;
 
   @override
   State<_PurchaseCapturePanel> createState() => _PurchaseCapturePanelState();
@@ -146,11 +155,19 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
   final _unitPrice = TextEditingController();
   final _lineTotal = TextEditingController();
   final Map<String, String> _selectedProducts = <String, String>{};
+  final Map<String, String> _selectedReviewPacks = <String, String>{};
+  final Map<String, bool> _reviewInStockUnits = <String, bool>{};
   bool _showDraftForm = false;
   String? _storeId;
+  String? _entryProductId;
+  String? _entryPackId;
+  final _productFocus = FocusNode();
+  final _productSearch = TextEditingController();
 
   @override
   void dispose() {
+    _productFocus.dispose();
+    _productSearch.dispose();
     _currency.dispose();
     _receiptTotal.dispose();
     _notes.dispose();
@@ -205,6 +222,55 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
               ),
             ],
             const SizedBox(height: 12),
+            OutlinedButton.icon(
+              key: const Key('purchase-import-receipt'),
+              onPressed: state.captureBusy ? null : widget.onImportReceipt,
+              icon: const Icon(Icons.upload_file_outlined),
+              label: const Text('Import photo or PDF'),
+            ),
+            if (widget.onImportReceipt == null)
+              const Text(
+                'Receipt import requires household AI access. Review Account & access for availability.',
+              ),
+            if (controller.canSelectReceipts &&
+                controller.receipts.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              DropdownButtonFormField<String>(
+                key: ValueKey('purchase-receipt-selector-${capture?.id}'),
+                initialValue: capture?.id,
+                decoration: const InputDecoration(labelText: 'Open receipts'),
+                isExpanded: true,
+                items: [
+                  for (final receipt in controller.receipts)
+                    DropdownMenuItem(
+                      value: receipt.id,
+                      child: Text(
+                        '${receipt.purchaseDate.toIso8601String().substring(0, 10)} · ${receipt.storeName ?? 'Unspecified store'} · ${receipt.lines.length} items${receipt.status == PurchaseReceiptStatus.committed ? ' · submitted' : ''}',
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                ],
+                onChanged: state.captureBusy
+                    ? null
+                    : (value) {
+                        if (value != null) {
+                          controller.selectReceipt(value);
+                          setState(() => _showDraftForm = false);
+                        }
+                      },
+              ),
+              TextButton.icon(
+                key: const Key('purchase-another-receipt'),
+                onPressed: state.captureBusy
+                    ? null
+                    : () {
+                        controller.startAnotherReceipt();
+                        setState(() => _showDraftForm = true);
+                      },
+                icon: const Icon(Icons.add),
+                label: const Text('Start another receipt'),
+              ),
+            ],
             if (capture == null)
               if (_showDraftForm)
                 _draftForm(context)
@@ -260,6 +326,13 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
               : (value) =>
                     setState(() => _storeId = value == '' ? null : value),
         ),
+        if (widget.controller.canEditStores)
+          TextButton.icon(
+            key: const Key('purchase-add-store'),
+            onPressed: state.captureBusy ? null : _addStore,
+            icon: const Icon(Icons.add),
+            label: const Text('Add store'),
+          ),
         TextField(
           key: const Key('purchase-receipt-currency'),
           controller: _currency,
@@ -332,6 +405,42 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
                 : 'Commit synchronized.',
             key: const Key('purchase-commit-state'),
           ),
+          if (widget.controller.canMaintainDraft)
+            OutlinedButton.icon(
+              key: const Key('purchase-edit-receipt'),
+              onPressed: widget.controller.state.captureBusy
+                  ? null
+                  : () => _editDraft(capture),
+              icon: const Icon(Icons.edit_outlined),
+              label: const Text('Edit receipt details'),
+            ),
+          for (final line in capture.lines.where(
+            (line) => line.stockApplied,
+          )) ...[
+            _lineReview(context, line),
+            if (widget.controller.canMaintainDraft)
+              Wrap(
+                spacing: 8,
+                children: [
+                  TextButton.icon(
+                    key: Key('purchase-edit-line-${line.id}'),
+                    onPressed: widget.controller.state.captureBusy
+                        ? null
+                        : () => _editDraft(capture, line),
+                    icon: const Icon(Icons.edit_outlined),
+                    label: const Text('Edit line'),
+                  ),
+                  TextButton.icon(
+                    key: Key('purchase-remove-line-${line.id}'),
+                    onPressed: widget.controller.state.captureBusy
+                        ? null
+                        : () => _removeLine(line),
+                    icon: const Icon(Icons.remove_circle_outline),
+                    label: const Text('Remove line'),
+                  ),
+                ],
+              ),
+          ],
           if (pending) ...<Widget>[
             const SizedBox(height: 8),
             OutlinedButton(
@@ -383,6 +492,65 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
               ),
             ],
           ),
+        if (widget.controller.canQuickEntry)
+          _quickEntry(context)
+        else ...[
+          TextField(
+            key: const Key('purchase-line-description'),
+            controller: _description,
+            maxLength: 500,
+            decoration: const InputDecoration(labelText: 'Receipt line text'),
+          ),
+          TextField(
+            key: const Key('purchase-line-pack'),
+            controller: _packText,
+            maxLength: 191,
+            decoration: const InputDecoration(
+              labelText: 'Pack text (optional)',
+            ),
+          ),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: TextField(
+                  key: const Key('purchase-line-quantity'),
+                  controller: _quantity,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: const InputDecoration(labelText: 'Quantity'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: TextField(
+                  key: const Key('purchase-line-total'),
+                  controller: _lineTotal,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: const InputDecoration(labelText: 'Line total'),
+                ),
+              ),
+            ],
+          ),
+          TextField(
+            key: const Key('purchase-line-unit-price'),
+            controller: _unitPrice,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(
+              labelText: 'Unit price (optional)',
+            ),
+          ),
+          const SizedBox(height: 8),
+          FilledButton.icon(
+            key: const Key('purchase-add-line'),
+            onPressed: widget.controller.state.captureBusy ? null : _addLine,
+            icon: const Icon(Icons.add),
+            label: const Text('Add receipt line'),
+          ),
+        ],
+        const SizedBox(height: 8),
         for (final line in capture.lines) ...[
           _lineReview(context, line),
           if (widget.controller.canMaintainDraft)
@@ -408,20 +576,117 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
               ],
             ),
         ],
-        TextField(
-          key: const Key('purchase-line-description'),
-          controller: _description,
-          maxLength: 500,
-          decoration: const InputDecoration(labelText: 'Receipt line text'),
+        if (!capture.reviewComplete)
+          const Text(
+            'Every line must be approved or intentionally left unresolved before commit.',
+            key: Key('purchase-review-required'),
+          ),
+        FilledButton(
+          key: const Key('purchase-commit-receipt'),
+          onPressed:
+              widget.controller.state.captureBusy || !capture.reviewComplete
+              ? null
+              : widget.controller.commitDraft,
+          child: Text(
+            widget.controller.canQuickEntry
+                ? 'Finish receipt'
+                : 'Queue receipt commit',
+          ),
         ),
-        TextField(
-          key: const Key('purchase-line-pack'),
-          controller: _packText,
-          maxLength: 191,
-          decoration: const InputDecoration(labelText: 'Pack text (optional)'),
+      ],
+    );
+  }
+
+  Widget _quickEntry(BuildContext context) {
+    final candidates = widget.controller.state.matchCandidates;
+    final products = candidates
+        .where((candidate) => candidate.homeProductId != null)
+        .toList();
+    PurchaseMatchCandidate? product;
+    for (final candidate in products) {
+      if (candidate.homeProductId == _entryProductId) product = candidate;
+    }
+    final packs = product == null || product.productId == null
+        ? <PurchaseMatchCandidate>[]
+        : candidates
+              .where(
+                (candidate) =>
+                    candidate.productId == product!.productId &&
+                    candidate.packId != null &&
+                    candidate.packStatus == 'published',
+              )
+              .toList();
+    if (!packs.any((candidate) => candidate.packId == _entryPackId)) {
+      _entryPackId = null;
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Divider(),
+        Text(
+          'Add purchased product',
+          style: Theme.of(context).textTheme.titleMedium,
         ),
+        const SizedBox(height: 8),
+        DropdownMenu<String>(
+          key: const Key('purchase-product-search'),
+          focusNode: _productFocus,
+          controller: _productSearch,
+          initialSelection: _entryProductId,
+          expandedInsets: EdgeInsets.zero,
+          enableFilter: true,
+          requestFocusOnTap: true,
+          label: const Text('Find product'),
+          dropdownMenuEntries: [
+            for (final candidate in products)
+              DropdownMenuEntry(
+                value: candidate.homeProductId!,
+                label:
+                    '${candidate.name}${candidate.brand.isEmpty ? '' : ' · ${candidate.brand}'} · ${candidate.packSize}',
+              ),
+          ],
+          onSelected: widget.controller.state.captureBusy
+              ? null
+              : (value) => setState(() {
+                  _entryProductId = value;
+                  _entryPackId = null;
+                }),
+        ),
+        if (products.isEmpty)
+          const Text(
+            'Add a product in Stock first. Imported receipt lines can also create a private product during review.',
+          ),
+        if (product != null) ...[
+          const SizedBox(height: 8),
+          DropdownButtonFormField<String>(
+            key: ValueKey('purchase-pack-$_entryProductId-$_entryPackId'),
+            initialValue: _entryPackId ?? '',
+            decoration: const InputDecoration(
+              labelText: 'Purchased pack or measurement',
+            ),
+            isExpanded: true,
+            items: [
+              DropdownMenuItem(
+                value: '',
+                child: Text('Quantity in ${product.stockUnit}'),
+              ),
+              for (final pack in packs)
+                DropdownMenuItem(
+                  value: pack.packId!,
+                  child: Text(pack.packSize),
+                ),
+            ],
+            onChanged: widget.controller.state.captureBusy
+                ? null
+                : (value) =>
+                      setState(() => _entryPackId = value == '' ? null : value),
+          ),
+          Text(
+            'Stock is tracked in ${product.stockUnit}.${product.stockUnit == 'units' ? ' Selected packs are converted to the home product base pack when available.' : ''}',
+          ),
+        ],
         Row(
-          children: <Widget>[
+          children: [
             Expanded(
               child: TextField(
                 key: const Key('purchase-line-quantity'),
@@ -429,7 +694,11 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
                 ),
-                decoration: const InputDecoration(labelText: 'Quantity'),
+                decoration: InputDecoration(
+                  labelText: _entryPackId == null
+                      ? 'Purchased quantity (${product?.stockUnit ?? 'stock units'})'
+                      : 'Number of packs',
+                ),
               ),
             ),
             const SizedBox(width: 8),
@@ -449,31 +718,153 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
           key: const Key('purchase-line-unit-price'),
           controller: _unitPrice,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(labelText: 'Unit price (optional)'),
+          decoration: const InputDecoration(
+            labelText: 'Price per purchased unit (optional)',
+          ),
         ),
+        if (_entryPackId == null)
+          TextField(
+            key: const Key('purchase-line-pack'),
+            controller: _packText,
+            maxLength: 191,
+            decoration: const InputDecoration(
+              labelText: 'Packaging description (optional)',
+            ),
+          ),
         const SizedBox(height: 8),
         FilledButton.icon(
           key: const Key('purchase-add-line'),
-          onPressed: widget.controller.state.captureBusy ? null : _addLine,
-          icon: const Icon(Icons.add),
-          label: const Text('Add receipt line'),
-        ),
-        const SizedBox(height: 8),
-        if (!capture.reviewComplete)
-          const Text(
-            'Every line must be approved or intentionally left unresolved before commit.',
-            key: Key('purchase-review-required'),
-          ),
-        FilledButton(
-          key: const Key('purchase-commit-receipt'),
-          onPressed:
-              widget.controller.state.captureBusy || !capture.reviewComplete
+          onPressed: widget.controller.state.captureBusy || product == null
               ? null
-              : widget.controller.commitDraft,
-          child: const Text('Queue receipt commit'),
+              : _addPurchasedLine,
+          icon: const Icon(Icons.add),
+          label: const Text('Add purchase'),
+        ),
+        const Text(
+          'Add saves this purchase and increases stock immediately. Items remain grouped under this receipt.',
         ),
       ],
     );
+  }
+
+  Future<void> _addPurchasedLine() async {
+    final capture = widget.controller.state.capture;
+    if (capture == null || _entryProductId == null) return;
+    final candidates = widget.controller.state.matchCandidates;
+    final product = candidates.firstWhere(
+      (candidate) => candidate.homeProductId == _entryProductId,
+    );
+    final unitPrice = _parseMoney(_unitPrice.text, capture.currency);
+    final lineTotal = _parseMoney(_lineTotal.text, capture.currency);
+    if ((_unitPrice.text.trim().isNotEmpty && unitPrice == null) ||
+        (_lineTotal.text.trim().isNotEmpty && lineTotal == null) ||
+        (unitPrice == null && lineTotal == null)) {
+      widget.controller.reportCaptureValidation(
+        'Add a valid price or line total with at most two decimals.',
+      );
+      return;
+    }
+    String packText = _packText.text;
+    for (final candidate in candidates) {
+      if (_entryPackId != null && candidate.packId == _entryPackId) {
+        packText = candidate.packSize;
+      }
+    }
+    final saved = await widget.controller.addPurchasedLine(
+      homeProductId: product.homeProductId!,
+      packId: _entryPackId,
+      rawDescription: product.name,
+      quantityText: _quantity.text.trim(),
+      originalPackText: packText,
+      unitPrice: unitPrice,
+      lineTotal: lineTotal,
+    );
+    if (saved && mounted) {
+      _quantity.text = '1';
+      _productSearch.clear();
+      _unitPrice.clear();
+      _lineTotal.clear();
+      _packText.clear();
+      setState(() {
+        _entryProductId = null;
+        _entryPackId = null;
+      });
+      _productFocus.requestFocus();
+    }
+  }
+
+  Future<void> _addStore() async {
+    final name = TextEditingController();
+    final location = TextEditingController();
+    bool saving = false;
+    String? error;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Add store'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                key: const Key('purchase-new-store-name'),
+                controller: name,
+                maxLength: 191,
+                enabled: !saving,
+                decoration: const InputDecoration(labelText: 'Store name'),
+              ),
+              TextField(
+                controller: location,
+                maxLength: 191,
+                enabled: !saving,
+                decoration: const InputDecoration(
+                  labelText: 'Location (optional)',
+                ),
+              ),
+              if (error != null) Text(error!),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: saving ? null : () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              key: const Key('purchase-new-store-save'),
+              onPressed: saving
+                  ? null
+                  : () async {
+                      if (name.text.trim().isEmpty) {
+                        setDialogState(() => error = 'Enter a store name.');
+                        return;
+                      }
+                      setDialogState(() {
+                        saving = true;
+                        error = null;
+                      });
+                      final saved = await widget.controller.saveStore(
+                        name: name.text.trim(),
+                        location: location.text.trim(),
+                        archived: false,
+                      );
+                      if (!dialogContext.mounted) return;
+                      if (saved) {
+                        Navigator.pop(dialogContext);
+                      } else {
+                        setDialogState(() {
+                          saving = false;
+                          error = 'The store could not be saved. Try again.';
+                        });
+                      }
+                    },
+              child: const Text('Save store'),
+            ),
+          ],
+        ),
+      ),
+    );
+    name.dispose();
+    location.dispose();
   }
 
   Future<void> _editDraft(
@@ -512,7 +903,7 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
   Future<void> _cancelDraft(PurchaseReceiptCapture receipt) async {
     if (await _confirmRemoval(
           'Cancel draft?',
-          'This receipt will leave the draft workspace without recording purchases or changing stock.',
+          'This receipt will be cancelled. Purchases already added from this receipt will be reversed in stock; history is kept.',
         ) &&
         mounted) {
       await widget.controller.cancelDraft(receipt);
@@ -522,7 +913,9 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
   Future<void> _removeLine(PurchaseReceiptLineCapture line) async {
     if (await _confirmRemoval(
           'Remove line?',
-          'This line will be excluded from receipt approval and commit.',
+          line.stockApplied
+              ? 'This purchase will be removed and its quantity reversed in stock. History is kept.'
+              : 'This line will be excluded from receipt approval and commit.',
         ) &&
         mounted) {
       await widget.controller.removeLine(line);
@@ -543,16 +936,19 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
         leading: const Icon(Icons.check_circle_outline),
         title: Text(line.rawDescription),
         subtitle: Text(
-          'Approved: ${match?.name ?? 'Private home product'} · '
-          'revision ${line.revision}',
+          line.stockApplied
+              ? 'Stock added: ${line.stockQuantity} ${line.stockUnit ?? match?.stockUnit ?? 'stock units'} · ${line.synchronizationState == PurchaseSynchronizationState.pending ? 'synchronization pending' : 'synchronized'}'
+              : 'Approved: ${match?.name ?? 'Private home product'} · revision ${line.revision}${line.stockQuantityPerPack == null ? '' : ' · ${widget.controller.approvedStockPreview(line)}'}',
         ),
-        trailing: TextButton(
-          key: Key('purchase-leave-unresolved-${line.id}'),
-          onPressed: widget.controller.state.captureBusy
-              ? null
-              : () => widget.controller.leaveLineUnresolved(line.id),
-          child: const Text('Leave unresolved'),
-        ),
+        trailing: line.stockApplied
+            ? const Icon(Icons.check_circle_outline)
+            : TextButton(
+                key: Key('purchase-leave-unresolved-${line.id}'),
+                onPressed: widget.controller.state.captureBusy
+                    ? null
+                    : () => widget.controller.leaveLineUnresolved(line.id),
+                child: const Text('Leave unresolved'),
+              ),
       );
     }
     final ranked = widget.controller.rankedCandidatesFor(line);
@@ -573,6 +969,9 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
             Text(line.rawDescription),
+            Text(
+              'Bought quantity: ${line.quantityText ?? _quantityValue(line.quantity)} · ${line.originalPackText ?? "Unspecified packaging"}',
+            ),
             if (line.unresolved)
               Text(
                 'Intentionally unresolved · revision ${line.revision}. You may still approve it later.',
@@ -598,6 +997,8 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
                   )
                   .toList(growable: false),
               onChanged: (value) => setState(() {
+                _selectedReviewPacks.remove(line.id);
+                _reviewInStockUnits.remove(line.id);
                 if (value == null) {
                   _selectedProducts.remove(line.id);
                 } else {
@@ -615,6 +1016,65 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
                 key: Key('purchase-match-basis-${line.id}'),
               ),
             ],
+            if (widget.controller.canReviewPacks && selected != null) ...[
+              DropdownButtonFormField<String>(
+                key: ValueKey(
+                  'purchase-review-measurement-${line.id}-${selected.candidate.id}',
+                ),
+                initialValue:
+                    _reviewInStockUnits[line.id] == true ||
+                        selected.candidate.packStatus != 'published'
+                    ? ''
+                    : _selectedReviewPacks[line.id] ??
+                          selected.candidate.packId ??
+                          '',
+                decoration: const InputDecoration(
+                  labelText: 'Quantity refers to',
+                ),
+                isExpanded: true,
+                items: [
+                  DropdownMenuItem(
+                    value: '',
+                    child: Text(
+                      'Stock measurement (${widget.controller.reviewTargetForCandidate(selected.candidate).stockUnit})',
+                    ),
+                  ),
+                  for (final pack
+                      in widget.controller.state.matchCandidates.where(
+                        (candidate) =>
+                            candidate.productId != null &&
+                            candidate.productId ==
+                                selected!.candidate.productId &&
+                            candidate.packId != null &&
+                            candidate.packStatus == 'published',
+                      ))
+                    DropdownMenuItem(
+                      value: pack.packId!,
+                      child: Text('Packs: ${pack.packSize}'),
+                    ),
+                ],
+                onChanged: widget.controller.state.captureBusy
+                    ? null
+                    : (value) => setState(() {
+                        _reviewInStockUnits[line.id] = value == '';
+                        if (value != null && value != '') {
+                          _selectedReviewPacks[line.id] = value;
+                        }
+                      }),
+              ),
+              Text(
+                widget.controller.reviewedStockPreview(
+                  line: line,
+                  product: selected.candidate,
+                  packId:
+                      _selectedReviewPacks[line.id] ??
+                      (selected.candidate.packStatus == 'published'
+                          ? selected.candidate.packId
+                          : null),
+                  quantityInStockUnits: _reviewInStockUnits[line.id] == true,
+                ),
+              ),
+            ],
             const SizedBox(height: 8),
             FilledButton.tonal(
               key: Key('purchase-approve-line-${line.id}'),
@@ -625,8 +1085,19 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
                   : () => widget.controller.approveCandidate(
                       lineId: line.id,
                       candidateId: _selectedProducts[line.id]!,
+                      purchasedPackId: _selectedReviewPacks[line.id],
+                      quantityInStockUnits:
+                          _reviewInStockUnits[line.id] == true,
                     ),
-              child: Text(_matchActionLabel(selected?.candidate)),
+              child: Text(
+                _matchActionLabel(
+                  selected == null
+                      ? null
+                      : widget.controller.reviewTargetForCandidate(
+                          selected.candidate,
+                        ),
+                ),
+              ),
             ),
             const SizedBox(height: 8),
             OutlinedButton.icon(
@@ -872,6 +1343,8 @@ String _matchBasisLabel(PurchaseMatchBasis basis) => switch (basis) {
 
 String _money(Money money) =>
     '${money.currency} ${(money.minorUnits / 100).toStringAsFixed(2)}';
+
+String _quantityValue(double value) => _quantity(value);
 
 String _quantity(double value) =>
     value.toStringAsFixed(value == value.roundToDouble() ? 0 : 3);

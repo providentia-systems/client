@@ -134,7 +134,18 @@ void main() {
     });
 
     test('publishes only the API 2.2.0 homeowner operation registry', () {
-      expect(ProvidentiaApiClient.operations, hasLength(167));
+      expect(ProvidentiaApiClient.operations, hasLength(168));
+      expect(
+        ProvidentiaApiClient.operations['purchaseReceiptLine'],
+        isA<ApiOperation>()
+            .having((operation) => operation.method, 'method', 'POST')
+            .having(
+              (operation) => operation.pathTemplate,
+              'path',
+              '/api/v1/homes/{homeId}/receipts/{receiptId}/purchases',
+            )
+            .having((operation) => operation.multipart, 'multipart', false),
+      );
       expect(
         ProvidentiaApiClient.operations['createAiExtraction'],
         isA<ApiOperation>()
@@ -177,6 +188,7 @@ void main() {
           'listHomeStock',
           'cancelStockCountSession',
           'commitReceipt',
+          'purchaseReceiptLine',
           'unresolveReceiptLine',
           'createShoppingSuggestionRun',
           'getInventoryReport',

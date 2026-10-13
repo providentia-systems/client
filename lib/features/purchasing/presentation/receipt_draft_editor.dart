@@ -41,7 +41,7 @@ class _ReceiptDraftEditorState extends State<ReceiptDraftEditor> {
         : <String, String>{
             'description': line.rawDescription,
             'pack': line.originalPackText ?? '',
-            'quantity': line.quantity.toString(),
+            'quantity': line.quantityText ?? line.quantity.toString(),
             'unitPrice': _amount(line.unitPrice),
             'total': _amount(line.lineTotal),
           };
@@ -66,10 +66,12 @@ class _ReceiptDraftEditorState extends State<ReceiptDraftEditor> {
     String label, {
     int? maxLength,
     bool number = false,
+    bool readOnly = false,
   }) => TextField(
     key: Key('receipt-edit-$name'),
     controller: _fields[name],
     enabled: !_saving,
+    readOnly: readOnly,
     maxLength: maxLength,
     keyboardType: number
         ? const TextInputType.numberWithOptions(decimal: true)
@@ -113,8 +115,23 @@ class _ReceiptDraftEditorState extends State<ReceiptDraftEditor> {
                       ? null
                       : (value) => setState(() => _storeId = value),
                 ),
-                _field('date', 'Purchase date (YYYY-MM-DD)'),
-                _field('currency', 'Currency', maxLength: 3),
+                _field(
+                  'date',
+                  'Purchase date (YYYY-MM-DD)',
+                  readOnly:
+                      widget.receipt.status ==
+                          PurchaseReceiptStatus.committed ||
+                      widget.receipt.lines.any((line) => line.stockApplied),
+                ),
+                _field(
+                  'currency',
+                  'Currency',
+                  maxLength: 3,
+                  readOnly:
+                      widget.receipt.status ==
+                          PurchaseReceiptStatus.committed ||
+                      widget.receipt.lines.any((line) => line.stockApplied),
+                ),
                 _field('total', 'Receipt total (optional)', number: true),
                 _field('notes', 'Notes', maxLength: 2000),
               ] else ...[
@@ -123,8 +140,10 @@ class _ReceiptDraftEditorState extends State<ReceiptDraftEditor> {
                 _field('quantity', 'Quantity', number: true),
                 _field('unitPrice', 'Unit price (optional)', number: true),
                 _field('total', 'Line total (optional)', number: true),
-                const Text(
-                  'Review the edited line again before committing this receipt.',
+                Text(
+                  widget.line!.stockApplied
+                      ? 'Saving this correction adjusts stock by the difference. The selected product and pack stay the same.'
+                      : 'Review the edited line again before committing this receipt.',
                 ),
               ],
               if (_error != null)
@@ -196,6 +215,7 @@ class _ReceiptDraftEditorState extends State<ReceiptDraftEditor> {
           original: line,
           rawDescription: _fields['description']!.text,
           quantity: double.tryParse(_fields['quantity']!.text) ?? double.nan,
+          quantityText: _fields['quantity']!.text.trim(),
           originalPackText: _fields['pack']!.text,
           unitPrice: _money('unitPrice', widget.receipt.currency),
           lineTotal: _money('total', widget.receipt.currency),

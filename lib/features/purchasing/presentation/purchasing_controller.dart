@@ -7,6 +7,7 @@ import 'package:providentia/features/purchasing/application/purchase_draft_maint
 import 'package:providentia/features/purchasing/application/purchase_repository.dart';
 import 'package:providentia/features/purchasing/application/purchase_store_repository.dart';
 import 'package:providentia/features/purchasing/domain/purchase_models.dart';
+import 'package:providentia/features/purchasing/domain/purchase_quantity.dart';
 import 'package:providentia/features/purchasing/domain/purchase_services.dart';
 
 enum PurchaseView { recent, history }
@@ -73,6 +74,31 @@ final class PurchasingController extends ChangeNotifier {
   final String homeId;
   StreamSubscription<List<PurchaseLine>>? _subscription;
   StreamSubscription<PurchaseReceiptCapture?>? _captureSubscription;
+  StreamSubscription<List<PurchaseReceiptCapture>>? _receiptsSubscription;
+  List<PurchaseReceiptCapture> _receipts = const [];
+  String? _selectedReceiptId;
+  List<PurchaseReceiptCapture> get receipts => _receipts;
+  bool get canSelectReceipts =>
+      _repository is PurchaseReceiptSelectionRepository;
+  bool get canReviewPacks => _repository is PurchasePackReviewRepository;
+  bool get canQuickEntry =>
+      captureEnabled && _repository is PurchaseQuickEntryRepository;
+
+  void selectReceipt(String receiptId) {
+    _selectedReceiptId = receiptId;
+    for (final receipt in _receipts) {
+      if (receipt.id == receiptId) {
+        _receiveCapture(receipt);
+        return;
+      }
+    }
+  }
+
+  void startAnotherReceipt() {
+    _selectedReceiptId = '';
+    _receiveCapture(null);
+  }
+
   StreamSubscription<List<PurchaseMatchCandidate>>? _candidateSubscription;
   StreamSubscription<List<InventoryItem>>? _itemMasterSubscription;
   List<PurchaseMatchCandidate> _legacyMatchCandidates =
@@ -197,41 +223,45 @@ final class PurchasingController extends ChangeNotifier {
         );
     final captureRepository = _captureRepository;
     if (!captureEnabled || captureRepository == null) return;
-    _captureSubscription = captureRepository
-        .watchActiveReceiptCapture(homeId: homeId)
-        .listen(
-          (capture) {
-            if (capture != null && capture.homeId != homeId) {
-              _setCaptureError('Purchase capture access was rejected.');
-              return;
-            }
-            final confirmed =
-                _state.capture?.commitAwaitingReadback == true &&
-                capture == null;
-            if (confirmed) _lastSynchronizedReceiptId = _state.capture!.id;
-            _state = PurchasingState(
-              lines: _state.lines,
-              matchCandidates: _state.matchCandidates,
-              view: _state.view,
-              loading: _state.loading,
-              captureBusy: _state.captureBusy,
-              capture: capture,
-              captureNotice: confirmed
-                  ? 'The receipt commit is synchronized.'
-                  : capture?.commitConfirmed == true
-                  ? 'The server confirmed the receipt commit. Receipt details are refreshing.'
-                  : _state.captureNotice,
-              captureError: _captureReadFailed ? null : _state.captureError,
-              safeError: _state.safeError,
-            );
-            _captureReadFailed = false;
-            notifyListeners();
-          },
-          onError: (Object error) {
-            _captureReadFailed = true;
-            _setCaptureError(_captureSafeError(error));
-          },
-        );
+    if (_repository is PurchaseReceiptSelectionRepository) {
+      _receiptsSubscription =
+          (_repository as PurchaseReceiptSelectionRepository)
+              .watchReceiptCaptures(homeId: homeId)
+              .listen(
+                (receipts) {
+                  if (receipts.any((receipt) => receipt.homeId != homeId)) {
+                    _setCaptureError('Purchase capture access was rejected.');
+                    return;
+                  }
+                  _receipts = List.unmodifiable(receipts);
+                  PurchaseReceiptCapture? selected;
+                  for (final receipt in receipts) {
+                    if (receipt.id == _selectedReceiptId) selected = receipt;
+                  }
+                  selected ??= _selectedReceiptId == null && receipts.isNotEmpty
+                      ? receipts.first
+                      : null;
+                  if (_selectedReceiptId == null && selected != null) {
+                    _selectedReceiptId = selected.id;
+                  }
+                  _receiveCapture(selected);
+                },
+                onError: (Object error) {
+                  _captureReadFailed = true;
+                  _setCaptureError(_captureSafeError(error));
+                },
+              );
+    } else {
+      _captureSubscription = captureRepository
+          .watchActiveReceiptCapture(homeId: homeId)
+          .listen(
+            _receiveCapture,
+            onError: (Object error) {
+              _captureReadFailed = true;
+              _setCaptureError(_captureSafeError(error));
+            },
+          );
+    }
     _candidateSubscription = captureRepository
         .watchPurchaseMatchCandidates(homeId: homeId)
         .listen(
@@ -271,6 +301,38 @@ final class PurchasingController extends ChangeNotifier {
             },
           );
     }
+  }
+
+  void _receiveCapture(PurchaseReceiptCapture? capture) {
+    if (capture != null && capture.homeId != homeId) {
+      _setCaptureError('Purchase capture access was rejected.');
+      return;
+    }
+    final confirmed =
+        _state.capture?.commitAwaitingReadback == true &&
+        (capture == null ||
+            (capture.id == _state.capture!.id &&
+                capture.synchronizationState ==
+                    PurchaseSynchronizationState.synchronized));
+    if (confirmed) _lastSynchronizedReceiptId = _state.capture!.id;
+    _state = PurchasingState(
+      lines: _state.lines,
+      matchCandidates: _state.matchCandidates,
+      view: _state.view,
+      loading: _state.loading,
+      captureBusy: _state.captureBusy,
+      capture: capture,
+      captureNotice: confirmed
+          ? 'The receipt commit is synchronized.'
+          : capture?.commitConfirmed == true &&
+                capture?.commitAwaitingReadback == true
+          ? 'The server confirmed the receipt commit. Receipt details are refreshing.'
+          : _state.captureNotice,
+      captureError: _captureReadFailed ? null : _state.captureError,
+      safeError: _state.safeError,
+    );
+    _captureReadFailed = false;
+    notifyListeners();
   }
 
   void selectView(PurchaseView view) {
@@ -328,6 +390,7 @@ final class PurchasingController extends ChangeNotifier {
     required PurchaseReceiptLineCapture original,
     required String rawDescription,
     required double quantity,
+    String? quantityText,
     String? originalPackText,
     Money? unitPrice,
     Money? lineTotal,
@@ -344,13 +407,15 @@ final class PurchasingController extends ChangeNotifier {
           receiptId: original.receiptId,
           rawDescription: rawDescription,
           quantity: quantity,
+          quantityText: quantityText,
           originalPackText: originalPackText,
           unitPrice: unitPrice,
           lineTotal: lineTotal,
         ),
       ),
-      queuedNotice:
-          'Line changes are saved locally. Review the edited line before committing.',
+      queuedNotice: original.stockApplied
+          ? 'Purchase corrected. Stock is updated locally; synchronization is pending.'
+          : 'Line changes are saved locally. Review the edited line before committing.',
     );
   }
 
@@ -405,6 +470,7 @@ final class PurchasingController extends ChangeNotifier {
           sourceReference: sourceReference,
         ),
       ),
+      onResult: (result) => selectReceipt(result.entityId),
       queuedNotice:
           'The draft is saved locally and queued for synchronization.',
     );
@@ -435,6 +501,47 @@ final class PurchasingController extends ChangeNotifier {
       ),
       queuedNotice:
           'The receipt line is saved locally and queued for synchronization.',
+    );
+  }
+
+  Future<bool> addPurchasedLine({
+    required String homeProductId,
+    String? packId,
+    required String rawDescription,
+    required String quantityText,
+    String? originalPackText,
+    Money? unitPrice,
+    Money? lineTotal,
+  }) {
+    final receipt = _state.capture;
+    if (!canQuickEntry ||
+        receipt == null ||
+        receipt.status != PurchaseReceiptStatus.draft) {
+      return _rejectCapture('Start a receipt before adding purchases.');
+    }
+    if (!_state.matchCandidates.any(
+      (candidate) => candidate.homeProductId == homeProductId,
+    )) {
+      return _rejectCapture('Choose an existing product from this home.');
+    }
+    return _runCaptureMutation(
+      () =>
+          (_repository as PurchaseQuickEntryRepository).addPurchasedReceiptLine(
+            homeProductId: homeProductId,
+            packId: packId,
+            line: PurchaseReceiptLineRequest(
+              homeId: homeId,
+              receiptId: receipt.id,
+              rawDescription: rawDescription,
+              quantity: double.tryParse(quantityText) ?? double.nan,
+              quantityText: quantityText,
+              originalPackText: originalPackText,
+              unitPrice: unitPrice,
+              lineTotal: lineTotal,
+            ),
+          ),
+      queuedNotice:
+          'Purchase saved. Stock is updated locally; synchronization is pending.',
     );
   }
 
@@ -471,6 +578,8 @@ final class PurchasingController extends ChangeNotifier {
   Future<bool> approveCandidate({
     required String lineId,
     required String candidateId,
+    String? purchasedPackId,
+    bool quantityInStockUnits = false,
   }) async {
     final line = _captureLine(lineId);
     if (line == null) {
@@ -490,9 +599,25 @@ final class PurchasingController extends ChangeNotifier {
       );
     }
     final selectedCandidate = candidate;
-    final homeProductId = selectedCandidate.homeProductId;
+    final homeProductId = reviewTargetForCandidate(
+      selectedCandidate,
+    ).homeProductId;
     if (homeProductId != null) {
-      return approveLine(lineId: lineId, homeProductId: homeProductId);
+      return _runCaptureMutation(
+        () => _approveSelectedLine(
+          receiptId: _state.capture!.id,
+          lineId: lineId,
+          homeProductId: homeProductId,
+          packId: quantityInStockUnits
+              ? null
+              : purchasedPackId ??
+                    (selectedCandidate.packStatus == 'published'
+                        ? selectedCandidate.packId
+                        : null),
+        ),
+        queuedNotice:
+            'The reviewed product and quantity are saved locally; stock changes when the receipt is finished.',
+      );
     }
     return _createProductAndApprove(
       lineId: lineId,
@@ -513,6 +638,9 @@ final class PurchasingController extends ChangeNotifier {
       unavailableMessage:
           'Adding a published pack is unavailable in this workspace.',
       supported: canAddPublishedPack,
+      reviewedPackId: quantityInStockUnits
+          ? null
+          : purchasedPackId ?? selectedCandidate.packId,
     );
   }
 
@@ -606,6 +734,7 @@ final class PurchasingController extends ChangeNotifier {
     required Future<InventoryProductCreationResult> Function() create,
     required String unavailableMessage,
     required bool supported,
+    String? reviewedPackId,
   }) async {
     final capture = _state.capture;
     final line = _captureLine(lineId);
@@ -630,11 +759,11 @@ final class PurchasingController extends ChangeNotifier {
         homeProductId = result.homeProductId;
         _createdHomeProductIds[pendingKey] = homeProductId;
       }
-      final result = await _captureRepository!.approveReceiptLine(
-        homeId: homeId,
+      final result = await _approveSelectedLine(
         receiptId: capture.id,
         lineId: lineId,
         homeProductId: homeProductId,
+        packId: reviewedPackId,
       );
       _state = PurchasingState(
         lines: _state.lines,
@@ -665,6 +794,103 @@ final class PurchasingController extends ChangeNotifier {
     } catch (_) {
       _setCaptureError('The product match could not be saved safely.');
       return false;
+    }
+  }
+
+  Future<PurchaseMutationResult> _approveSelectedLine({
+    required String receiptId,
+    required String lineId,
+    required String homeProductId,
+    String? packId,
+  }) => canReviewPacks
+      ? (_repository as PurchasePackReviewRepository)
+            .approveReceiptLineWithPack(
+              homeId: homeId,
+              receiptId: receiptId,
+              lineId: lineId,
+              homeProductId: homeProductId,
+              packId: packId,
+            )
+      : _captureRepository!.approveReceiptLine(
+          homeId: homeId,
+          receiptId: receiptId,
+          lineId: lineId,
+          homeProductId: homeProductId,
+        );
+
+  PurchaseMatchCandidate reviewTargetForCandidate(
+    PurchaseMatchCandidate candidate,
+  ) {
+    if (!candidate.requiresHomeSelection || candidate.productId == null) {
+      return candidate;
+    }
+    final existing = _state.matchCandidates
+        .where(
+          (value) =>
+              value.homeProductId != null &&
+              value.productId == candidate.productId,
+        )
+        .toList();
+    return existing.length == 1 ? existing.single : candidate;
+  }
+
+  String approvedStockPreview(PurchaseReceiptLineCapture line) {
+    try {
+      final quantity = PurchaseQuantity.parse(
+        line.quantityText ??
+            line.quantity
+                .toStringAsFixed(8)
+                .replaceFirst(RegExp(r'\.?0+$'), ''),
+        positive: true,
+      );
+      final factor = PurchaseQuantity.parse(
+        line.stockQuantityPerPack ?? '1',
+        positive: true,
+      );
+      return 'On finish: +${quantity * factor} ${line.stockUnit ?? 'stock units'}';
+    } on ArgumentError {
+      return 'Review the quantity before finishing this receipt.';
+    }
+  }
+
+  String reviewedStockPreview({
+    required PurchaseReceiptLineCapture line,
+    required PurchaseMatchCandidate product,
+    String? packId,
+    bool quantityInStockUnits = false,
+  }) {
+    try {
+      final quantity = PurchaseQuantity.parse(
+        line.quantityText ??
+            line.quantity
+                .toStringAsFixed(8)
+                .replaceFirst(RegExp(r'\.?0+$'), ''),
+        positive: true,
+      );
+      final target = reviewTargetForCandidate(product);
+      final unit = target.requiresHomeSelection ? 'units' : target.stockUnit;
+      if (quantityInStockUnits || packId == null) {
+        return 'On finish: +$quantity $unit';
+      }
+      final selected = _state.matchCandidates
+          .where(
+            (candidate) =>
+                candidate.productId == product.productId &&
+                candidate.packId == packId,
+          )
+          .firstOrNull;
+      if (selected == null) return 'Choose a published pack.';
+      final factor = purchasePackConversionFactor(
+        stockUnit: unit,
+        selectedAmount: selected.normalizedBaseAmount,
+        selectedUnit: selected.normalizedBaseUnit,
+        baseAmount: target.normalizedBaseAmount,
+        baseUnit: target.normalizedBaseUnit,
+        selectedIsBasePack: target.packId == selected.packId,
+      );
+      return 'On finish: +${quantity * factor} $unit';
+    } on ArgumentError {
+      return 'Choose a compatible pack or use quantity in stock units.';
     }
   }
 
@@ -703,6 +929,10 @@ final class PurchasingController extends ChangeNotifier {
         productId: item.productId,
         packId: item.packId,
         brand: item.brand,
+        stockUnit: item.unit,
+        normalizedBaseAmount: item.normalizedBaseAmount,
+        normalizedBaseUnit: item.normalizedBaseUnit,
+        packStatus: item.packStatus,
         category: item.category,
         aliases: item.aliases,
       );
@@ -741,6 +971,7 @@ final class PurchasingController extends ChangeNotifier {
   Future<bool> _runCaptureMutation(
     Future<PurchaseMutationResult> Function() mutation, {
     required String queuedNotice,
+    void Function(PurchaseMutationResult)? onResult,
   }) async {
     if (!captureEnabled) {
       return _rejectCapture(
@@ -751,6 +982,7 @@ final class PurchasingController extends ChangeNotifier {
     _setCaptureBusy(true);
     try {
       final result = await mutation();
+      onResult?.call(result);
       _state = PurchasingState(
         lines: _state.lines,
         matchCandidates: _state.matchCandidates,
@@ -825,6 +1057,7 @@ final class PurchasingController extends ChangeNotifier {
     _storesSubscription?.cancel();
     unawaited(_subscription?.cancel());
     unawaited(_captureSubscription?.cancel());
+    unawaited(_receiptsSubscription?.cancel());
     unawaited(_candidateSubscription?.cancel());
     unawaited(_itemMasterSubscription?.cancel());
     super.dispose();

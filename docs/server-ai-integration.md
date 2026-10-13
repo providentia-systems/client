@@ -21,6 +21,17 @@ execution snapshot before calling any provider. A changed plan requires a new
 review and explicit consent; selecting a radio button does not change the active
 policy. Ordinary profile management remains separate from media transmission.
 
+**Purchases → Import photo or PDF** opens the receipt-specific import page.
+Receipt photo capture, gallery/file selection and PDF selection are visible in
+that workflow. Provider management is under **AI setup**; a disabled import
+explains the missing permission, provider, credential or household policy.
+Opening/rasterizing, sanitizing and extracting each show a progress message.
+Cancelling a replacement picker keeps the staged pages available. A failed
+replacement discards only its new bytes; reselecting an identical page does not
+wipe the current selection.
+Receipt import requires an online authorized session; manual purchases remain
+available offline.
+
 Receipt intake supports one to eight ordered photo pages or a locally
 rasterized PDF of up to eight pages. Raw PDF bytes are bounded, validated,
 never registered for transmission, and cleared after rendering. Before
@@ -30,8 +41,18 @@ sanitizer then bakes orientation, bounds dimensions, strips embedded metadata,
 re-encodes JPEG bytes, and computes the digest used for consent and transport.
 All ordered sanitized previews remain visible during proposal review.
 
+If extraction did not identify an item price, the final draft confirmation asks
+for its line total. A missing amount remains unknown until the person enters it;
+it is never silently changed to zero. The confirmed amounts remain fixed across
+response-loss retries.
+
 After receipt review, a second explicit confirmation may create an ordinary
-home-private receipt draft and unreviewed receipt lines. Matching remains a
+home-private receipt draft and unreviewed receipt lines. The imported draft is
+selected when returning to Purchases. Other pending receipts remain available
+and do not block this import; recovery locates its home-scoped extraction
+reference and stable operation identities so a retry does not duplicate it.
+Unavailable local receipt data blocks retry rather than assuming the previous
+import is absent. Matching remains a
 separate purchasing action. It searches the verified offline item master,
 including selected home products, unselected published packs, private rows,
 canonical names, brands, categories, packs, and approved aliases. The user may

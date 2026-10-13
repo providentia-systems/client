@@ -95,6 +95,7 @@ final class ReceiptPdfRasterizer {
     ReceiptPdfDocument? document;
     Uint8List? documentBytes;
     final created = <AiMediaAsset>[];
+    final previousSourceIds = _sources.registeredIds.toSet();
     MediaAcquisitionException? failure;
     try {
       if (homeId.trim().isEmpty) {
@@ -171,7 +172,7 @@ final class ReceiptPdfRasterizer {
     documentBytes?.fillRange(0, documentBytes.length, 0);
     bytes.fillRange(0, bytes.length, 0);
     if (failure case final error?) {
-      _remove(created);
+      _remove(created.where((asset) => !previousSourceIds.contains(asset.id)));
       throw error;
     }
     return List<AiMediaAsset>.unmodifiable(created);

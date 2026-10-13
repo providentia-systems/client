@@ -122,18 +122,108 @@ void main() {
     expect(controller.section, AppSection.stock);
     expect(notifications, 1);
   });
+
+  test(
+    'outbox updates retain refresh progress and the last refresh failure',
+    () async {
+      final gate = Completer<void>();
+      final synchronization = _FakeSynchronization(
+        connectivityGate: gate,
+        outcome: const SyncRunOutcome(
+          status: SyncRunStatus.retryableFailure,
+          safeMessage: 'The catalog could not be refreshed.',
+        ),
+      );
+      final controller = AppController(
+        synchronization: synchronization,
+        activeHomeId: 'home-1',
+      );
+      addTearDown(() async {
+        controller.dispose();
+        await synchronization.close();
+      });
+      final started = controller.start();
+      synchronization.summaries.add(const SyncSummary.initial());
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.syncSummary.isSynchronizing, isTrue);
+      gate.complete();
+      await started;
+      synchronization.summaries.add(const SyncSummary.initial());
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.syncSummary.isSynchronizing, isFalse);
+      expect(controller.syncSummary.lastSafeError, contains('catalog'));
+      expect(controller.syncSummary.lastSuccessfulSync, isNull);
+
+      synchronization.outcome = const SyncRunOutcome(
+        status: SyncRunStatus.completed,
+      );
+      await controller.refresh();
+      expect(controller.syncSummary.lastSafeError, isNull);
+      expect(controller.syncSummary.lastSuccessfulSync, isNotNull);
+    },
+  );
+
+  test(
+    'unexpected connectivity failure allows a later manual refresh',
+    () async {
+      final synchronization = _FakeSynchronization(
+        connectivityFailure: const FormatException(
+          'Invalid connectivity response',
+        ),
+      );
+      final controller = AppController(
+        synchronization: synchronization,
+        activeHomeId: 'home-1',
+      );
+      addTearDown(() async {
+        controller.dispose();
+        await synchronization.close();
+      });
+      await controller.refresh();
+      expect(controller.syncSummary.isSynchronizing, isFalse);
+      expect(
+        controller.syncSummary.availability,
+        SyncAvailability.temporarilyUnavailable,
+      );
+      expect(controller.syncSummary.lastSafeError, contains('interrupted'));
+      synchronization.connectivityFailure = null;
+      await controller.refresh();
+      expect(controller.syncSummary.lastSafeError, isNull);
+      expect(controller.syncSummary.lastSuccessfulSync, isNotNull);
+    },
+  );
+
+  test(
+    'leaving a home during refresh does not notify a disposed controller',
+    () async {
+      final gate = Completer<void>();
+      final synchronization = _FakeSynchronization(connectivityGate: gate);
+      final controller = AppController(
+        synchronization: synchronization,
+        activeHomeId: 'home-1',
+      );
+      final refreshing = controller.refresh();
+      controller.dispose();
+      gate.complete();
+      await refreshing;
+      expect(synchronization.synchronizeCalls, 0);
+      await synchronization.close();
+    },
+  );
 }
 
 final class _FakeSynchronization implements AppSynchronization {
   _FakeSynchronization({
     this.outcome = const SyncRunOutcome(status: SyncRunStatus.completed),
     this.connectivityGate,
+    this.connectivityFailure,
   });
 
-  final SyncRunOutcome outcome;
+  SyncRunOutcome outcome;
   final ConnectivityResult connectivityResult =
       const ConnectivityResult.online();
   final Completer<void>? connectivityGate;
+  Exception? connectivityFailure;
   final StreamController<SyncSummary> summaries =
       StreamController<SyncSummary>.broadcast();
   final List<String> watchedHomes = <String>[];
@@ -144,6 +234,7 @@ final class _FakeSynchronization implements AppSynchronization {
   Future<ConnectivityResult> connectivity() async {
     connectivityCalls++;
     await connectivityGate?.future;
+    if (connectivityFailure case final Exception failure) throw failure;
     return connectivityResult;
   }
 

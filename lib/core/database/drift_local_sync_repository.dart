@@ -61,6 +61,7 @@ final class DriftLocalSyncRepository
         'purchasing.receipt-line.remove': 'purchasing-receipt-line',
         'purchasing.receipt.create': 'purchasing-receipt',
         'purchasing.receipt-line.create': 'purchasing-receipt-line',
+        'purchasing.receipt-line.purchase': 'purchasing-receipt-line',
         'purchasing.receipt-line.approve': 'purchasing-receipt-line',
         'purchasing.receipt-line.unresolve': 'purchasing-receipt-line',
         'purchasing.receipt.commit': 'purchasing-receipt',
@@ -481,6 +482,17 @@ final class DriftLocalSyncRepository
           'received ${page.fromCursor}.',
         );
       }
+      final pendingPurchases =
+          await (_database.select(_database.clientOperations)..where(
+                (row) =>
+                    row.homeId.equals(homeId) &
+                    row.state.isIn(_unacknowledgedOperationStates),
+              ))
+              .get();
+      final purchaseAuxiliaryKeys = await _pendingPurchaseAuxiliaryKeys(
+        homeId,
+        pendingPurchases,
+      );
       for (final change in page.changes) {
         if (change.homeId != homeId) {
           throw StateError(
@@ -492,6 +504,25 @@ final class DriftLocalSyncRepository
           throw StateError(
             'Server change targeted a reserved local-only record type.',
           );
+        }
+        if (purchaseAuxiliaryKeys.contains(
+          '${change.entityType}\u0000${change.entityId}',
+        )) {
+          // Earlier accepted purchases may already be in this page while a
+          // later purchase or correction is still queued. Its local balance
+          // and parent receipt already contain that saved intent. Keep them
+          // until the final command's authoritative event, then replace the
+          // absolute server balance; never add the purchase a second time.
+          final optimistic =
+              await (_database.select(_database.localRecords)..where(
+                    (row) =>
+                        row.homeId.equals(homeId) &
+                        row.entityType.equals(change.entityType) &
+                        row.entityId.equals(change.entityId) &
+                        row.synchronizedAt.isNull(),
+                  ))
+                  .getSingleOrNull();
+          if (optimistic != null) continue;
         }
         final localIntent =
             await (_database.select(_database.clientOperations)..where(
@@ -728,6 +759,9 @@ final class DriftLocalSyncRepository
             (operation) => '${operation.entityType}\u0000${operation.entityId}',
           )
           .toSet();
+      intentKeys.addAll(
+        await _pendingPurchaseAuxiliaryKeys(homeId, protocolTwoIntent),
+      );
       for (final operation in protocolTwoIntent) {
         final payload = _decodePayload(operation.payload);
         if (operation.operationType == 'shopping.list-line.create' &&
@@ -744,6 +778,7 @@ final class DriftLocalSyncRepository
           'purchasing.receipt-line.update' ||
           'purchasing.receipt-line.remove' ||
           'purchasing.receipt-line.create' ||
+          'purchasing.receipt-line.purchase' ||
           'purchasing.receipt-line.approve' ||
           'purchasing.receipt-line.unresolve' => (
             entityType: 'purchasing-receipt',
@@ -928,6 +963,58 @@ final class DriftLocalSyncRepository
             ),
           );
     });
+  }
+
+  Future<Set<String>> _pendingPurchaseAuxiliaryKeys(
+    String homeId,
+    List<ClientOperation> operations,
+  ) async {
+    final keys = <String>{};
+    final purchases = operations.where(
+      (operation) => operation.operationType.startsWith('purchasing.receipt'),
+    );
+    if (purchases.isEmpty) return keys;
+    final lines =
+        await (_database.select(_database.localRecords)..where(
+              (row) =>
+                  row.homeId.equals(homeId) &
+                  row.entityType.equals('purchasing-receipt-line'),
+            ))
+            .get();
+    final linePayloads = {
+      for (final line in lines) line.entityId: _decodePayload(line.payload),
+    };
+    for (final operation in purchases) {
+      final payload = _decodePayload(operation.payload);
+      final command = operation.operationType;
+      if (command.startsWith('purchasing.receipt-line.')) {
+        final receiptId = payload['receiptId'];
+        if (receiptId is String) {
+          keys.add('purchasing-receipt\u0000$receiptId');
+        }
+        final line = linePayloads[operation.entityId];
+        if (command == 'purchasing.receipt-line.purchase' ||
+            ((command == 'purchasing.receipt-line.update' ||
+                    command == 'purchasing.receipt-line.remove') &&
+                line?['stockQuantity'] != null)) {
+          final productId = payload['homeProductId'] ?? line?['homeProductId'];
+          if (productId is String) {
+            keys.add('inventory-balance\u0000$productId');
+          }
+        }
+      } else if (command == 'purchasing.receipt.cancel' ||
+          command == 'purchasing.receipt.commit') {
+        for (final entry in linePayloads.entries) {
+          final line = entry.value;
+          final productId = line['homeProductId'];
+          if (line['receiptId'] == operation.entityId && productId is String) {
+            keys.add('inventory-balance\u0000$productId');
+            keys.add('purchasing-receipt-line\u0000${entry.key}');
+          }
+        }
+      }
+    }
+    return keys;
   }
 
   @override

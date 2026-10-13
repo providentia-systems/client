@@ -10,6 +10,47 @@ import 'package:providentia/features/ai_integration/infrastructure/sanitizing_im
 
 void main() {
   test(
+    'failed replacement PDF retains an identical previously staged page',
+    () async {
+      final sources = RegisteredMediaSourceReader();
+      final first = _page(20, 20, image.ColorRgb8(1, 2, 3));
+      final original = ReceiptPdfRasterizer(
+        sources: sources,
+        openDocument: (_) async =>
+            _FakePdfDocument(pages: <ReceiptPdfRenderedPage>[first]),
+      );
+      final pages = await original.rasterize(
+        bytes: _pdfBytes(),
+        homeId: 'home-1',
+        sourceName: 'original.pdf',
+      );
+      final replacement = ReceiptPdfRasterizer(
+        sources: sources,
+        openDocument: (_) async => _FakePdfDocument(
+          pages: <ReceiptPdfRenderedPage>[
+            first,
+            ReceiptPdfRenderedPage(
+              jpegBytes: Uint8List(1),
+              width: 20,
+              height: 20,
+            ),
+          ],
+        ),
+      );
+      await expectLater(
+        replacement.rasterize(
+          bytes: _pdfBytes(),
+          homeId: 'home-1',
+          sourceName: 'replacement.pdf',
+        ),
+        throwsA(isA<MediaAcquisitionException>()),
+      );
+      expect(sources.registeredIds, <String>{pages.single.id});
+      expect(await sources.read(pages.single), first.jpegBytes);
+    },
+  );
+
+  test(
     'rasterizes ordered PDF pages into editable sanitized receipt images',
     () async {
       final sources = RegisteredMediaSourceReader();
