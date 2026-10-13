@@ -414,6 +414,33 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
               icon: const Icon(Icons.edit_outlined),
               label: const Text('Edit receipt details'),
             ),
+          for (final line in capture.lines.where(
+            (line) => line.stockApplied,
+          )) ...[
+            _lineReview(context, line),
+            if (widget.controller.canMaintainDraft)
+              Wrap(
+                spacing: 8,
+                children: [
+                  TextButton.icon(
+                    key: Key('purchase-edit-line-${line.id}'),
+                    onPressed: widget.controller.state.captureBusy
+                        ? null
+                        : () => _editDraft(capture, line),
+                    icon: const Icon(Icons.edit_outlined),
+                    label: const Text('Edit line'),
+                  ),
+                  TextButton.icon(
+                    key: Key('purchase-remove-line-${line.id}'),
+                    onPressed: widget.controller.state.captureBusy
+                        ? null
+                        : () => _removeLine(line),
+                    icon: const Icon(Icons.remove_circle_outline),
+                    label: const Text('Remove line'),
+                  ),
+                ],
+              ),
+          ],
           if (pending) ...<Widget>[
             const SizedBox(height: 8),
             OutlinedButton(

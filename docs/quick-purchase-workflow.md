@@ -33,7 +33,13 @@ from the Purchases header. **Edit receipt** can correct store, notes and total
 while work is pending and after submission. Date and currency cannot change
 after stock has been applied. **Edit line** adjusts stock by the difference;
 **Remove line** reverses that purchase. Cancelling an open receipt reverses its
-applied lines and retains the server's immutable movement history. Corrections
+applied lines and retains the server's immutable movement history. Applied lines in finished receipts also expose Edit and Remove.
+Older approved lines use their original quantity with a factor of one only
+after both the receipt and line have been confirmed by authoritative readback.
+A locally pending older commit receives no inferred stock or confirmation;
+refresh its details before attempting a correction. Retrying corrections to a
+previously confirmed finished receipt synchronizes those corrections without
+creating another commit. Corrections
 that exceed available stock are rejected locally and on the server.
 
 **Finish receipt** closes the group. It applies approved imported lines which
