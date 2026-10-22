@@ -579,11 +579,11 @@ void main() {
       '1',
     );
     expect(
-      find.text(
-        'Purchase saved. Stock is updated locally; synchronization is pending.',
-      ),
+      find.text('Saved on this device; awaiting server confirmation.'),
       findsOneWidget,
     );
+    expect(find.text('Products entered: NAD 100.00'), findsOneWidget);
+    expect(find.textContaining('Stock added: 5 kg'), findsOneWidget);
     await tester.ensureVisible(
       find.byKey(const Key('purchase-import-receipt')),
     );

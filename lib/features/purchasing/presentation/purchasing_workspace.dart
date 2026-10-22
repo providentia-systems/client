@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:providentia/core/domain/household_product_lookup.dart';
 import 'package:providentia/core/presentation/place_management_dialog.dart';
 import 'package:providentia/core/presentation/quantity_field.dart';
-import 'package:providentia/core/domain/household_product_lookup.dart';
 import 'package:providentia/features/purchasing/domain/purchase_models.dart';
 import 'package:providentia/features/purchasing/domain/receipt_amounts.dart';
 import 'package:providentia/features/purchasing/presentation/purchasing_controller.dart';
@@ -251,7 +251,9 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
               'Capture receipt',
               style: Theme.of(context).textTheme.titleLarge,
             ),
-            if (state.captureNotice != null) ...<Widget>[
+            if (state.captureNotice != null &&
+                state.captureNotice !=
+                    controller.receiptSynchronizationNotice) ...<Widget>[
               const SizedBox(height: 8),
               Text(
                 state.captureNotice!,

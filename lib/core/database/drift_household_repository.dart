@@ -16,6 +16,7 @@ import 'package:providentia/features/purchasing/application/purchase_repository.
 import 'package:providentia/features/purchasing/application/purchase_store_repository.dart';
 import 'package:providentia/features/purchasing/domain/purchase_models.dart';
 import 'package:providentia/features/purchasing/domain/purchase_quantity.dart';
+import 'package:providentia/features/purchasing/domain/receipt_amounts.dart';
 import 'package:providentia/features/shopping/application/online_shopping_suggestion_repository.dart';
 import 'package:providentia/features/shopping/application/shopping_repository.dart';
 import 'package:providentia/features/shopping/domain/online_shopping_suggestion_models.dart';
@@ -3328,6 +3329,7 @@ final class DriftHouseholdRepository
       }
       final currency = _requiredString(receipt, 'currency');
       final lineTotal = _nullableString(payload['lineTotal']);
+      final unitPrice = _nullableString(payload['unitPrice']);
       final homeProductId = _nullableString(payload['homeProductId']);
       final storeId = _nullableString(receipt['storeId']);
       projected.add(
@@ -3349,7 +3351,15 @@ final class DriftHouseholdRepository
           canonicalItemId: homeProductId,
           canonicalName: homeProductId == null ? null : products[homeProductId],
           lineTotal: lineTotal == null
-              ? null
+              ? (unitPrice == null
+                    ? null
+                    : calculatePurchasedLineTotal(
+                        quantityText: _requiredString(payload, 'quantity'),
+                        unitPrice: Money(
+                          minorUnits: _moneyMinorUnits(unitPrice),
+                          currency: currency,
+                        ),
+                      ))
               : Money(
                   minorUnits: _moneyMinorUnits(lineTotal),
                   currency: currency,
@@ -3945,6 +3955,21 @@ final class DriftHouseholdRepository
         }
         final line = newLines.single;
         _validateNewShoppingLine(list, line);
+        if (line.origin == ShoppingLineOrigin.manual &&
+            line.homeProductId != null) {
+          final product = await _record(
+            homeId: list.homeId,
+            entityType: _homeProductType,
+            entityId: line.homeProductId!,
+          );
+          if (product == null ||
+              _validatedProjection(product, list.homeId)['status'] !=
+                  'active') {
+            throw StateError(
+              'Choose an active product from this home or add a custom item.',
+            );
+          }
+        }
         await _writeProjection(
           homeId: list.homeId,
           entityType: _serverShoppingLineType,

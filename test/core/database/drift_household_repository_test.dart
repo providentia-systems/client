@@ -1993,6 +1993,169 @@ void main() {
   );
 
   test(
+    'manual product identity survives restart and another-device readback',
+    () async {
+      var idIndex = 1;
+      repository = DriftHouseholdRepository(
+        database,
+        clock: () => now,
+        deviceId: _deviceId,
+        idGenerator: () => _fixtureUuid(4, idIndex++),
+      );
+      await _seedProjection(
+        database,
+        homeId: _homeId,
+        entityType: 'inventory-home-product',
+        entityId: _productId,
+        revision: 1,
+        payload: {'privateName': 'Rice', 'unit': 'kg', 'status': 'active'},
+      );
+      final empty = ShoppingList(
+        id: _listId,
+        homeId: _homeId,
+        name: 'Shopping list',
+        createdAt: now,
+      );
+      await repository.saveList(empty);
+      final list = await repository.watchActiveList(homeId: _homeId).first;
+      await repository.saveList(
+        list.add(
+          ShoppingListLine(
+            id: _shoppingLineId,
+            homeId: _homeId,
+            name: 'Rice',
+            quantity: 4,
+            origin: ShoppingLineOrigin.manual,
+            createdAt: now,
+            homeProductId: _productId,
+          ),
+        ),
+      );
+      final restarted = DriftHouseholdRepository(database, deviceId: _deviceId);
+      final saved = await restarted.watchActiveList(homeId: _homeId).first;
+      expect(saved.lines.single.homeProductId, _productId);
+      expect(saved.lines.single.origin, ShoppingLineOrigin.manual);
+      expect(saved.lines.single.suggestionId, isNull);
+      final operations = await database.select(database.clientOperations).get();
+      final command = operations.singleWhere(
+        (row) => row.operationType == 'shopping.list-line.create',
+      );
+      expect(
+        jsonDecode(command.payload),
+        containsPair('homeProductId', _productId),
+      );
+      final otherDevice = AppDatabase(NativeDatabase.memory());
+      addTearDown(otherDevice.close);
+      await DriftLocalSyncRepository(otherDevice).applyPullPage(
+        homeId: _homeId,
+        page: PullPage(
+          protocolVersion: 1,
+          fromCursor: null,
+          pageCursor: 'line',
+          highWaterCursor: 'line',
+          hasMore: false,
+          requestId: 'manual-shopping-readback',
+          changes: [
+            RemoteChange(
+              cursor: 'list',
+              homeId: _homeId,
+              entityType: 'shopping-list',
+              entityId: _listId,
+              kind: RemoteChangeKind.upsert,
+              revision: 2,
+              serverTimestamp: now,
+              payload: {'name': 'Shopping list', 'status': 'open'},
+            ),
+            RemoteChange(
+              cursor: 'line',
+              homeId: _homeId,
+              entityType: 'shopping-list-line',
+              entityId: _shoppingLineId,
+              kind: RemoteChangeKind.upsert,
+              revision: 1,
+              serverTimestamp: now,
+              payload: {
+                'listId': _listId,
+                'homeProductId': _productId,
+                'description': 'Rice',
+                'quantityToBuy': '4',
+                'source': 'manual',
+              },
+            ),
+          ],
+        ),
+      );
+      final downloaded = await DriftHouseholdRepository(
+        otherDevice,
+      ).watchActiveList(homeId: _homeId).first;
+      expect(downloaded.lines.single.homeProductId, _productId);
+      expect(downloaded.lines.single.origin, ShoppingLineOrigin.manual);
+      expect(downloaded.lines.single.quantity, 4);
+      expect(
+        await otherDevice.select(otherDevice.clientOperations).get(),
+        isEmpty,
+      );
+      expect(
+        (await database.select(database.localRecords).get()).where(
+          (row) => row.entityType == 'inventory-balance',
+        ),
+        isEmpty,
+      );
+    },
+  );
+
+  test(
+    'manual product from another home cannot enter projection or outbox',
+    () async {
+      var idIndex = 1;
+      repository = DriftHouseholdRepository(
+        database,
+        deviceId: _deviceId,
+        idGenerator: () => _fixtureUuid(4, idIndex++),
+      );
+      await _seedProjection(
+        database,
+        homeId: _otherHomeId,
+        entityType: 'inventory-home-product',
+        entityId: _productId,
+        revision: 1,
+        payload: {'privateName': 'Other home rice', 'status': 'active'},
+      );
+      final list = ShoppingList(
+        id: _listId,
+        homeId: _homeId,
+        name: 'Shopping list',
+        createdAt: now,
+      );
+      await repository.saveList(list);
+      await expectLater(
+        repository.saveList(
+          list.add(
+            ShoppingListLine(
+              id: _shoppingLineId,
+              homeId: _homeId,
+              name: 'Rice',
+              quantity: 1,
+              origin: ShoppingLineOrigin.manual,
+              createdAt: now,
+              homeProductId: _productId,
+            ),
+          ),
+        ),
+        throwsStateError,
+      );
+      expect(
+        (await repository.watchActiveList(homeId: _homeId).first).lines,
+        isEmpty,
+      );
+      expect(
+        await database.select(database.clientOperations).get(),
+        hasLength(1),
+      );
+    },
+  );
+
+  test(
     'suggestion add keeps three identities while queuing ordinary v2 line create',
     () async {
       var idIndex = 0;

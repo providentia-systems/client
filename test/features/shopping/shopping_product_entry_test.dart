@@ -247,7 +247,7 @@ class _Repository
 
   @override
   Stream<List<ShoppingList>> watchLists({required String homeId}) async* {
-    yield [current, if (other != null) other!];
+    yield [current, ?other];
     yield* updates.stream;
   }
 
@@ -261,7 +261,7 @@ class _Repository
   Future<void> saveList(ShoppingList list) async {
     if (failSave) throw StateError('Save failed');
     current = list;
-    updates.add([current, if (other != null) other!]);
+    updates.add([current, ?other]);
   }
 
   @override
