@@ -118,15 +118,16 @@ final class DriftLocalSyncRepository
               ? timestamp
               : a.operationId.compareTo(b.operationId);
         });
-      final safeErrors = orderedRows
+      final unresolvedRows = orderedRows
           .where(
             (row) =>
                 row.state != ClientOperationState.acknowledged.storageValue &&
                 row.state != ClientOperationState.superseded.storageValue,
           )
-          .where((row) => row.lastSafeError != null)
-          .map((row) => row.lastSafeError)
           .toList(growable: false);
+      final firstUnresolved = unresolvedRows.isEmpty
+          ? null
+          : unresolvedRows.first;
 
       return SyncSummary(
         pending: count(ClientOperationState.pending),
@@ -138,7 +139,17 @@ final class DriftLocalSyncRepository
         acknowledged: count(ClientOperationState.acknowledged),
         availability: SyncAvailability.checking,
         isSynchronizing: count(ClientOperationState.syncing) > 0,
-        lastSafeError: safeErrors.isEmpty ? null : safeErrors.first,
+        // Diagnostics describe the queue barrier, never a later command that
+        // cannot run yet. No payload, product name or household ID is exposed.
+        lastSafeError: firstUnresolved?.lastSafeError,
+        failureCode: sanitizedSyncFailureCode(firstUnresolved?.safeFailureCode),
+        blockedOperationType:
+            _protocolTwoProjectionByCommand.containsKey(
+              firstUnresolved?.operationType,
+            )
+            ? firstUnresolved!.operationType
+            : null,
+        nextRetryAt: firstUnresolved?.nextAttemptAt,
       );
     });
   }

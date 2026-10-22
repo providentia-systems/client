@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:providentia/core/database/app_database.dart';
 import 'package:providentia/core/database/drift_household_repository.dart';
 import 'package:providentia/features/purchasing/domain/purchase_models.dart';
+import 'package:providentia/features/purchasing/domain/receipt_amounts.dart';
 import 'package:providentia/features/purchasing/presentation/purchasing_controller.dart';
 import 'package:providentia/features/purchasing/presentation/receipt_draft_editor.dart';
 
@@ -51,6 +52,65 @@ void main() {
     );
     return (await repository.watchActiveReceiptCapture(homeId: _home).first)!;
   }
+
+  test(
+    'unit-price-only totals survive restart and commit without stock effects',
+    () async {
+      final draft = await repository.createReceiptDraft(
+        PurchaseReceiptDraftRequest(
+          homeId: _home,
+          purchaseDate: at,
+          currency: 'NAD',
+          total: Money(minorUnits: 85000, currency: 'NAD'),
+        ),
+      );
+      final line = await repository.addReceiptLine(
+        PurchaseReceiptLineRequest(
+          homeId: _home,
+          receiptId: draft.entityId,
+          rawDescription: 'Four rice packs',
+          quantity: 4,
+          quantityText: '4',
+          originalPackText: '1 kg',
+          unitPrice: Money(minorUnits: 3250, currency: 'NAD'),
+        ),
+      );
+      await repository.markReceiptLineUnresolved(
+        homeId: _home,
+        receiptId: draft.entityId,
+        lineId: line.entityId,
+      );
+      final restarted = DriftHouseholdRepository(database, deviceId: _device);
+      final capture = (await restarted
+          .watchActiveReceiptCapture(homeId: _home)
+          .first)!;
+      expect(capture.lines.single.quantityText, '4');
+      expect(capture.lines.single.lineTotal, isNull);
+      final totals = ReceiptAmounts.fromReceipt(capture);
+      expect(totals.knownTotal.minorUnits, 13000);
+      expect(totals.difference!.minorUnits, 72000);
+      expect(totals.isComplete, isTrue);
+      await restarted.commitReceipt(homeId: _home, receiptId: draft.entityId);
+      final history = await restarted.watchPurchaseLines(homeId: _home).first;
+      expect(history.single.lineTotal!.minorUnits, 13000);
+      final records = await database.select(database.localRecords).get();
+      expect(
+        records.where((row) => row.entityType == 'inventory-balance'),
+        isEmpty,
+      );
+      final operations = await database.select(database.clientOperations).get();
+      final savedLine = operations.singleWhere(
+        (row) => row.operationType == 'purchasing.receipt-line.create',
+      );
+      expect((jsonDecode(savedLine.payload) as Map)['lineTotal'], isNull);
+      expect(
+        operations.where(
+          (row) => row.operationType == 'purchasing.receipt.commit',
+        ),
+        hasLength(1),
+      );
+    },
+  );
 
   test(
     'draft edits retain identity and source, reset review, and persist ordered revision-bound commands',
@@ -334,6 +394,131 @@ void main() {
       expect(edited.rawDescription, 'Edited rice');
       expect(edited.quantity, 3);
       expect(edited.approvalStatus, PurchaseLineApprovalStatus.unreviewed);
+    },
+  );
+  testWidgets(
+    'invalid quantity remains visible and focused beside sticky save feedback',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(480, 640));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final capture = (await tester.runAsync(draftWithLine))!;
+      final controller = PurchasingController(
+        repository: repository,
+        homeId: _home,
+        mayWrite: true,
+      );
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ReceiptDraftEditor(
+              controller: controller,
+              receipt: capture,
+              line: capture.lines.single,
+            ),
+          ),
+        ),
+      );
+      await tester.enterText(
+        find.byKey(const Key('receipt-edit-quantity')),
+        '0',
+      );
+      await tester.tap(find.byKey(const Key('receipt-edit-save')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('receipt-edit-error')), findsOneWidget);
+      expect(
+        find.text('Correct the highlighted field. Nothing was saved.'),
+        findsOneWidget,
+      );
+      final quantityInput = tester.widget<TextField>(
+        find.descendant(
+          of: find.byKey(const Key('receipt-edit-quantity')),
+          matching: find.byType(TextField),
+        ),
+      );
+      expect(quantityInput.controller!.text, '0');
+      expect(quantityInput.focusNode!.hasFocus, isTrue);
+      final saved = (await tester.runAsync(
+        () => repository.watchActiveReceiptCapture(homeId: _home).first,
+      ))!;
+      expect(saved.lines.single.quantity, 1);
+    },
+  );
+
+  testWidgets(
+    'stale edit preserves entries and reviews latest values without overwriting',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(700, 1000));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final opened = (await tester.runAsync(draftWithLine))!;
+      await tester.runAsync(
+        () => repository.updateReceiptDraftLine(
+          lineId: opened.lines.single.id,
+          expectedRevision: opened.lines.single.revision,
+          line: PurchaseReceiptLineRequest(
+            homeId: _home,
+            receiptId: opened.id,
+            rawDescription: 'Latest saved rice',
+            quantity: 2,
+            lineTotal: Money(minorUnits: 2000, currency: 'NAD'),
+          ),
+        ),
+      );
+      final controller = PurchasingController(
+        repository: repository,
+        homeId: _home,
+        mayWrite: true,
+      );
+      addTearDown(controller.dispose);
+      controller.start();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ReceiptDraftEditor(
+              controller: controller,
+              receipt: opened,
+              line: opened.lines.single,
+            ),
+          ),
+        ),
+      );
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      await tester.pump();
+      await tester.enterText(
+        find.byKey(const Key('receipt-edit-description')),
+        'My retained rice',
+      );
+      await tester.runAsync(() async {
+        await tester.tap(find.byKey(const Key('receipt-edit-save')));
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      });
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('receipt-edit-error')), findsOneWidget);
+      expect(
+        find.text(
+          'Your entries are retained. Nothing will be overwritten automatically.',
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const Key('receipt-edit-review-current')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Latest saved rice'), findsOneWidget);
+      await tester.tap(find.text('Return to my entries'));
+      await tester.pumpAndSettle();
+      final description = tester.widget<TextField>(
+        find.descendant(
+          of: find.byKey(const Key('receipt-edit-description')),
+          matching: find.byType(TextField),
+        ),
+      );
+      expect(description.controller!.text, 'My retained rice');
+      final saved = (await tester.runAsync(
+        () => repository.watchActiveReceiptCapture(homeId: _home).first,
+      ))!;
+      expect(saved.lines.single.rawDescription, 'Latest saved rice');
+      expect(saved.lines.single.quantity, 2);
     },
   );
 }

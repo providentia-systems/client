@@ -96,6 +96,9 @@ void main() {
       isSynchronizing: true,
       lastSuccessfulSync: synchronizedAt,
       lastSafeError: 'Offline.',
+      failureCode: 'device_binding_mismatch',
+      blockedOperationType: 'purchasing.receipt.create',
+      nextRetryAt: synchronizedAt.add(const Duration(minutes: 1)),
     );
 
     final cleared = summary.copyWith(
@@ -108,6 +111,85 @@ void main() {
     expect(cleared.lastSafeError, isNull);
     expect(cleared.lastSuccessfulSync, synchronizedAt);
     expect(cleared.acknowledged, 4);
+    expect(cleared.failureCode, 'device_binding_mismatch');
+    expect(cleared.blockedOperationType, 'purchasing.receipt.create');
+    expect(cleared.nextRetryAt, synchronizedAt.add(const Duration(minutes: 1)));
+    expect(cleared.waitingBehindFirst, 8);
+    final resolved = cleared.copyWith(clearDiagnostics: true);
+    expect(resolved.failureCode, isNull);
+    expect(resolved.blockedOperationType, isNull);
+    expect(resolved.nextRetryAt, isNull);
+    expect(const SyncSummary.initial().waitingBehindFirst, 0);
+  });
+
+  test('failure diagnostics use allowlisted codes rather than prose', () {
+    expect(
+      sanitizedSyncFailureCode('device_binding_mismatch'),
+      'device_binding_mismatch',
+    );
+    expect(
+      sanitizedSyncFailureCode('authentication_required'),
+      'authentication_required',
+    );
+    expect(
+      sanitizedSyncFailureCode('network_unavailable'),
+      'network_unavailable',
+    );
+    expect(
+      sanitizedSyncFailureCode('Access to this home changed'),
+      'unclassified_failure',
+    );
+    expect(sanitizedSyncFailureCode(null), isNull);
+  });
+
+  test('recovery headings never infer home denial from a binding block', () {
+    expect(
+      syncFailureHeading('device_binding_mismatch'),
+      'Review this device and session',
+    );
+    expect(
+      syncFailureHeading('account_binding_mismatch'),
+      'Use the original account',
+    );
+    expect(
+      syncFailureHeading('origin_account_unknown'),
+      'Review saved-operation provenance',
+    );
+    expect(
+      syncFailureHeading('home_access_denied'),
+      'Access to this home changed',
+    );
+    expect(
+      syncFailureHeading('unclassified_http_denial'),
+      'Review synchronization',
+    );
+    expect(
+      syncRecoveryInstruction('device_binding_mismatch'),
+      contains('Saved operations are preserved'),
+    );
+    expect(syncRecoveryInstruction('revision_conflict'), contains('compare'));
+    expect(syncRecoveryInstruction(null), contains('queue is preserved'));
+  });
+
+  test('operation labels expose only known human-readable actions', () {
+    expect(syncOperationLabel('purchasing.receipt.commit'), 'Finish receipt');
+    expect(
+      syncOperationLabel('purchasing.receipt-line.purchase'),
+      'Save purchased receipt line',
+    );
+    expect(
+      syncOperationLabel('shopping.list-line.create'),
+      'Add shopping item',
+    );
+    expect(
+      syncOperationLabel('inventory.count-session.close'),
+      'Finish stock count',
+    );
+    expect(
+      syncOperationLabel('private receipt description'),
+      'Household change',
+    );
+    expect(syncOperationLabel(null), 'Household change');
   });
 
   test('connectivity result constructors expose truthful states', () {

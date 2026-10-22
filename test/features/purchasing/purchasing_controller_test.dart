@@ -2,12 +2,144 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:providentia/core/synchronization/sync_models.dart';
 import 'package:providentia/features/purchasing/application/purchase_repository.dart';
 import 'package:providentia/features/purchasing/domain/purchase_models.dart';
 import 'package:providentia/features/purchasing/presentation/purchasing_controller.dart';
 import 'package:providentia/features/purchasing/presentation/purchasing_workspace.dart';
 
 void main() {
+  test(
+    'receipt retry awaits the actual attempt and never resubmits a commit',
+    () async {
+      final repository = _CaptureRepository();
+      final gate = Completer<SyncSummary>();
+      var attempts = 0;
+      final controller = PurchasingController(
+        repository: repository,
+        homeId: 'home-a',
+        mayWrite: true,
+        synchronize: () {
+          attempts++;
+          return gate.future;
+        },
+      );
+      controller.start();
+      repository._captures.add(
+        PurchaseReceiptCapture(
+          id: 'receipt-a',
+          homeId: 'home-a',
+          purchaseDate: DateTime.utc(2026, 10, 20),
+          currency: 'NAD',
+          notes: '',
+          revision: 2,
+          status: PurchaseReceiptStatus.committed,
+          synchronizationState: PurchaseSynchronizationState.pending,
+          lines: const [],
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+      final first = controller.retrySynchronization();
+      final duplicate = controller.retrySynchronization();
+      expect(controller.synchronizationBusy, isTrue);
+      expect(
+        controller.receiptSynchronizationNotice,
+        contains('Synchronizing'),
+      );
+      expect(attempts, 1);
+      gate.complete(
+        const SyncSummary.initial().copyWith(
+          pending: 71,
+          blockedAuthorization: 1,
+          failureCode: 'device_binding_mismatch',
+          blockedOperationType: 'purchasing.receipt.create',
+          lastSafeError:
+              'The synchronization device does not match the session.',
+        ),
+      );
+      await Future.wait([first, duplicate]);
+      expect(controller.synchronizationBusy, isFalse);
+      expect(
+        controller.receiptSynchronizationNotice,
+        contains('72 saved operations'),
+      );
+      expect(
+        controller.receiptSynchronizationNotice,
+        contains('First blocker'),
+      );
+      expect(controller.receiptSynchronizationNotice, contains('device'));
+      expect(
+        controller.receiptSynchronizationNotice,
+        isNot(contains('Access to this home changed')),
+      );
+      expect(repository.commitCalls, 0);
+      controller.startAnotherReceipt();
+      expect(controller.state.captureNotice, isNull);
+      expect(controller.receiptSynchronizationNotice, isNull);
+      controller.dispose();
+      await repository.close();
+    },
+  );
+
+  test(
+    'a failed retry preserves receipt state and reports its actual outcome',
+    () async {
+      final repository = _CaptureRepository();
+      final controller = PurchasingController(
+        repository: repository,
+        homeId: 'home-a',
+        mayWrite: true,
+        synchronize: () async =>
+            throw const FormatException('transport details'),
+      );
+      controller.start();
+      await controller.createDraft(
+        purchaseDate: DateTime.utc(2026, 10, 20),
+        currency: 'NAD',
+      );
+      await Future<void>.delayed(Duration.zero);
+      await controller.retrySynchronization();
+      expect(controller.synchronizationBusy, isFalse);
+      expect(controller.state.capture!.id, 'receipt-a');
+      expect(controller.receiptSynchronizationNotice, contains('interrupted'));
+      expect(
+        controller.receiptSynchronizationNotice,
+        isNot(contains('transport details')),
+      );
+      expect(repository.commitCalls, 0);
+      controller.dispose();
+      await repository.close();
+    },
+  );
+
+  test(
+    'leaving the receipt during a delayed retry does not inherit its notice',
+    () async {
+      final repository = _CaptureRepository();
+      final gate = Completer<SyncSummary>();
+      final controller = PurchasingController(
+        repository: repository,
+        homeId: 'home-a',
+        mayWrite: true,
+        synchronize: () => gate.future,
+      );
+      controller.start();
+      await controller.createDraft(
+        purchaseDate: DateTime.utc(2026, 10, 20),
+        currency: 'NAD',
+      );
+      await Future<void>.delayed(Duration.zero);
+      final attempt = controller.retrySynchronization();
+      controller.startAnotherReceipt();
+      gate.complete(const SyncSummary.initial());
+      await attempt;
+      expect(controller.state.capture, isNull);
+      expect(controller.state.captureNotice, isNull);
+      controller.dispose();
+      await repository.close();
+    },
+  );
+
   testWidgets(
     'purchasing workspace switches from receipts to monthly history',
     (tester) async {
@@ -82,10 +214,15 @@ void main() {
       await tester.binding.setSurfaceSize(const Size(1000, 1800));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       final repository = _CaptureRepository();
+      var synchronizationAttempts = 0;
       final controller = PurchasingController(
         repository: repository,
         homeId: 'home-a',
         mayWrite: true,
+        synchronize: () async {
+          synchronizationAttempts++;
+          return const SyncSummary.initial().copyWith(pending: 1);
+        },
       );
       addTearDown(() async {
         controller.dispose();
@@ -254,7 +391,8 @@ void main() {
 
       await tester.tap(find.byKey(const Key('purchase-retry-commit')));
       await tester.pumpAndSettle();
-      expect(repository.commitCalls, 2);
+      expect(repository.commitCalls, 1);
+      expect(synchronizationAttempts, 1);
       repository.synchronizeCommit();
       await tester.pumpAndSettle();
       expect(find.text('Commit synchronized.'), findsOneWidget);
@@ -325,7 +463,7 @@ void main() {
       await tester.pump();
 
       expect(find.text('3 receipt groups'), findsOneWidget);
-      expect(find.text('NAD 33.99'), findsOneWidget);
+      expect(find.textContaining('NAD 33.99'), findsOneWidget);
       expect(find.text('Receipt pending synchronization'), findsOneWidget);
       expect(find.text('Receipt'), findsOneWidget);
       expect(find.text('Legacy date/store grouping'), findsOneWidget);
@@ -477,10 +615,7 @@ void main() {
       );
       repository._captures.add(null);
       await tester.pump();
-      expect(
-        controller.state.captureNotice,
-        'The receipt commit is synchronized.',
-      );
+      expect(controller.state.captureNotice, isNull);
       controller.dispose();
       await repository.close();
     },

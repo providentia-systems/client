@@ -47,6 +47,7 @@ void main() {
       expect(first.completed, isFalse);
       expect(first.pullCompleted, isTrue);
       expect(first.remainingUploads, 1);
+      expect(first.failureCode, 'device_binding_mismatch');
       final saved = await database
           .select(database.clientOperations)
           .getSingle();
@@ -62,6 +63,7 @@ void main() {
       final second = await coordinator.synchronize('home-1');
       expect(second.status, SyncRunStatus.uploadsBlocked);
       expect(second.pullCompleted, isTrue);
+      expect(second.failureCode, 'device_binding_mismatch');
       expect(remote.pushedOperationIds, isEmpty);
     },
   );
@@ -92,8 +94,36 @@ void main() {
       expect(result.pullCompleted, isTrue);
       expect(result.remainingUploads, 1);
       expect(result.safeMessage, contains('referenced record'));
+      expect(result.failureCode, 'resource_unavailable');
     },
   );
+
+  test('download failure retains a typed durable binding blocker', () async {
+    await local.commitLocalMutation(_mutation());
+    final remote = _FakeGateway(
+      pushHandler: (_, _) async =>
+          throw StateError('Mismatched binding must not upload.'),
+      bootstrapHandler: (_) async =>
+          throw const RetryableSyncException('Download unavailable.'),
+    );
+    final coordinator = SyncCoordinator(
+      local: local,
+      remote: SessionBoundSyncGateway(
+        delegate: remote,
+        homeId: 'home-1',
+        deviceId: 'different-session-device',
+        isCurrent: () => true,
+      ),
+      connectivity: const _OnlineProbe(),
+      clock: () => now,
+    );
+    final result = await coordinator.synchronize('home-1');
+    expect(result.status, SyncRunStatus.retryableFailure);
+    expect(result.failureCode, 'device_binding_mismatch');
+    expect(result.remainingUploads, 1);
+    expect(result.pullCompleted, isFalse);
+    expect(remote.pushedOperationIds, isEmpty);
+  });
 
   for (final failure in <Exception>[
     const FormatException('Malformed successful response.'),
