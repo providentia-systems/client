@@ -778,7 +778,7 @@ class _SyncStatusCard extends StatelessWidget {
                         ),
                         const SizedBox(height: 2),
                         Text(detail),
-                        if (summary.unresolved > 0)
+                        if (summary.blocked > 0)
                           Text(
                             '${summary.unresolved} saved operations unresolved: '
                             '${summary.blocked} blocked, ${summary.waiting} waiting.',

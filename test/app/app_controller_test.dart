@@ -139,6 +139,31 @@ void main() {
     expect(controller.syncSummary.isSynchronizing, isFalse);
   });
 
+  test(
+    'an interrupted durable syncing row is not an active network attempt',
+    () async {
+      final synchronization = _FakeSynchronization(
+        connectivityResult: const ConnectivityResult.offline(),
+      );
+      final controller = AppController(
+        synchronization: synchronization,
+        activeHomeId: 'home-1',
+      );
+      addTearDown(() async {
+        controller.dispose();
+        await synchronization.close();
+      });
+      await controller.start();
+      synchronization.summaries.add(
+        const SyncSummary.initial().copyWith(syncing: 1, isSynchronizing: true),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.syncSummary.isSynchronizing, isFalse);
+      expect(controller.syncSummary.availability, SyncAvailability.offline);
+      expect(controller.syncSummary.unresolved, 1);
+    },
+  );
+
   test('section changes notify only when the value changes', () {
     final controller = AppController.preview();
     addTearDown(controller.dispose);
@@ -197,9 +222,7 @@ void main() {
     'unexpected connectivity failure allows a later manual refresh',
     () async {
       final synchronization = _FakeSynchronization(
-        connectivityFailure: const FormatException(
-          'Invalid connectivity response',
-        ),
+        connectivityFailure: StateError('Invalid connectivity response'),
       );
       final controller = AppController(
         synchronization: synchronization,
@@ -248,13 +271,13 @@ final class _FakeSynchronization implements AppSynchronization {
     this.connectivityGate,
     this.connectivityFailure,
     this.synchronizeGate,
+    this.connectivityResult = const ConnectivityResult.online(),
   });
 
   SyncRunOutcome outcome;
-  final ConnectivityResult connectivityResult =
-      const ConnectivityResult.online();
+  final ConnectivityResult connectivityResult;
   final Completer<void>? connectivityGate;
-  Exception? connectivityFailure;
+  Object? connectivityFailure;
   final StreamController<SyncSummary> summaries =
       StreamController<SyncSummary>.broadcast();
   final List<String> watchedHomes = <String>[];
@@ -268,7 +291,7 @@ final class _FakeSynchronization implements AppSynchronization {
   Future<ConnectivityResult> connectivity() async {
     connectivityCalls++;
     await connectivityGate?.future;
-    if (connectivityFailure case final Exception failure) throw failure;
+    if (connectivityFailure case final Object failure) throw failure;
     return connectivityResult;
   }
 

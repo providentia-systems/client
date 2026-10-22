@@ -463,7 +463,10 @@ void main() {
       await tester.pump();
 
       expect(find.text('3 receipt groups'), findsOneWidget);
-      expect(find.textContaining('NAD 33.99'), findsOneWidget);
+      expect(
+        find.text('Incomplete prices or mixed currencies'),
+        findsOneWidget,
+      );
       expect(find.text('Receipt pending synchronization'), findsOneWidget);
       expect(find.text('Receipt'), findsOneWidget);
       expect(find.text('Legacy date/store grouping'), findsOneWidget);
@@ -494,7 +497,10 @@ void main() {
         ),
       ]);
       await tester.pumpAndSettle();
-      expect(find.text('Incomplete prices'), findsOneWidget);
+      expect(
+        find.text('Incomplete prices or mixed currencies'),
+        findsOneWidget,
+      );
     },
   );
 
