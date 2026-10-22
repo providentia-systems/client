@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:providentia/core/security/uuid_v4.dart';
+import 'package:providentia/features/inventory/application/inventory_repository.dart';
+import 'package:providentia/features/inventory/domain/inventory_models.dart';
 import 'package:providentia/features/shopping/application/online_shopping_suggestion_repository.dart';
 import 'package:providentia/features/shopping/application/shopping_interaction_capabilities.dart';
 import 'package:providentia/features/shopping/application/shopping_repository.dart';
@@ -36,6 +38,7 @@ final class ShoppingController extends ChangeNotifier {
   factory ShoppingController({
     required ShoppingRepository repository,
     required String homeId,
+    InventoryRepository? itemMasterRepository,
     DateTime Function()? clock,
     String Function()? idGenerator,
     OnlineShoppingSuggestionRepository? suggestionRepository,
@@ -57,6 +60,7 @@ final class ShoppingController extends ChangeNotifier {
       suggestionRepository,
       capabilities,
       onAuthorizationDenied,
+      itemMasterRepository,
     );
   }
 
@@ -68,9 +72,16 @@ final class ShoppingController extends ChangeNotifier {
     this._suggestionRepository,
     this.capabilities,
     this._onAuthorizationDenied,
+    this._itemMasterRepository,
   );
 
   final ShoppingRepository _repository;
+  final InventoryRepository? _itemMasterRepository;
+  StreamSubscription<List<InventoryItem>>? _itemsSubscription;
+  List<InventoryItem> _items = const <InventoryItem>[];
+  List<InventoryItem> get items => _items;
+  bool _manualBusy = false;
+  bool get manualBusy => _manualBusy;
   final String homeId;
   final DateTime Function() _clock;
   final String Function() _idGenerator;
@@ -96,6 +107,23 @@ final class ShoppingController extends ChangeNotifier {
 
   void start() {
     if (_subscription != null) return;
+    _itemsSubscription = _itemMasterRepository?.watchItems(homeId: homeId).listen(
+      (items) {
+        if (_disposed) return;
+        if (items.any((item) => item.homeId != homeId)) {
+          _items = const <InventoryItem>[];
+          _setError('Product lookup access was rejected.');
+          return;
+        }
+        _items = List<InventoryItem>.unmodifiable(
+          items.where((item) => item.isHomeProduct),
+        );
+        notifyListeners();
+      },
+      onError: (Object _) => _setError(
+        'Product lookup could not refresh. Verified saved products remain available.',
+      ),
+    );
     final repository = _repository;
     if (repository is ShoppingListLifecycleRepository) {
       _listsSubscription = (repository as ShoppingListLifecycleRepository)
@@ -209,19 +237,30 @@ final class ShoppingController extends ChangeNotifier {
         !list.lines.any((entry) => entry.id == line.id)) {
       return false;
     }
+    if (quantity != null && (!quantity.isFinite || quantity <= 0)) {
+      _setError('Enter a quantity greater than zero.');
+      return false;
+    }
+    if (name != null && (name.trim().isEmpty || name.trim().length > 191)) {
+      _setError('Enter an item name of 1 to 191 characters.');
+      return false;
+    }
     final edited = line.copyWith(
       name: name?.trim(),
       quantity: quantity,
       archived: archived,
     );
     try {
-      await _repository.saveList(
-        list.copyWith(
-          lines: list.lines
-              .map((entry) => entry.id == line.id ? edited : entry)
-              .toList(),
-        ),
+      final next = list.copyWith(
+        lines: list.lines
+            .map((entry) => entry.id == line.id ? edited : entry)
+            .toList(),
       );
+      await _repository.saveList(next);
+      if (!_disposed && identical(_state.list, list)) {
+        _state = _copyState(list: next, clearSafeError: true);
+        notifyListeners();
+      }
       return true;
     } catch (_) {
       _setError(
@@ -231,31 +270,118 @@ final class ShoppingController extends ChangeNotifier {
     }
   }
 
-  Future<bool> addManual(String name, {double quantity = 1}) async {
+  /// Duplicates are scoped to the currently selected list, never old lists.
+  ShoppingListLine? duplicateForProduct(String homeProductId) {
+    final product = _items
+        .where((item) => item.id == homeProductId)
+        .firstOrNull;
+    if (product == null) return null;
+    return _state.list?.activeLines
+        .where(
+          (line) =>
+              line.homeProductId == homeProductId &&
+              (line.selectedPackId == null ||
+                  line.selectedPackId == product.packId),
+        )
+        .firstOrNull;
+  }
+
+  Future<bool> addManual(
+    String name, {
+    double quantity = 1,
+    String? homeProductId,
+    bool allowDuplicate = false,
+  }) async {
+    if (_manualBusy || _disposed) return false;
     final trimmed = name.trim();
-    if (trimmed.isEmpty) return false;
+    if (trimmed.isEmpty || trimmed.length > 191) {
+      _setError('Enter an item name of 1 to 191 characters.');
+      return false;
+    }
     if (!quantity.isFinite || quantity <= 0) {
       _setError('Enter a quantity greater than zero.');
       return false;
     }
-    final list = _requireList();
+    if (homeProductId != null) {
+      final product = _items
+          .where((item) => item.id == homeProductId && item.homeId == homeId)
+          .firstOrNull;
+      if (product == null || product.canonicalName != trimmed) {
+        _setError('Choose the product again or add the text as a custom item.');
+        return false;
+      }
+      if (!allowDuplicate && duplicateForProduct(homeProductId) != null) {
+        _setError(
+          'This product is already on the selected list. Review its quantity or keep a separate line.',
+        );
+        return false;
+      }
+    }
+    final list = _state.list;
+    if (list == null || list.archived) {
+      _setError('Choose an open shopping list first.');
+      return false;
+    }
+    _manualBusy = true;
+    _state = _copyState(clearSafeError: true);
+    notifyListeners();
     try {
-      await _repository.saveList(
-        list.add(
-          ShoppingListLine(
-            id: _idGenerator(),
-            homeId: homeId,
-            name: trimmed,
-            quantity: quantity,
-            origin: ShoppingLineOrigin.manual,
-            createdAt: _clock().toUtc(),
-          ),
+      final next = list.add(
+        ShoppingListLine(
+          id: _idGenerator(),
+          homeId: homeId,
+          name: trimmed,
+          quantity: quantity,
+          origin: ShoppingLineOrigin.manual,
+          createdAt: _clock().toUtc(),
+          homeProductId: homeProductId,
         ),
       );
+      await _repository.saveList(next);
+      if (!_disposed && identical(_state.list, list)) {
+        _state = _copyState(list: next, clearSafeError: true);
+      }
       return true;
     } catch (_) {
-      _setError('The manual shopping item could not be saved.');
+      _setError(
+        'The manual shopping item could not be saved. Your entry is retained.',
+      );
       return false;
+    } finally {
+      _manualBusy = false;
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  Future<bool> increaseDuplicateQuantity(
+    ShoppingListLine existing,
+    double additionalQuantity,
+  ) async {
+    if (_manualBusy ||
+        _disposed ||
+        !additionalQuantity.isFinite ||
+        additionalQuantity <= 0) {
+      return false;
+    }
+    final current = _state.list?.activeLines
+        .where((line) => line.id == existing.id && line.homeId == homeId)
+        .firstOrNull;
+    if (current == null || current.quantity != existing.quantity) {
+      _setError(
+        'This item changed. Review the current quantity before adding.',
+      );
+      return false;
+    }
+    _manualBusy = true;
+    notifyListeners();
+    try {
+      return await editLine(
+        current,
+        quantity: current.quantity + additionalQuantity,
+      );
+    } finally {
+      _manualBusy = false;
+      if (!_disposed) notifyListeners();
     }
   }
 
@@ -818,6 +944,7 @@ final class ShoppingController extends ChangeNotifier {
   );
 
   void _setError(String message) {
+    if (_disposed) return;
     _state = _copyState(loading: false, safeError: message);
     notifyListeners();
   }
@@ -828,6 +955,7 @@ final class ShoppingController extends ChangeNotifier {
     _suggestionRequestGeneration++;
     unawaited(_subscription?.cancel());
     unawaited(_listsSubscription?.cancel());
+    unawaited(_itemsSubscription?.cancel());
     super.dispose();
   }
 }
