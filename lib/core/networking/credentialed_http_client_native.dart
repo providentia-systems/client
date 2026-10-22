@@ -1,3 +1,7 @@
-import 'package:http/http.dart' as http;
+import 'dart:io';
 
-http.Client createCredentialedHttpClient() => http.Client();
+import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
+
+http.Client createCredentialedHttpClient() =>
+    IOClient(HttpClient()..connectionTimeout = const Duration(seconds: 30));
