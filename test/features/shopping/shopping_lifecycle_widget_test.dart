@@ -23,7 +23,13 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('New list'));
       await tester.pumpAndSettle();
-      await tester.enterText(find.byType(TextFormField), 'Month end');
+      await tester.enterText(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.byType(TextFormField),
+        ),
+        'Month end',
+      );
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
       expect(controller.lists, hasLength(2));
@@ -38,8 +44,24 @@ void main() {
       await tester.ensureVisible(find.byTooltip('Edit item'));
       await tester.tap(find.byTooltip('Edit item'));
       await tester.pumpAndSettle();
-      await tester.enterText(find.byType(TextFormField).at(0), 'Brown rice');
-      await tester.enterText(find.byType(TextFormField).at(1), '3.5');
+      await tester.enterText(
+        find
+            .descendant(
+              of: find.byType(AlertDialog),
+              matching: find.byType(TextFormField),
+            )
+            .at(0),
+        'Brown rice',
+      );
+      await tester.enterText(
+        find
+            .descendant(
+              of: find.byType(AlertDialog),
+              matching: find.byType(TextFormField),
+            )
+            .at(1),
+        '3.5',
+      );
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
       expect(controller.state.list!.lines.single.name, 'Brown rice');

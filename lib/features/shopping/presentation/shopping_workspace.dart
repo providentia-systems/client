@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:providentia/core/domain/household_product_lookup.dart';
+import 'package:providentia/core/presentation/quantity_field.dart';
+import 'package:providentia/features/inventory/domain/inventory_models.dart';
 import 'package:providentia/features/shopping/domain/online_shopping_suggestion_models.dart';
 import 'package:providentia/features/shopping/domain/shopping_models.dart';
 import 'package:providentia/features/shopping/presentation/shopping_controller.dart';
@@ -16,16 +19,54 @@ class _ShoppingWorkspaceState extends State<ShoppingWorkspace> {
   bool _showRemoved = false;
   final TextEditingController _draft = TextEditingController();
   final TextEditingController _quantityDraft = TextEditingController(text: '1');
+  final FocusNode _productFocus = FocusNode();
+  String? _selectedProductId;
+  String? _entryError;
+  var _quantityReset = 0;
+
+  InventoryItem? get _selectedProduct => widget.controller.items
+      .where((item) => item.id == _selectedProductId)
+      .firstOrNull;
+
+  String _productLabel(InventoryItem item) =>
+      '${item.canonicalName}${item.brand.isEmpty ? '' : ' · ${item.brand}'} · ${item.packSize} (${item.unit})';
+
+  void _textChanged() {
+    if (!mounted) return;
+    final selected = _selectedProduct;
+    setState(() {
+      if (selected == null || _draft.text != _productLabel(selected)) {
+        _selectedProductId = null;
+      }
+      _entryError = null;
+    });
+  }
 
   @override
   void initState() {
     super.initState();
+    _draft.addListener(_textChanged);
     widget.controller.start();
   }
 
   @override
+  void didUpdateWidget(covariant ShoppingWorkspace oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      _selectedProductId = null;
+      _draft.clear();
+      _quantityDraft.text = '1';
+      _quantityReset++;
+      _entryError = null;
+      widget.controller.start();
+    }
+  }
+
+  @override
   void dispose() {
+    _draft.removeListener(_textChanged);
     _draft.dispose();
+    _productFocus.dispose();
     _quantityDraft.dispose();
     super.dispose();
   }
@@ -96,41 +137,33 @@ class _ShoppingWorkspaceState extends State<ShoppingWorkspace> {
                 ],
               ),
             ],
-            if (list?.archived != true)
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: <Widget>[
-                  Expanded(
-                    child: TextField(
-                      key: const Key('manual-list-input'),
-                      controller: _draft,
-                      decoration: const InputDecoration(
-                        labelText: 'Manual shopping item',
-                      ),
-                      onSubmitted: (_) => _add(),
-                    ),
+            if (list?.archived != true) ...<Widget>[
+              _manualEntry(),
+              if (_selectedProduct case final product?)
+                Text(
+                  'Selected household product: ${product.canonicalName}. '
+                  'Quantity uses this product’s stock measurement (${product.unit}).',
+                  key: const Key('shopping-selected-product'),
+                )
+              else if (_draft.text.trim().isNotEmpty)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton(
+                    key: const Key('shopping-add-custom'),
+                    onPressed: widget.controller.manualBusy
+                        ? null
+                        : () => _add(asCustom: true),
+                    child: Text('Add “${_draft.text.trim()}” as a custom item'),
                   ),
-                  const SizedBox(width: 8),
-                  SizedBox(
-                    width: 92,
-                    child: TextField(
-                      key: const Key('manual-list-quantity'),
-                      controller: _quantityDraft,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      decoration: const InputDecoration(labelText: 'Quantity'),
-                      onSubmitted: (_) => _add(),
-                    ),
-                  ),
-                  IconButton(
-                    key: const Key('manual-list-add'),
-                    tooltip: 'Add to shopping list',
-                    onPressed: _add,
-                    icon: const Icon(Icons.add),
-                  ),
-                ],
-              ),
+                ),
+              if (_entryError != null)
+                Text(
+                  _entryError!,
+                  key: const Key('shopping-entry-error'),
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              if (widget.controller.manualBusy) const LinearProgressIndicator(),
+            ],
             if (state.safeError != null) Text(state.safeError!),
             if (widget
                 .controller
@@ -255,6 +288,86 @@ class _ShoppingWorkspaceState extends State<ShoppingWorkspace> {
     );
   }
 
+  Widget _manualEntry() {
+    final products = widget.controller.items;
+    final productField = DropdownMenu<String>(
+      key: const Key('manual-list-input'),
+      controller: _draft,
+      focusNode: _productFocus,
+      expandedInsets: EdgeInsets.zero,
+      enableFilter: true,
+      enableSearch: true,
+      requestFocusOnTap: true,
+      enabled: !widget.controller.manualBusy,
+      label: const Text('Manual shopping item'),
+      helperText: 'Browse household products or type a custom item.',
+      dropdownMenuEntries: <DropdownMenuEntry<String>>[
+        for (final item in products)
+          DropdownMenuEntry(value: item.id, label: _productLabel(item)),
+      ],
+      filterCallback: (entries, query) => const HouseholdProductLookup().rank(
+        query: query,
+        products: entries,
+        describe: (entry) {
+          final item = products.firstWhere((item) => item.id == entry.value);
+          return ProductLookupText(
+            name: item.canonicalName,
+            brand: item.brand,
+            pack: item.packSize,
+            category: item.category,
+            aliases: item.aliases,
+          );
+        },
+      ),
+      onSelected: (id) => setState(() {
+        _selectedProductId = id;
+        _entryError = null;
+      }),
+    );
+    final quantityAndAdd = Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        SizedBox(
+          width: 110,
+          child: QuantityField(
+            key: const Key('manual-list-quantity'),
+            controller: _quantityDraft,
+            resetToken: _quantityReset,
+            enabled: !widget.controller.manualBusy,
+            decoration: const InputDecoration(labelText: 'Quantity'),
+            onFieldSubmitted: (_) => _add(),
+          ),
+        ),
+        IconButton(
+          key: const Key('manual-list-add'),
+          tooltip: 'Add to shopping list',
+          onPressed: widget.controller.manualBusy ? null : _add,
+          icon: const Icon(Icons.add),
+        ),
+      ],
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) => constraints.maxWidth < 520
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                productField,
+                const SizedBox(height: 8),
+                Align(alignment: Alignment.centerLeft, child: quantityAndAdd),
+              ],
+            )
+          : Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Expanded(child: productField),
+                const SizedBox(width: 8),
+                quantityAndAdd,
+              ],
+            ),
+    );
+  }
+
   Future<void> _editListName({required bool create}) async {
     final currentList = widget.controller.state.list;
     var name = create ? '' : currentList!.name;
@@ -340,85 +453,101 @@ class _ShoppingWorkspaceState extends State<ShoppingWorkspace> {
   }
 
   Future<void> _editLine(ShoppingListLine line) async {
-    var name = line.name;
-    var quantity = _formatQuantity(line.quantity);
-    final result = await showDialog<(String, double)>(
+    await showDialog<void>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Edit shopping item'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            TextFormField(
-              initialValue: name,
-              maxLength: 191,
-              decoration: const InputDecoration(labelText: 'Description'),
-              onChanged: (value) => name = value,
+      builder: (context) => _ShoppingLineEditor(
+        line: line,
+        save: (name, quantity) =>
+            widget.controller.editLine(line, name: name, quantity: quantity),
+      ),
+    );
+  }
+
+  Future<void> _add({bool asCustom = false}) async {
+    if (widget.controller.manualBusy) return;
+    final quantity = double.tryParse(_quantityDraft.text.trim());
+    if (quantity == null || !quantity.isFinite || quantity <= 0) {
+      setState(() => _entryError = 'Enter a quantity greater than zero.');
+      return;
+    }
+    final product = asCustom ? null : _selectedProduct;
+    final value = product?.canonicalName ?? _draft.text.trim();
+    if (value.isEmpty || value.length > 191) {
+      setState(
+        () => _entryError = 'Enter an item name of 1 to 191 characters.',
+      );
+      return;
+    }
+    final listId = widget.controller.state.list?.id;
+    final duplicate = product == null
+        ? null
+        : widget.controller.duplicateForProduct(product.id);
+    var separate = false;
+    if (duplicate != null) {
+      final choice = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Product already on this list'),
+          content: Text(
+            '${duplicate.name} already has quantity ${_formatQuantity(duplicate.quantity)}. '
+            'Add ${_formatQuantity(quantity)} to that quantity or keep a separate line?',
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
             ),
-            TextFormField(
-              initialValue: quantity,
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-              ),
-              decoration: const InputDecoration(
-                labelText: 'Quantity greater than zero',
-              ),
-              onChanged: (value) => quantity = value,
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Keep separate line'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Add to existing quantity'),
             ),
           ],
         ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final parsed = double.tryParse(quantity);
-              if (name.trim().isNotEmpty &&
-                  parsed != null &&
-                  parsed.isFinite &&
-                  parsed > 0) {
-                Navigator.pop(context, (name.trim(), parsed));
-              }
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-    if (result != null) {
-      await widget.controller.editLine(
-        line,
-        name: result.$1,
-        quantity: result.$2,
       );
+      if (!mounted || choice == null) return;
+      separate = choice;
     }
-  }
-
-  Future<void> _add() async {
-    final value = _draft.text;
-    final quantity = double.tryParse(_quantityDraft.text.trim());
-    final saved = quantity != null
-        ? await widget.controller.addManual(value, quantity: quantity)
-        : false;
+    if (widget.controller.state.list?.id != listId) {
+      setState(
+        () => _entryError =
+            'The selected list changed. Review your entry before adding.',
+      );
+      return;
+    }
+    final saved = duplicate != null && !separate
+        ? await widget.controller.increaseDuplicateQuantity(duplicate, quantity)
+        : await widget.controller.addManual(
+            value,
+            quantity: quantity,
+            homeProductId: product?.id,
+            allowDuplicate: separate,
+          );
     if (mounted && saved) {
-      _draft.clear();
-      _quantityDraft.text = '1';
+      setState(() {
+        _selectedProductId = null;
+        _draft.clear();
+        _quantityDraft.text = '1';
+        _quantityReset++;
+        _entryError = null;
+      });
     }
   }
 
   Future<void> _addSuggestion(OnlineShoppingSuggestion suggestion) async {
     var input = suggestion.requiredQuantity.value;
+    final quantityController = TextEditingController(text: input);
     final quantity = await showDialog<ExactDecimal>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text('Add ${suggestion.productName} to the list'),
-        content: TextFormField(
+        content: QuantityField(
           key: Key('online-suggestion-quantity-${suggestion.id}'),
-          initialValue: input,
+          controller: quantityController,
           autofocus: true,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
           decoration: const InputDecoration(
             labelText: 'Quantity greater than zero',
           ),
@@ -444,6 +573,7 @@ class _ShoppingWorkspaceState extends State<ShoppingWorkspace> {
         ],
       ),
     );
+    quantityController.dispose();
     if (quantity == null || !mounted) return;
     final added = await widget.controller.addOnlineSuggestion(
       suggestion,
@@ -529,42 +659,15 @@ class _ShoppingWorkspaceState extends State<ShoppingWorkspace> {
   }
 
   Future<void> _editQuantity(ShoppingListLine line) async {
-    var input = _formatQuantity(line.quantity);
-    final quantity = await showDialog<double>(
+    await showDialog<void>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Edit ${line.name} quantity'),
-        content: TextFormField(
-          key: Key('shopping-quantity-editor-${line.id}'),
-          initialValue: input,
-          autofocus: true,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(
-            labelText: 'Quantity greater than zero',
-          ),
-          onChanged: (value) => input = value,
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            key: Key('save-shopping-quantity-${line.id}'),
-            onPressed: () {
-              final value = double.tryParse(input.trim());
-              if (value != null && value.isFinite && value > 0) {
-                Navigator.pop(context, value);
-              }
-            },
-            child: const Text('Save quantity'),
-          ),
-        ],
+      builder: (context) => _ShoppingLineEditor(
+        line: line,
+        quantityOnly: true,
+        save: (_, quantity) =>
+            widget.controller.tryUpdateQuantity(line, quantity),
       ),
     );
-    if (quantity != null && mounted) {
-      await widget.controller.tryUpdateQuantity(line, quantity);
-    }
   }
 
   Future<void> _showExplanation(ShoppingListLine line) {
@@ -601,6 +704,130 @@ class _ShoppingWorkspaceState extends State<ShoppingWorkspace> {
       );
     }
   }
+}
+
+class _ShoppingLineEditor extends StatefulWidget {
+  const _ShoppingLineEditor({
+    required this.line,
+    required this.save,
+    this.quantityOnly = false,
+  });
+
+  final ShoppingListLine line;
+  final Future<bool> Function(String name, double quantity) save;
+  final bool quantityOnly;
+
+  @override
+  State<_ShoppingLineEditor> createState() => _ShoppingLineEditorState();
+}
+
+class _ShoppingLineEditorState extends State<_ShoppingLineEditor> {
+  late final TextEditingController _name = TextEditingController(
+    text: widget.line.name,
+  );
+  late final TextEditingController _quantity = TextEditingController(
+    text: widget.line.quantity.toString(),
+  );
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _quantity.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final quantity = double.tryParse(_quantity.text.trim());
+    if (quantity == null ||
+        !quantity.isFinite ||
+        quantity <= 0 ||
+        _name.text.trim().isEmpty ||
+        _name.text.trim().length > 191) {
+      setState(
+        () => _error = 'Enter a description and a quantity greater than zero.',
+      );
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    var saved = false;
+    try {
+      saved = await widget.save(_name.text.trim(), quantity);
+    } catch (_) {
+      // Keep all entered values available for correction or retry.
+    }
+    if (!mounted) return;
+    if (saved) {
+      Navigator.pop(context);
+    } else {
+      setState(() {
+        _saving = false;
+        _error =
+            'The item could not be saved. Your entry is retained; review the current list and retry.';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(
+      widget.quantityOnly
+          ? 'Edit ${widget.line.name} quantity'
+          : 'Edit shopping item',
+    ),
+    content: SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          if (!widget.quantityOnly)
+            TextFormField(
+              controller: _name,
+              maxLength: 191,
+              enabled: !_saving,
+              decoration: InputDecoration(
+                labelText: widget.line.homeProductId == null
+                    ? 'Description'
+                    : 'Shopping description / instructions',
+                helperText: widget.line.homeProductId == null
+                    ? null
+                    : 'The household product identity and master name stay linked.',
+              ),
+            ),
+          QuantityField(
+            key: Key('shopping-quantity-editor-${widget.line.id}'),
+            controller: _quantity,
+            enabled: !_saving,
+            autofocus: widget.quantityOnly,
+            decoration: const InputDecoration(
+              labelText: 'Quantity greater than zero',
+            ),
+            onFieldSubmitted: (_) => _save(),
+          ),
+        ],
+      ),
+    ),
+    actions: <Widget>[
+      if (_error != null)
+        Text(
+          _error!,
+          style: TextStyle(color: Theme.of(context).colorScheme.error),
+        ),
+      if (_saving) const LinearProgressIndicator(),
+      TextButton(
+        onPressed: _saving ? null : () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        key: Key('save-shopping-quantity-${widget.line.id}'),
+        onPressed: _saving ? null : _save,
+        child: Text(widget.quantityOnly ? 'Save quantity' : 'Save'),
+      ),
+    ],
+  );
 }
 
 class _OnlineSuggestionCard extends StatelessWidget {
@@ -763,7 +990,8 @@ class _ShoppingLineTile extends StatelessWidget {
             ),
             Padding(
               padding: const EdgeInsets.only(left: 8),
-              child: Row(
+              child: Wrap(
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: <Widget>[
                   Text('Quantity: ${_formatQuantity(line.quantity)}'),
                   if (onEdit != null && !line.archived)
@@ -846,8 +1074,13 @@ class _ShoppingLineTile extends StatelessWidget {
   }
 }
 
-String _formatQuantity(double quantity) =>
-    quantity.toStringAsFixed(quantity == quantity.roundToDouble() ? 0 : 2);
+String _formatQuantity(double quantity) {
+  if (quantity == quantity.roundToDouble()) return quantity.toStringAsFixed(0);
+  final precise = quantity.toStringAsFixed(8).replaceFirst(RegExp(r'0+$'), '');
+  return precise.split('.').last.length < 2
+      ? quantity.toStringAsFixed(2)
+      : precise;
+}
 
 String _confidenceLabel(ShoppingSuggestionConfidenceBand band) =>
     switch (band) {
