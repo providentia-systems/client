@@ -479,7 +479,9 @@ final class PurchaseGroup {
 
   Money? get total {
     final priced = lines.where((line) => line.lineTotal != null).toList();
-    if (priced.isEmpty || priced.length != lines.length) {
+    if (priced.isEmpty ||
+        priced.length != lines.length ||
+        priced.map((line) => line.lineTotal!.currency).toSet().length != 1) {
       return null;
     }
     return priced

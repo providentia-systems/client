@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:providentia/core/presentation/place_management_dialog.dart';
+import 'package:providentia/core/presentation/quantity_field.dart';
+import 'package:providentia/core/domain/household_product_lookup.dart';
 import 'package:providentia/features/purchasing/domain/purchase_models.dart';
+import 'package:providentia/features/purchasing/domain/receipt_amounts.dart';
 import 'package:providentia/features/purchasing/presentation/purchasing_controller.dart';
 import 'package:providentia/features/purchasing/presentation/receipt_draft_editor.dart';
+import 'package:providentia/features/purchasing/presentation/receipt_price_widgets.dart';
 
 class PurchasingWorkspace extends StatefulWidget {
   const PurchasingWorkspace({
@@ -97,6 +101,7 @@ class _PurchasingWorkspaceState extends State<PurchasingWorkspace> {
             if (state.safeError != null) Text(state.safeError!),
             if (state.view == PurchaseView.recent) ...<Widget>[
               _PurchaseCapturePanel(
+                key: ValueKey('purchase-home-${widget.controller.homeId}'),
                 controller: widget.controller,
                 onImportReceipt: widget.onImportReceipt,
               ),
@@ -111,7 +116,7 @@ class _PurchasingWorkspaceState extends State<PurchasingWorkspace> {
                   ),
                   trailing: Text(
                     widget.controller.recentSpend == null
-                        ? 'Incomplete prices'
+                        ? 'Incomplete prices or mixed currencies'
                         : _money(widget.controller.recentSpend!),
                   ),
                 ),
@@ -135,7 +140,11 @@ class _PurchasingWorkspaceState extends State<PurchasingWorkspace> {
 }
 
 class _PurchaseCapturePanel extends StatefulWidget {
-  const _PurchaseCapturePanel({required this.controller, this.onImportReceipt});
+  const _PurchaseCapturePanel({
+    required this.controller,
+    this.onImportReceipt,
+    super.key,
+  });
 
   final PurchasingController controller;
   final VoidCallback? onImportReceipt;
@@ -151,6 +160,9 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
   final _sourceReference = TextEditingController();
   final _description = TextEditingController();
   final _quantity = TextEditingController(text: '1');
+  int _quantityReset = 0;
+  String? _entryProductLabel;
+  String? _draftReceiptId;
   final _packText = TextEditingController();
   final _unitPrice = TextEditingController();
   final _lineTotal = TextEditingController();
@@ -165,7 +177,24 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
   final _productSearch = TextEditingController();
 
   @override
+  void initState() {
+    super.initState();
+    _productSearch.addListener(_clearChangedProductSelection);
+  }
+
+  void _clearChangedProductSelection() {
+    if (_entryProductId != null && _productSearch.text != _entryProductLabel) {
+      setState(() {
+        _entryProductId = null;
+        _entryPackId = null;
+        _entryProductLabel = null;
+      });
+    }
+  }
+
+  @override
   void dispose() {
+    _productSearch.removeListener(_clearChangedProductSelection);
     _productFocus.dispose();
     _productSearch.dispose();
     _currency.dispose();
@@ -185,6 +214,22 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
     final controller = widget.controller;
     final state = controller.state;
     final capture = state.capture;
+    if (_draftReceiptId != capture?.id) {
+      _draftReceiptId = capture?.id;
+      _entryProductId = null;
+      _entryPackId = null;
+      _entryProductLabel = null;
+      _productSearch.clear();
+      _description.clear();
+      _packText.clear();
+      _unitPrice.clear();
+      _lineTotal.clear();
+      _quantity.text = '1';
+      _quantityReset++;
+      _selectedProducts.clear();
+      _selectedReviewPacks.clear();
+      _reviewInStockUnits.clear();
+    }
     if (!controller.captureEnabled) {
       return const Card(
         key: Key('purchase-capture-read-only'),
@@ -212,6 +257,22 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
                 state.captureNotice!,
                 key: const Key('purchase-capture-notice'),
               ),
+            ],
+            if (controller.receiptSynchronizationNotice != null) ...<Widget>[
+              const SizedBox(height: 8),
+              Semantics(
+                liveRegion: true,
+                child: Text(
+                  controller.receiptSynchronizationNotice!,
+                  key: const Key('receipt-synchronization-outcome'),
+                ),
+              ),
+              if (controller.canReviewSynchronization)
+                TextButton(
+                  key: const Key('purchase-review-sync'),
+                  onPressed: controller.reviewSynchronization,
+                  child: const Text('Review synchronization'),
+                ),
             ],
             if (state.captureError != null) ...<Widget>[
               const SizedBox(height: 8),
@@ -396,6 +457,7 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Text('Receipt revision ${capture.revision}'),
+          ReceiptAmountSummary(receipt: capture),
           const SizedBox(height: 4),
           Text(
             capture.commitConfirmed && pending
@@ -414,11 +476,9 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
               icon: const Icon(Icons.edit_outlined),
               label: const Text('Edit receipt details'),
             ),
-          for (final line in capture.lines.where(
-            (line) => line.stockApplied,
-          )) ...[
+          for (final line in capture.lines) ...[
             _lineReview(context, line),
-            if (widget.controller.canMaintainDraft)
+            if (widget.controller.canMaintainDraft && line.stockApplied)
               Wrap(
                 spacing: 8,
                 children: [
@@ -445,11 +505,22 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
             const SizedBox(height: 8),
             OutlinedButton(
               key: const Key('purchase-retry-commit'),
-              onPressed: widget.controller.state.captureBusy
+              onPressed:
+                  widget.controller.state.captureBusy ||
+                      widget.controller.synchronizationBusy ||
+                      !widget.controller.canRetrySynchronization
                   ? null
-                  : widget.controller.commitDraft,
-              child: const Text('Retry synchronization'),
+                  : widget.controller.retrySynchronization,
+              child: Text(
+                widget.controller.synchronizationBusy
+                    ? 'Synchronizing…'
+                    : 'Retry synchronization',
+              ),
             ),
+            if (!widget.controller.canRetrySynchronization)
+              const Text(
+                'Synchronization is unavailable in this view. Open Home to review the saved upload queue.',
+              ),
           ],
         ],
       );
@@ -471,6 +542,7 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
           ),
         ],
         const SizedBox(height: 12),
+        ReceiptAmountSummary(receipt: capture),
         if (widget.controller.canMaintainDraft)
           Wrap(
             spacing: 8,
@@ -512,12 +584,10 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
           Row(
             children: <Widget>[
               Expanded(
-                child: TextField(
+                child: QuantityField(
                   key: const Key('purchase-line-quantity'),
                   controller: _quantity,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
+                  resetToken: _quantityReset,
                   decoration: const InputDecoration(labelText: 'Quantity'),
                 ),
               ),
@@ -541,6 +611,12 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
             decoration: const InputDecoration(
               labelText: 'Unit price (optional)',
             ),
+          ),
+          ReceiptLinePricePreview(
+            quantity: _quantity,
+            unitPrice: _unitPrice,
+            lineTotal: _lineTotal,
+            currency: capture.currency,
           ),
           const SizedBox(height: 8),
           FilledButton.icon(
@@ -576,6 +652,7 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
               ],
             ),
         ],
+        if (capture.lines.length > 4) ReceiptAmountSummary(receipt: capture),
         if (!capture.reviewComplete)
           const Text(
             'Every line must be approved or intentionally left unresolved before commit.',
@@ -636,6 +713,23 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
           expandedInsets: EdgeInsets.zero,
           enableFilter: true,
           requestFocusOnTap: true,
+          filterCallback: (entries, query) =>
+              const HouseholdProductLookup().rank<DropdownMenuEntry<String>>(
+                query: query,
+                products: entries,
+                describe: (entry) {
+                  final candidate = products.firstWhere(
+                    (candidate) => candidate.homeProductId == entry.value,
+                  );
+                  return ProductLookupText(
+                    name: candidate.name,
+                    brand: candidate.brand,
+                    pack: candidate.packSize,
+                    category: candidate.category,
+                    aliases: candidate.aliases,
+                  );
+                },
+              ),
           label: const Text('Find product'),
           dropdownMenuEntries: [
             for (final candidate in products)
@@ -650,6 +744,7 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
               : (value) => setState(() {
                   _entryProductId = value;
                   _entryPackId = null;
+                  _entryProductLabel = _productSearch.text;
                 }),
         ),
         if (products.isEmpty)
@@ -688,12 +783,10 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
         Row(
           children: [
             Expanded(
-              child: TextField(
+              child: QuantityField(
                 key: const Key('purchase-line-quantity'),
                 controller: _quantity,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
+                resetToken: _quantityReset,
                 decoration: InputDecoration(
                   labelText: _entryPackId == null
                       ? 'Purchased quantity (${product?.stockUnit ?? 'stock units'})'
@@ -731,6 +824,12 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
               labelText: 'Packaging description (optional)',
             ),
           ),
+        ReceiptLinePricePreview(
+          quantity: _quantity,
+          unitPrice: _unitPrice,
+          lineTotal: _lineTotal,
+          currency: widget.controller.state.capture!.currency,
+        ),
         const SizedBox(height: 8),
         FilledButton.icon(
           key: const Key('purchase-add-line'),
@@ -779,8 +878,11 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
       unitPrice: unitPrice,
       lineTotal: lineTotal,
     );
-    if (saved && mounted) {
+    if (saved && mounted && widget.controller.state.capture?.id == capture.id) {
       _quantity.text = '1';
+      _quantityReset++;
+      _entryProductId = null;
+      _entryProductLabel = null;
       _productSearch.clear();
       _unitPrice.clear();
       _lineTotal.clear();
@@ -923,6 +1025,25 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
   }
 
   Widget _lineReview(BuildContext context, PurchaseReceiptLineCapture line) {
+    final capture = widget.controller.state.capture!;
+    if (capture.status == PurchaseReceiptStatus.committed && !line.approved) {
+      return Card.outlined(
+        key: Key('purchase-line-${line.id}'),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(line.rawDescription),
+              ReceiptLinePriceDetails(line: line, currency: capture.currency),
+              Text(
+                '${line.unresolved ? 'Intentionally unresolved; no stock applied' : 'Not approved for stock'} · ${line.synchronizationState == PurchaseSynchronizationState.pending ? 'synchronization pending' : 'synchronized'}',
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     if (line.approved) {
       PurchaseMatchCandidate? match;
       for (final candidate in widget.controller.state.matchCandidates) {
@@ -935,10 +1056,19 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
         key: Key('purchase-line-${line.id}'),
         leading: const Icon(Icons.check_circle_outline),
         title: Text(line.rawDescription),
-        subtitle: Text(
-          line.stockApplied
-              ? 'Stock added: ${line.stockQuantity} ${line.stockUnit ?? match?.stockUnit ?? 'stock units'} · ${line.synchronizationState == PurchaseSynchronizationState.pending ? 'synchronization pending' : 'synchronized'}'
-              : 'Approved: ${match?.name ?? 'Private home product'} · revision ${line.revision}${line.stockQuantityPerPack == null ? '' : ' · ${widget.controller.approvedStockPreview(line)}'}',
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ReceiptLinePriceDetails(
+              line: line,
+              currency: widget.controller.state.capture!.currency,
+            ),
+            Text(
+              line.stockApplied
+                  ? 'Stock added: ${line.stockQuantity} ${line.stockUnit ?? match?.stockUnit ?? 'stock units'} · ${line.synchronizationState == PurchaseSynchronizationState.pending ? 'synchronization pending' : 'synchronized'}'
+                  : 'Approved: ${match?.name ?? 'Private home product'} · revision ${line.revision}${line.stockQuantityPerPack == null ? '' : ' · ${widget.controller.approvedStockPreview(line)}'}',
+            ),
+          ],
         ),
         trailing: line.stockApplied
             ? const Icon(Icons.check_circle_outline)
@@ -969,8 +1099,9 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
             Text(line.rawDescription),
-            Text(
-              'Bought quantity: ${line.quantityText ?? _quantityValue(line.quantity)} · ${line.originalPackText ?? "Unspecified packaging"}',
+            ReceiptLinePriceDetails(
+              line: line,
+              currency: widget.controller.state.capture!.currency,
             ),
             if (line.unresolved)
               Text(
@@ -1199,16 +1330,18 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
     final saved = await widget.controller.addLine(
       rawDescription: _description.text,
       quantity: double.tryParse(_quantity.text) ?? double.nan,
+      quantityText: _quantity.text.trim(),
       originalPackText: _packText.text,
       unitPrice: unitPrice,
       lineTotal: lineTotal,
     );
-    if (saved) {
+    if (saved && mounted && widget.controller.state.capture?.id == capture.id) {
       _description.clear();
       _packText.clear();
       _unitPrice.clear();
       _lineTotal.clear();
       _quantity.text = '1';
+      setState(() => _quantityReset++);
     }
   }
 }
@@ -1341,24 +1474,15 @@ String _matchBasisLabel(PurchaseMatchBasis basis) => switch (basis) {
     'available in the verified offline item master',
 };
 
-String _money(Money money) =>
-    '${money.currency} ${(money.minorUnits / 100).toStringAsFixed(2)}';
-
-String _quantityValue(double value) => _quantity(value);
+String _money(Money money) => formatReceiptMoney(money);
 
 String _quantity(double value) =>
     value.toStringAsFixed(value == value.roundToDouble() ? 0 : 3);
 
 Money? _parseMoney(String value, String currency) {
-  final trimmed = value.trim();
-  if (trimmed.isEmpty ||
-      !RegExp(r'^(?:0|[1-9]\d{0,11})(?:\.\d{1,2})?$').hasMatch(trimmed)) {
+  try {
+    return parseReceiptMoney(value, currency: currency);
+  } on ArgumentError {
     return null;
   }
-  final parts = trimmed.split('.');
-  final whole = int.parse(parts.first);
-  final fraction = parts.length == 1
-      ? 0
-      : int.parse(parts.last.padRight(2, '0'));
-  return Money(minorUnits: whole * 100 + fraction, currency: currency);
 }
