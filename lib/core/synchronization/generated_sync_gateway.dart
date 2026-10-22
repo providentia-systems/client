@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
+import 'package:providentia/core/networking/request_timeout_http_client.dart';
 import 'package:providentia/core/synchronization/receipt_projection_validation.dart';
 import 'package:providentia/core/synchronization/sync_models.dart';
 import 'package:providentia/core/synchronization/sync_ports.dart';
@@ -165,6 +166,10 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
         hasMore: false,
         requestId: requestId!,
       );
+    } on RequestTimeoutException {
+      throw const RetryableSyncException(
+        'The synchronization request timed out. Retry safely with the saved operation identities.',
+      );
     } on generated.ProvidentiaApiException catch (error) {
       if (error.statusCode == 401) {
         throw AuthenticationSyncException(_safeProblem(error));
@@ -296,6 +301,10 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
           .toList(growable: false);
       _validatePushResults(operationIds, results);
       return PushResponse(results: results);
+    } on RequestTimeoutException {
+      throw const RetryableSyncException(
+        'The synchronization request timed out. Retry safely with the saved operation identities.',
+      );
     } on generated.ProvidentiaApiException catch (error) {
       if (error.statusCode == 401) {
         throw AuthenticationSyncException(_safeProblem(error));
@@ -461,6 +470,10 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
             .map((operationId) => byOperationId[operationId]!)
             .toList(growable: false),
       );
+    } on RequestTimeoutException {
+      throw const RetryableSyncException(
+        'The synchronization request timed out. Retry safely with the saved operation identities.',
+      );
     } on generated.ProvidentiaApiException catch (error) {
       if (error.statusCode == 401) {
         throw AuthenticationSyncException(_safeProblem(error));
@@ -522,6 +535,10 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
         validateReceiptProjection(change);
       }
       return page;
+    } on RequestTimeoutException {
+      throw const RetryableSyncException(
+        'The synchronization request timed out. Retry safely with the saved operation identities.',
+      );
     } on generated.ProvidentiaApiException catch (error) {
       if (error.statusCode == 401) {
         throw AuthenticationSyncException(_safeProblem(error));

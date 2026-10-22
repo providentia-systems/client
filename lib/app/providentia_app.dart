@@ -794,7 +794,7 @@ class _SyncStatusCard extends StatelessWidget {
                         ],
                         if (summary.nextRetryAt case final DateTime retryAt)
                           Text(
-                            'Next automatic retry: ${retryAt.toLocal()}. Sync now retries eligible delays without skipping dependencies.',
+                            'Retry eligible after: ${retryAt.toLocal()}. Sync now retries eligible delays without skipping dependencies.',
                             key: const Key('sync-next-retry'),
                           ),
                         if (summary.lastSuccessfulSync

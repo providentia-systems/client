@@ -123,6 +123,11 @@ final class PurchasingController extends ChangeNotifier {
     if (summary.availability == SyncAvailability.authenticationRequired) {
       return '${prefix}Sign in again using the original account. Your saved work is preserved.';
     }
+    if (summary.nextRetryAt case final DateTime retryAt) {
+      return '${prefix}Retry eligible after: ${retryAt.toLocal()}. '
+          'Saved receipt data is preserved. Retry synchronization processes '
+          'eligible household dependencies without skipping them.';
+    }
     if (summary.lastSafeError != null) {
       return '$prefix${summary.lastSafeError} Saved receipt data is preserved; retry safely from this receipt or Home.';
     }

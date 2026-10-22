@@ -73,6 +73,21 @@ void main() {
         isNot(contains('Access to this home changed')),
       );
       expect(repository.commitCalls, 0);
+      controller.updateSynchronizationSummary(
+        const SyncSummary.initial().copyWith(
+          retryWaiting: 1,
+          nextRetryAt: DateTime.utc(2026, 10, 22, 12),
+        ),
+      );
+      expect(controller.synchronizationBusy, isFalse);
+      expect(
+        controller.receiptSynchronizationNotice,
+        contains('Retry eligible after:'),
+      );
+      expect(
+        controller.receiptSynchronizationNotice,
+        contains('without skipping'),
+      );
       controller.startAnotherReceipt();
       expect(controller.state.captureNotice, isNull);
       expect(controller.receiptSynchronizationNotice, isNull);

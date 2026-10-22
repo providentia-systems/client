@@ -1,6 +1,7 @@
 import 'package:http/http.dart' as http;
 import 'package:providentia/core/config/runtime_configuration.dart';
 import 'package:providentia/core/networking/credentialed_http_client.dart';
+import 'package:providentia/core/networking/request_timeout_http_client.dart';
 import 'package:providentia_api_client/providentia_api_client.dart';
 
 /// Composition-root factory for the generated backend client.
@@ -13,12 +14,17 @@ final class ApiClientFactory {
   ProvidentiaApiClient create({
     required RuntimeConfiguration configuration,
     http.Client? httpClient,
+    Duration requestTimeout = const Duration(seconds: 30),
   }) {
     final transport = httpClient ?? createCredentialedHttpClient();
     return ProvidentiaApiClient(
       baseUri: configuration.apiBaseUri,
-      httpClient: transport,
-      closeHttpClient: httpClient == null,
+      httpClient: RequestTimeoutHttpClient(
+        inner: transport,
+        timeout: requestTimeout,
+        closeInner: httpClient == null,
+      ),
+      closeHttpClient: true,
     );
   }
 }
