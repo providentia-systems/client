@@ -183,14 +183,22 @@ final class PurchaseHistoryGrouper {
     required Iterable<PurchaseLine> lines,
   }) {
     final priced = <Money>[];
+    var incomplete = false;
     for (final line in lines) {
       _requireHome(homeId, line.homeId);
-      if (line.source == PurchaseSource.recentReceipt &&
-          line.lineTotal != null) {
-        priced.add(line.lineTotal!);
+      if (line.source == PurchaseSource.recentReceipt) {
+        if (line.lineTotal == null) {
+          incomplete = true;
+        } else {
+          priced.add(line.lineTotal!);
+        }
       }
     }
-    if (priced.isEmpty) return null;
+    if (incomplete ||
+        priced.isEmpty ||
+        priced.map((amount) => amount.currency).toSet().length != 1) {
+      return null;
+    }
     return priced.reduce((left, right) => left + right);
   }
 

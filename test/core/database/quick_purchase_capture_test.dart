@@ -568,7 +568,12 @@ void main() {
     expect(tester.widget<TextField>(search).controller!.text, '');
     expect(
       tester
-          .widget<TextField>(find.byKey(const Key('purchase-line-quantity')))
+          .widget<TextField>(
+            find.descendant(
+              of: find.byKey(const Key('purchase-line-quantity')),
+              matching: find.byType(TextField),
+            ),
+          )
           .controller!
           .text,
       '1',

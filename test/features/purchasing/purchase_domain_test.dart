@@ -77,6 +77,44 @@ void main() {
         throwsStateError,
       );
     });
+
+    test('recent cards disclose unknown prices and isolate currencies', () {
+      final nad = _line('nad', total: Money(minorUnits: 100, currency: 'NAD'));
+      final usd = _line('usd', total: Money(minorUnits: 100, currency: 'USD'));
+      for (final lines in <List<PurchaseLine>>[
+        [nad, usd],
+        [nad, _line('unknown')],
+      ]) {
+        expect(
+          const PurchaseHistoryGrouper().recentSpend(
+            homeId: 'home-a',
+            lines: lines,
+          ),
+          isNull,
+        );
+        expect(
+          PurchaseGroup(
+            id: 'legacy',
+            purchasedAt: DateTime.utc(2026, 10, 22),
+            storeName: 'Store',
+            lines: lines,
+            inferred: true,
+          ).total,
+          isNull,
+        );
+      }
+      expect(
+        () => const PurchaseHistoryGrouper().recentSpend(
+          homeId: 'home-a',
+          lines: [
+            nad,
+            _line('unknown'),
+            _line('foreign', homeId: 'home-b'),
+          ],
+        ),
+        throwsStateError,
+      );
+    });
   });
 
   group('PrivateHomePriceComparison', () {
