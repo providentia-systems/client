@@ -10,27 +10,30 @@
 
 ## Arithmetic and persistence
 
-Money multiplication uses BigInt and the retained decimal purchased quantity. Each line rounds HALF_UP to two decimal places, matching the backend. The purchased pack count is distinct from stock conversion; four 1 kg packs and one 4 kg pack retain different purchase meanings. Explicit line totals, including zero and discounted amounts, override the calculated preview. Missing prices never become zero. Totals do not enqueue commands or mutate stock.
+Money multiplication uses BigInt and the retained decimal purchased quantity. Each line rounds HALF_UP to two decimal places, matching the backend. The purchased pack count is distinct from stock conversion; four 1 kg packs and one 4 kg pack retain different purchase meanings. Explicit line totals, including zero and discounted amounts, override the calculated preview. An overflowing optional calculation cannot discard a valid explicit total; an overflowing derived-only history amount remains unknown without breaking other purchases. Missing prices never become zero. Totals do not enqueue commands or mutate stock.
 
 Selected manual products are checked against active same-home products inside the atomic projection/outbox transaction. Restart and another-device readback regressions verify the stable identity and manual origin. Unit-price-only receipt amounts remain consistent across restart and committed history without inventing stored amounts or duplicating stock changes.
+
+Each API request has a 30-second deadline across response headers and body, using request-scoped cancellation while preserving the shared authenticated transport. Native connections are also bounded. A timed-out request retains immutable operation identity for response-loss recovery; cancellation is not proof the server rejected an operation. Eight real socket tests cover header/body stalls, actual abort, late responses, concurrent request isolation, external abort and transport reuse. Retry timing is labelled eligibility rather than promising an automatic timer.
 
 Late completions, disposed controllers and home changes retain isolation. A Flutter DropdownMenu focus-state defect found during testing was corrected so saving/disabling one household's entry cannot leave the next household's product field read-only.
 
 ## Automated evidence (22 October 2026)
 
 - Flutter 3.44.7 / Dart 3.12.2; committed dependency locks and archive checksums preserved.
-- Full Flutter suite: **1,323 passed**.
-- Handwritten production coverage: **81.42%** (23,082 / 28,348), required minimum 80%.
+- Full Flutter suite: **1,335 passed**.
+- Handwritten production coverage: **81.48%** (23,161 / 28,425), required minimum 80%.
 - Strict Flutter analysis: no issues.
 - Dart formatting and `git diff --check`: passed.
 - Contract generation, toolchain, architecture/structure verification: passed.
 - Node tool tests: **31 passed**.
 - Drift generation: passed; no generated source changes.
+- Web release build: passed.
 - Phone golden: passed with the existing baseline. Pending-only counts remain concise; additional blocked/waiting diagnostics appear for blocked work.
 
 Focused tests also cover exact rounding boundaries, discounted/zero/unknown amounts, currency isolation, responsive prices, quantity focus/reset/failure behavior, duplicate/custom shopping items, restart/readback, account/home switching, delayed retry, no recommit, queue barriers, editor failures and production security wiring.
 
-The restricted contributor host could not install native system packages with the canonical setup script. The pinned SDK and locked dependencies were provisioned with verified checksums, followed by normal checks (`--no-pub` after successful offline `--enforce-lockfile` resolution). No check or threshold was weakened. Native/compiler/package and browser acceptance evidence is supplied by the PR's unchanged GitHub Actions workflows; inspect the current PR checks before merging.
+The restricted contributor host could not install native system packages with the canonical setup script. The pinned SDK and locked dependencies were provisioned with verified checksums, followed by normal checks (`--no-pub` after successful offline `--enforce-lockfile` resolution). No check or threshold was weakened. The PR's unchanged GitHub Actions workflows validate platform builds/packages and encrypted browser persistence; inspect the current PR checks before merging. The separate deployed-browser acceptance workflow requires an installed target and was not run here.
 
 ## Backend coordination and deployment acceptance
 
