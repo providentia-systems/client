@@ -96,6 +96,63 @@ void main() {
     expect(find.textContaining('NAD 100.00'), findsOneWidget);
   });
 
+  testWidgets(
+    'overflowing comparison retains explicit preview and saved price',
+    (tester) async {
+      final quantity = TextEditingController(text: '999999999');
+      final unitPrice = TextEditingController(text: '999999999999.99');
+      final lineTotal = TextEditingController(text: '90');
+      addTearDown(quantity.dispose);
+      addTearDown(unitPrice.dispose);
+      addTearDown(lineTotal.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: Column(
+                children: [
+                  ReceiptLinePricePreview(
+                    quantity: quantity,
+                    unitPrice: unitPrice,
+                    lineTotal: lineTotal,
+                    currency: 'NAD',
+                  ),
+                  ReceiptLinePriceDetails(
+                    line: _line(
+                      quantity: '999999999',
+                      unitPrice: 99999999999999,
+                      total: 9000,
+                    ),
+                    currency: 'NAD',
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(find.textContaining('NAD 90.00 (entered amount)'), findsOneWidget);
+      expect(find.textContaining('= NAD 90.00'), findsOneWidget);
+      expect(
+        find.textContaining('comparison is unavailable'),
+        findsNWidgets(2),
+      );
+      expect(
+        find.byKey(const Key('receipt-line-preview-discrepancy')),
+        findsNothing,
+      );
+      expect(lineTotal.text, '90');
+      lineTotal.clear();
+      await tester.pump();
+      expect(find.textContaining('NAD 90.00 (entered amount)'), findsNothing);
+      expect(
+        find.textContaining('Unsaved line preview: The receipt amount exceeds'),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('unsaved preview responds without changing saved sum', (
     tester,
   ) async {

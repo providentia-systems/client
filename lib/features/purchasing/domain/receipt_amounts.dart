@@ -5,6 +5,13 @@ import 'package:providentia/features/purchasing/domain/purchase_quantity.dart';
 // outside it must not silently lose cents on a browser build.
 final BigInt _maximumExactMinorUnits = BigInt.parse('9007199254740991');
 
+/// A valid amount calculation cannot be represented exactly on every target.
+/// Kept distinct from malformed input so an explicit receipt amount can still
+/// be retained when only its optional arithmetic comparison is unavailable.
+final class ReceiptAmountRangeException extends ArgumentError {
+  ReceiptAmountRangeException(super.message);
+}
+
 /// Multiplies the purchased quantity (pack count or purchased measurement,
 /// never converted stock quantity) by the price per purchased unit.
 ///
@@ -98,12 +105,21 @@ final class ReceiptLineAmounts {
       _validateCurrency(currency);
       PurchaseQuantity.parse(purchasedLineQuantityText(line), positive: true);
       if (line.lineTotal != null) _validateMoney(line.lineTotal!);
-      final calculated = line.unitPrice == null
-          ? null
-          : calculatePurchasedLineTotal(
-              quantityText: purchasedLineQuantityText(line),
-              unitPrice: line.unitPrice!,
-            );
+      if (line.unitPrice != null) _validateMoney(line.unitPrice!);
+      Money? calculated;
+      String? calculationError;
+      if (line.unitPrice != null) {
+        try {
+          calculated = calculatePurchasedLineTotal(
+            quantityText: purchasedLineQuantityText(line),
+            unitPrice: line.unitPrice!,
+          );
+        } on ReceiptAmountRangeException {
+          calculationError = line.lineTotal == null
+              ? 'The calculated amount exceeds the supported range. Enter a valid receipt line total or review the quantity and unit price.'
+              : 'The calculated amount exceeds the supported range. The entered line total is retained; arithmetic comparison is unavailable.';
+        }
+      }
       return ReceiptLineAmounts._(
         total: line.lineTotal ?? calculated,
         calculatedTotal: calculated,
@@ -112,6 +128,7 @@ final class ReceiptLineAmounts {
             calculated != null &&
             line.lineTotal != calculated,
         currencyMismatch: false,
+        error: calculationError,
       );
     } on ArgumentError {
       return const ReceiptLineAmounts._(
@@ -223,7 +240,9 @@ void _validateMoney(Money value) {
 
 int _exactMinorUnits(BigInt value) {
   if (value < BigInt.zero || value > _maximumExactMinorUnits) {
-    throw ArgumentError('The receipt amount exceeds the supported range.');
+    throw ReceiptAmountRangeException(
+      'The receipt amount exceeds the supported range.',
+    );
   }
   return value.toInt();
 }

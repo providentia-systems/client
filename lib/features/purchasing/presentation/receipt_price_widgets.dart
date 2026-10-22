@@ -125,14 +125,21 @@ class ReceiptLinePricePreview extends StatelessWidget {
       String? error;
       Money? calculated;
       Money? entered;
+      String? comparisonWarning;
       try {
         final price = parseReceiptMoney(unitPrice.text, currency: currency);
         entered = parseReceiptMoney(lineTotal.text, currency: currency);
         if (price != null) {
-          calculated = calculatePurchasedLineTotal(
-            quantityText: quantity.text.trim(),
-            unitPrice: price,
-          );
+          try {
+            calculated = calculatePurchasedLineTotal(
+              quantityText: quantity.text.trim(),
+              unitPrice: price,
+            );
+          } on ReceiptAmountRangeException {
+            if (entered == null) rethrow;
+            comparisonWarning =
+                'The calculated amount exceeds the supported range. The entered line total is retained; arithmetic comparison is unavailable.';
+          }
         }
       } on ArgumentError catch (failure) {
         error = failure.message?.toString() ?? 'Check the quantity and prices.';
@@ -150,6 +157,11 @@ class ReceiptLinePricePreview extends StatelessWidget {
                 : 'Unsaved line preview: ${formatReceiptMoney((entered ?? calculated)!)}${entered == null ? ' (calculated)' : ' (entered amount)'}. Not included in Products entered.',
             key: const Key('receipt-line-price-preview'),
           ),
+          if (comparisonWarning != null)
+            Text(
+              comparisonWarning,
+              key: const Key('receipt-line-preview-comparison-unavailable'),
+            ),
           if (entered != null && calculated != null && entered != calculated)
             Text(
               'Entered amount differs from quantity × unit price (${formatReceiptMoney(calculated)}). Keep the entered total for a discount, promotion or receipt rounding if correct.',
