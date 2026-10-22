@@ -710,6 +710,7 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
   StrictLocalHomeAiComposition? _strictLocalAi;
   SyncMetricsSnapshot? _latestSyncMetrics;
   bool _revocationRouted = false;
+  bool _featuresReady = false;
 
   @override
   void initState() {
@@ -980,11 +981,25 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
       purchasing: PurchasingController(
         repository: household,
         productCreationRepository: household,
+        onReviewSynchronization: () => _app.selectSection(AppSection.home),
+        synchronize: () async {
+          if (!_bindingIsCurrent) {
+            return const SyncSummary.initial().copyWith(
+              availability: SyncAvailability.authenticationRequired,
+              failureCode: 'authentication_required',
+              lastSafeError:
+                  'The session changed. Reopen the original account and home to review saved work.',
+            );
+          }
+          await _app.refresh();
+          return _app.syncSummary;
+        },
         homeId: widget.home.id,
         mayWrite: widget.access.purchasesWrite,
       ),
       shopping: ShoppingController(
         repository: household,
+        itemMasterRepository: household,
         homeId: widget.home.id,
         suggestionRepository: CachedOnlineShoppingSuggestionRepository(
           remote: GeneratedOnlineShoppingSuggestionRepository(widget.api),
@@ -998,6 +1013,8 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
       stockPhotoCount: stockPhotoCount,
       stockPhotoAcquisition: stockPhotoAcquisition,
     );
+    _featuresReady = true;
+    _features.purchasing.updateSynchronizationSummary(_app.syncSummary);
   }
 
   @visibleForTesting
@@ -1305,6 +1322,9 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
   }
 
   void _handleSynchronizationState() {
+    if (_featuresReady) {
+      _features.purchasing.updateSynchronizationSummary(_app.syncSummary);
+    }
     if (_revocationRouted ||
         _app.syncSummary.availability != SyncAvailability.authorizationDenied) {
       return;

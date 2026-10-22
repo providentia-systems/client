@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:providentia/core/synchronization/sync_models.dart';
 import 'package:providentia/features/inventory/application/inventory_repository.dart';
 import 'package:providentia/features/inventory/domain/inventory_models.dart';
 import 'package:providentia/features/purchasing/application/purchase_draft_maintenance_repository.dart';
@@ -44,6 +45,8 @@ final class PurchasingController extends ChangeNotifier {
     PurchaseHistoryGrouper grouper = const PurchaseHistoryGrouper(),
     PurchaseMatchRanker matchRanker = const PurchaseMatchRanker(),
     InventoryProductCreationRepository? productCreationRepository,
+    Future<SyncSummary> Function()? synchronize,
+    VoidCallback? onReviewSynchronization,
   }) => PurchasingController._(
     repository,
     homeId,
@@ -51,6 +54,8 @@ final class PurchasingController extends ChangeNotifier {
     grouper,
     matchRanker,
     productCreationRepository,
+    synchronize,
+    onReviewSynchronization,
   );
 
   PurchasingController._(
@@ -60,10 +65,107 @@ final class PurchasingController extends ChangeNotifier {
     this._grouper,
     this._matchRanker,
     this._productCreationRepository,
+    this._synchronize,
+    this._onReviewSynchronization,
   ) : _repository = repository,
       _captureRepository = repository is PurchaseCaptureRepository
           ? repository
           : null;
+
+  final Future<SyncSummary> Function()? _synchronize;
+  final VoidCallback? _onReviewSynchronization;
+  bool get canReviewSynchronization => _onReviewSynchronization != null;
+  void reviewSynchronization() => _onReviewSynchronization?.call();
+  Future<void>? _synchronizationAttempt;
+  SyncSummary? _synchronizationSummary;
+  bool _disposed = false;
+  final Map<String, String> _receiptErrors = {};
+
+  bool get synchronizationBusy =>
+      _synchronizationAttempt != null ||
+      _synchronizationSummary?.isSynchronizing == true;
+  bool get canRetrySynchronization => _synchronize != null;
+  SyncSummary? get synchronizationSummary => _synchronizationSummary;
+
+  /// Current household work can precede this receipt in the durable queue.
+  String? get receiptSynchronizationNotice {
+    final capture = _state.capture;
+    if (capture == null) return null;
+    final summary = _synchronizationSummary;
+    if (synchronizationBusy) {
+      return 'Synchronizing… Household dependencies are processed before this receipt.';
+    }
+    if (capture.commitConfirmed && capture.commitAwaitingReadback) {
+      return 'Server confirmed; receipt details are refreshing. Local stock application and server readback are separate.'
+          '${summary?.lastSafeError == null ? '' : ' ${summary!.lastSafeError} Review synchronization to continue refreshing safely.'}';
+    }
+    if (capture.synchronizationState ==
+        PurchaseSynchronizationState.synchronized) {
+      return capture.status == PurchaseReceiptStatus.committed
+          ? 'Receipt and line details are synchronized.'
+          : null;
+    }
+    if (summary == null) {
+      return 'Saved on this device; awaiting server confirmation.';
+    }
+    final waiting = summary.unresolved;
+    final prefix = waiting > 0
+        ? '$waiting saved operation${waiting == 1 ? '' : 's'} remain unresolved. '
+        : '';
+    if (summary.blocked > 0) {
+      return '${prefix}First blocker: ${syncOperationLabel(summary.blockedOperationType)}. ${summary.lastSafeError ?? 'A preceding household change needs review.'} '
+          '${syncRecoveryInstruction(summary.failureCode)} '
+          'Review Home synchronization for the first blocker; later queued operations are waiting, not separate failures.';
+    }
+    if (summary.availability == SyncAvailability.offline) {
+      return '${prefix}Saved on this device; reconnect before retrying.';
+    }
+    if (summary.availability == SyncAvailability.authenticationRequired) {
+      return '${prefix}Sign in again using the original account. Your saved work is preserved.';
+    }
+    if (summary.lastSafeError != null) {
+      return '$prefix${summary.lastSafeError} Saved receipt data is preserved; retry safely from this receipt or Home.';
+    }
+    return '${prefix}Saved on this device; awaiting server confirmation. Retry synchronization to process household dependencies and refresh receipt details.';
+  }
+
+  void updateSynchronizationSummary(SyncSummary summary) {
+    if (_disposed) return;
+    _synchronizationSummary = summary;
+    _notifyIfActive();
+  }
+
+  /// Retry observes real household synchronization; it never submits another
+  /// purchase or changes the original commit/operation identities.
+  Future<void> retrySynchronization() {
+    final active = _synchronizationAttempt;
+    if (active != null) return active;
+    final synchronize = _synchronize;
+    if (_disposed || synchronize == null) return Future<void>.value();
+    final completer = Completer<void>();
+    _synchronizationAttempt = completer.future;
+    _notifyIfActive();
+    unawaited(() async {
+      try {
+        final summary = await synchronize();
+        if (!_disposed) _synchronizationSummary = summary;
+      } catch (_) {
+        if (!_disposed) {
+          _synchronizationSummary =
+              (_synchronizationSummary ?? const SyncSummary.initial()).copyWith(
+                availability: SyncAvailability.temporarilyUnavailable,
+                lastSafeError: 'Synchronization was interrupted. Retry safely.',
+                failureCode: 'service_unavailable',
+              );
+        }
+      } finally {
+        _synchronizationAttempt = null;
+        _notifyIfActive();
+        completer.complete();
+      }
+    }());
+    return completer.future;
+  }
 
   final PurchaseRepository _repository;
   final PurchaseCaptureRepository? _captureRepository;
@@ -105,7 +207,6 @@ final class PurchasingController extends ChangeNotifier {
       const <PurchaseMatchCandidate>[];
   bool _itemMasterVerified = false;
   bool _captureReadFailed = false;
-  String? _lastSynchronizedReceiptId;
   final Map<String, String> _createdHomeProductIds = <String, String>{};
   PurchasingState _state = const PurchasingState();
 
@@ -168,7 +269,7 @@ final class PurchasingController extends ChangeNotifier {
         .listen(
           (rows) {
             _stores = List.unmodifiable(rows);
-            notifyListeners();
+            _notifyIfActive();
           },
           onError: (Object _) {
             _stores = const [];
@@ -191,7 +292,7 @@ final class PurchasingController extends ChangeNotifier {
                 captureError: _state.captureError,
                 safeError: 'Purchase-history access was rejected.',
               );
-              notifyListeners();
+              _notifyIfActive();
               return;
             }
             _state = PurchasingState(
@@ -204,7 +305,7 @@ final class PurchasingController extends ChangeNotifier {
               captureNotice: _state.captureNotice,
               captureError: _state.captureError,
             );
-            notifyListeners();
+            _notifyIfActive();
           },
           onError: (Object _) {
             _state = PurchasingState(
@@ -218,7 +319,7 @@ final class PurchasingController extends ChangeNotifier {
               captureError: _state.captureError,
               safeError: 'Purchase history could not be loaded.',
             );
-            notifyListeners();
+            _notifyIfActive();
           },
         );
     final captureRepository = _captureRepository;
@@ -308,13 +409,15 @@ final class PurchasingController extends ChangeNotifier {
       _setCaptureError('Purchase capture access was rejected.');
       return;
     }
+    final previous = _state.capture;
+    final sameReceipt = capture != null && previous?.id == capture.id;
     final confirmed =
-        _state.capture?.commitAwaitingReadback == true &&
-        (capture == null ||
-            (capture.id == _state.capture!.id &&
-                capture.synchronizationState ==
-                    PurchaseSynchronizationState.synchronized));
-    if (confirmed) _lastSynchronizedReceiptId = _state.capture!.id;
+        capture != null &&
+        sameReceipt &&
+        previous!.commitAwaitingReadback &&
+        capture.synchronizationState ==
+            PurchaseSynchronizationState.synchronized;
+    if (_captureReadFailed && sameReceipt) _receiptErrors.remove(capture.id);
     _state = PurchasingState(
       lines: _state.lines,
       matchCandidates: _state.matchCandidates,
@@ -322,17 +425,20 @@ final class PurchasingController extends ChangeNotifier {
       loading: _state.loading,
       captureBusy: _state.captureBusy,
       capture: capture,
-      captureNotice: confirmed
+      captureNotice: capture == null
+          ? null
+          : confirmed
           ? 'The receipt commit is synchronized.'
-          : capture?.commitConfirmed == true &&
-                capture?.commitAwaitingReadback == true
+          : capture.commitConfirmed && capture.commitAwaitingReadback
           ? 'The server confirmed the receipt commit. Receipt details are refreshing.'
-          : _state.captureNotice,
-      captureError: _captureReadFailed ? null : _state.captureError,
+          : capture.synchronizationState == PurchaseSynchronizationState.pending
+          ? 'Saved on this device; awaiting server confirmation.'
+          : null,
+      captureError: capture == null ? null : _receiptErrors[capture.id],
       safeError: _state.safeError,
     );
     _captureReadFailed = false;
-    notifyListeners();
+    _notifyIfActive();
   }
 
   void selectView(PurchaseView view) {
@@ -348,7 +454,7 @@ final class PurchasingController extends ChangeNotifier {
       captureError: _state.captureError,
       safeError: _state.safeError,
     );
-    notifyListeners();
+    _notifyIfActive();
   }
 
   PurchaseDraftMaintenanceRepository? get _draftMaintenance =>
@@ -479,6 +585,7 @@ final class PurchasingController extends ChangeNotifier {
   Future<bool> addLine({
     required String rawDescription,
     required double quantity,
+    String? quantityText,
     String? originalPackText,
     Money? unitPrice,
     Money? lineTotal,
@@ -494,6 +601,7 @@ final class PurchasingController extends ChangeNotifier {
           receiptId: capture.id,
           rawDescription: rawDescription,
           quantity: quantity,
+          quantityText: quantityText,
           originalPackText: originalPackText,
           unitPrice: unitPrice,
           lineTotal: lineTotal,
@@ -745,7 +853,8 @@ final class PurchasingController extends ChangeNotifier {
     }
     if (line.approved) return true;
     if (!supported) return _rejectCapture(unavailableMessage);
-    if (_state.captureBusy) return false;
+    if (_state.captureBusy || _disposed) return false;
+    final originalReceiptId = _state.capture?.id;
     _setCaptureBusy(true);
     try {
       var homeProductId = _createdHomeProductIds[pendingKey];
@@ -765,6 +874,12 @@ final class PurchasingController extends ChangeNotifier {
         homeProductId: homeProductId,
         packId: reviewedPackId,
       );
+      if (_disposed) return true;
+      if (_state.capture?.id != originalReceiptId) {
+        _setCaptureBusy(false);
+        return true;
+      }
+      _receiptErrors.remove(capture.id);
       _state = PurchasingState(
         lines: _state.lines,
         matchCandidates: _state.matchCandidates,
@@ -772,7 +887,9 @@ final class PurchasingController extends ChangeNotifier {
         loading: _state.loading,
         capture: _state.capture,
         captureNotice:
-            result.disposition == PurchaseMutationDisposition.synchronized
+            result.disposition == PurchaseMutationDisposition.synchronized &&
+                _state.capture?.synchronizationState ==
+                    PurchaseSynchronizationState.synchronized
             ? 'The product and line approval are synchronized.'
             : result.disposition ==
                   PurchaseMutationDisposition.confirmedAwaitingReadback
@@ -780,19 +897,25 @@ final class PurchasingController extends ChangeNotifier {
             : 'The product and line approval are saved locally and queued.',
         safeError: _state.safeError,
       );
-      notifyListeners();
+      _notifyIfActive();
       return true;
     } on InventoryProductCreationException catch (error) {
-      _setCaptureError(error.safeMessage);
+      _reportMutationError(originalReceiptId, error.safeMessage);
       return false;
     } on PurchaseCaptureException catch (error) {
-      _setCaptureError(error.safeMessage);
+      _reportMutationError(originalReceiptId, error.safeMessage);
       return false;
     } on ArgumentError catch (_) {
-      _setCaptureError('Check the product name and pack details.');
+      _reportMutationError(
+        originalReceiptId,
+        'Check the product name and pack details.',
+      );
       return false;
     } catch (_) {
-      _setCaptureError('The product match could not be saved safely.');
+      _reportMutationError(
+        originalReceiptId,
+        'The product match could not be saved safely.',
+      );
       return false;
     }
   }
@@ -965,7 +1088,7 @@ final class PurchasingController extends ChangeNotifier {
       captureError: _state.captureError,
       safeError: _state.safeError,
     );
-    notifyListeners();
+    _notifyIfActive();
   }
 
   Future<bool> _runCaptureMutation(
@@ -978,11 +1101,20 @@ final class PurchasingController extends ChangeNotifier {
         'Purchase capture is unavailable for this read-only home.',
       );
     }
-    if (_state.captureBusy) return false;
+    if (_state.captureBusy || _disposed) return false;
+    final originalReceiptId = _state.capture?.id;
     _setCaptureBusy(true);
     try {
       final result = await mutation();
+      if (_disposed) return true;
       onResult?.call(result);
+      if (onResult == null && _state.capture?.id != originalReceiptId) {
+        _setCaptureBusy(false);
+        return true;
+      }
+      if (_state.capture?.id case final String receiptId) {
+        _receiptErrors.remove(receiptId);
+      }
       _state = PurchasingState(
         lines: _state.lines,
         matchCandidates: _state.matchCandidates,
@@ -990,8 +1122,9 @@ final class PurchasingController extends ChangeNotifier {
         loading: _state.loading,
         capture: _state.capture,
         captureNotice:
-            result.disposition == PurchaseMutationDisposition.synchronized ||
-                _lastSynchronizedReceiptId == result.entityId
+            result.disposition == PurchaseMutationDisposition.synchronized &&
+                _state.capture?.synchronizationState ==
+                    PurchaseSynchronizationState.synchronized
             ? 'The receipt change is synchronized.'
             : _state.capture?.commitConfirmed == true
             ? 'The server confirmed the receipt commit. Receipt details are refreshing.'
@@ -1001,18 +1134,34 @@ final class PurchasingController extends ChangeNotifier {
             : queuedNotice,
         safeError: _state.safeError,
       );
-      notifyListeners();
+      _notifyIfActive();
       return true;
     } on PurchaseCaptureException catch (error) {
-      _setCaptureError(error.safeMessage);
+      _reportMutationError(originalReceiptId, error.safeMessage);
       return false;
     } on ArgumentError catch (_) {
-      _setCaptureError('Check the receipt values and try again.');
+      _reportMutationError(
+        originalReceiptId,
+        'Check the receipt values and try again.',
+      );
       return false;
     } catch (_) {
-      _setCaptureError('The receipt change could not be saved safely.');
+      _reportMutationError(
+        originalReceiptId,
+        'The receipt change could not be saved safely.',
+      );
       return false;
     }
+  }
+
+  void _reportMutationError(String? receiptId, String message) {
+    if (_disposed) return;
+    if (receiptId != _state.capture?.id) {
+      if (receiptId != null) _receiptErrors[receiptId] = message;
+      _setCaptureBusy(false);
+      return;
+    }
+    _setCaptureError(message);
   }
 
   Future<bool> _rejectCapture(String safeMessage) async {
@@ -1029,12 +1178,17 @@ final class PurchasingController extends ChangeNotifier {
       captureBusy: busy,
       capture: _state.capture,
       captureNotice: _state.captureNotice,
+      captureError: _state.captureError,
       safeError: _state.safeError,
     );
-    notifyListeners();
+    _notifyIfActive();
   }
 
   void _setCaptureError(String safeMessage) {
+    if (_disposed) return;
+    if (_state.capture?.id case final String receiptId) {
+      _receiptErrors[receiptId] = safeMessage;
+    }
     _state = PurchasingState(
       lines: _state.lines,
       matchCandidates: _state.matchCandidates,
@@ -1045,15 +1199,20 @@ final class PurchasingController extends ChangeNotifier {
       captureError: safeMessage,
       safeError: _state.safeError,
     );
-    notifyListeners();
+    _notifyIfActive();
   }
 
   String _captureSafeError(Object error) => error is PurchaseCaptureException
       ? error.safeMessage
       : 'Receipt capture could not be loaded safely.';
 
+  void _notifyIfActive() {
+    if (!_disposed) notifyListeners();
+  }
+
   @override
   void dispose() {
+    _disposed = true;
     _storesSubscription?.cancel();
     unawaited(_subscription?.cancel());
     unawaited(_captureSubscription?.cancel());

@@ -200,6 +200,7 @@ class _AdaptiveShell extends StatelessWidget {
       builder: (context, constraints) {
         final width = constraints.maxWidth;
         final content = _ContentViewport(
+          accountPageBuilder: accountPageBuilder,
           controller: controller,
           catalogContributionPageBuilder: catalogContributionPageBuilder,
           receiptImportPageBuilder: receiptImportPageBuilder,
@@ -347,6 +348,7 @@ class _AccountActionsButton extends StatelessWidget {
 
 class _ContentViewport extends StatelessWidget {
   const _ContentViewport({
+    required this.accountPageBuilder,
     required this.controller,
     required this.catalogContributionPageBuilder,
     required this.receiptImportPageBuilder,
@@ -356,6 +358,7 @@ class _ContentViewport extends StatelessWidget {
     required this.onCountReconciliation,
   });
 
+  final WidgetBuilder? accountPageBuilder;
   final WidgetBuilder? catalogContributionPageBuilder;
   final WidgetBuilder? receiptImportPageBuilder;
   final AppController controller;
@@ -369,6 +372,7 @@ class _ContentViewport extends StatelessWidget {
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
     final page = switch (controller.section) {
       AppSection.home => _HomeWorkspace(
+        accountPageBuilder: accountPageBuilder,
         controller: controller,
         features: features,
         access: access,
@@ -429,6 +433,7 @@ class _ContentViewport extends StatelessWidget {
 
 class _HomeWorkspace extends StatelessWidget {
   const _HomeWorkspace({
+    required this.accountPageBuilder,
     required this.controller,
     required this.features,
     required this.access,
@@ -436,6 +441,7 @@ class _HomeWorkspace extends StatelessWidget {
     required this.onCountReconciliation,
   });
 
+  final WidgetBuilder? accountPageBuilder;
   final AppController controller;
   final HouseholdFeatures? features;
   final HouseholdWorkspaceAccess access;
@@ -479,6 +485,15 @@ class _HomeWorkspace extends StatelessWidget {
                     _SyncStatusCard(
                       summary: controller.syncSummary,
                       onRetry: controller.refresh,
+                      onReviewSession: accountPageBuilder == null
+                          ? null
+                          : () => unawaited(
+                              Navigator.of(context).push<void>(
+                                MaterialPageRoute<void>(
+                                  builder: accountPageBuilder!,
+                                ),
+                              ),
+                            ),
                       onReviewConflicts: syncConflictController == null
                           ? null
                           : () {
@@ -632,11 +647,13 @@ class _SyncStatusCard extends StatelessWidget {
     required this.summary,
     required this.onRetry,
     required this.onReviewConflicts,
+    required this.onReviewSession,
   });
 
   final SyncSummary summary;
   final Future<void> Function() onRetry;
   final VoidCallback? onReviewConflicts;
+  final VoidCallback? onReviewSession;
 
   @override
   Widget build(BuildContext context) {
@@ -653,7 +670,21 @@ class _SyncStatusCard extends StatelessWidget {
         summary.availability == SyncAvailability.temporarilyUnavailable;
     final checking = summary.availability == SyncAvailability.checking;
 
-    final (icon, title, detail, background, foreground) = conflict
+    final (
+      icon,
+      title,
+      detail,
+      background,
+      foreground,
+    ) = summary.isSynchronizing
+        ? (
+            Icons.sync_rounded,
+            'Synchronizing…',
+            'Processing household dependencies and refreshing confirmed details.',
+            ProvidentiaColors.mint,
+            ProvidentiaColors.forest,
+          )
+        : conflict
         ? (
             Icons.sync_problem_rounded,
             'Review a synchronization conflict',
@@ -681,9 +712,9 @@ class _SyncStatusCard extends StatelessWidget {
         : authorization
         ? (
             Icons.person_off_outlined,
-            'Access to this home changed',
+            syncFailureHeading(summary.failureCode),
             summary.lastSafeError ??
-                'Your local data is preserved while access is reviewed.',
+                'Your local data is preserved while this failure is reviewed.',
             ProvidentiaColors.warningSurface,
             ProvidentiaColors.warning,
           )
@@ -747,6 +778,25 @@ class _SyncStatusCard extends StatelessWidget {
                         ),
                         const SizedBox(height: 2),
                         Text(detail),
+                        if (summary.unresolved > 0)
+                          Text(
+                            '${summary.unresolved} saved operations unresolved: '
+                            '${summary.blocked} blocked, ${summary.waiting} waiting.',
+                            key: const Key('sync-unresolved-counts'),
+                          ),
+                        if (summary.blockedOperationType != null) ...[
+                          Text(
+                            '${summary.failureCode != null || summary.nextRetryAt != null ? 'First blocker' : 'First queued action'}: ${syncOperationLabel(summary.blockedOperationType)}. '
+                            '${summary.waitingBehindFirst} later operation(s) wait for this dependency.',
+                            key: const Key('sync-first-blocker'),
+                          ),
+                          Text(syncRecoveryInstruction(summary.failureCode)),
+                        ],
+                        if (summary.nextRetryAt case final DateTime retryAt)
+                          Text(
+                            'Next automatic retry: ${retryAt.toLocal()}. Sync now retries eligible delays without skipping dependencies.',
+                            key: const Key('sync-next-retry'),
+                          ),
                         if (summary.lastSuccessfulSync
                             case final DateTime lastSync)
                           Padding(
@@ -768,6 +818,19 @@ class _SyncStatusCard extends StatelessWidget {
                 alignment: WrapAlignment.end,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: <Widget>[
+                  if (onReviewSession != null &&
+                      (authentication ||
+                          const {
+                            'device_binding_mismatch',
+                            'account_binding_mismatch',
+                            'origin_account_unknown',
+                          }.contains(summary.failureCode)))
+                    TextButton.icon(
+                      key: const Key('review-sync-session'),
+                      onPressed: onReviewSession,
+                      icon: const Icon(Icons.manage_accounts_outlined),
+                      label: const Text('Review account/session'),
+                    ),
                   if (conflict && onReviewConflicts != null)
                     IconButton(
                       key: const Key('review-sync-conflicts'),
@@ -783,7 +846,9 @@ class _SyncStatusCard extends StatelessWidget {
                             await onRetry();
                           },
                     icon: const Icon(Icons.refresh_rounded),
-                    label: const Text('Sync now'),
+                    label: Text(
+                      summary.isSynchronizing ? 'Synchronizing…' : 'Sync now',
+                    ),
                   ),
                 ],
               );

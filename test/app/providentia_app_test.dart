@@ -98,6 +98,7 @@ void main() {
       availability: SyncAvailability.authorizationDenied,
       isSynchronizing: false,
       lastSafeError: 'Home membership no longer permits synchronization.',
+      failureCode: 'home_access_denied',
     );
 
     await tester.pumpWidget(
@@ -108,6 +109,65 @@ void main() {
     expect(find.textContaining('membership'), findsOneWidget);
     expect(find.text('Sign in to continue'), findsNothing);
   });
+
+  testWidgets(
+    'device mismatch exposes its own diagnosis and actual account route',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1000, 1000));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final summary = const SyncSummary.initial().copyWith(
+        pending: 71,
+        blockedAuthorization: 1,
+        availability: SyncAvailability.online,
+        failureCode: 'device_binding_mismatch',
+        blockedOperationType: 'purchasing.receipt.create',
+        lastSafeError: 'The synchronization device does not match the session.',
+      );
+      await tester.pumpWidget(
+        ProvidentiaApp(
+          controller: AppController.preview(summary: summary),
+          accountPageBuilder: (_) =>
+              const Scaffold(body: Text('Existing account settings')),
+        ),
+      );
+      expect(find.text('Review this device and session'), findsOneWidget);
+      expect(find.text('Access to this home changed'), findsNothing);
+      expect(
+        find.textContaining('72 saved operations unresolved'),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('First blocker: Create receipt'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('71 later operation(s)'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('review-sync-session')));
+      await tester.pumpAndSettle();
+      expect(find.text('Existing account settings'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'active synchronization is visible even with waiting or blocked work',
+    (tester) async {
+      final summary = const SyncSummary.initial().copyWith(
+        pending: 5,
+        blockedAuthorization: 1,
+        isSynchronizing: true,
+        failureCode: 'device_binding_mismatch',
+      );
+      await tester.pumpWidget(
+        ProvidentiaApp(controller: AppController.preview(summary: summary)),
+      );
+      expect(find.text('Synchronizing…'), findsNWidgets(2));
+      final retry = tester.widget<TextButton>(
+        find.byKey(const Key('manual-sync')),
+      );
+      expect(retry.onPressed, isNull);
+      expect(find.text('Saved on this device — waiting to sync'), findsNothing);
+      expect(find.text('Up to date'), findsNothing);
+    },
+  );
 
   testWidgets(
     'sync action is labelled and the last successful refresh is visible',

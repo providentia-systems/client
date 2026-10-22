@@ -68,7 +68,7 @@ void main() {
     expect(controller.syncSummary.pending, 2);
   });
 
-  test('overlapping refresh requests are coalesced', () async {
+  test('overlapping refresh callers join and drain a follow-up pass', () async {
     final gate = Completer<void>();
     final synchronization = _FakeSynchronization(connectivityGate: gate);
     final controller = AppController(
@@ -85,9 +85,39 @@ void main() {
     gate.complete();
     await Future.wait(<Future<void>>[first, second]);
 
-    expect(synchronization.synchronizeCalls, 1);
-    expect(synchronization.connectivityCalls, 2);
+    expect(synchronization.synchronizeCalls, 2);
+    expect(synchronization.connectivityCalls, 4);
   });
+
+  test(
+    'joined callers await network completion and work saved mid-run gets a pass',
+    () async {
+      final gate = Completer<void>();
+      final synchronization = _FakeSynchronization(synchronizeGate: gate);
+      final controller = AppController(
+        synchronization: synchronization,
+        activeHomeId: 'home-1',
+      );
+      addTearDown(() async {
+        controller.dispose();
+        await synchronization.close();
+      });
+      final first = controller.refresh();
+      await Future<void>.delayed(Duration.zero);
+      var joinedCompleted = false;
+      final joined = controller.refresh().then((_) => joinedCompleted = true);
+      await Future<void>.delayed(Duration.zero);
+      expect(joinedCompleted, isFalse);
+      expect(controller.syncSummary.isSynchronizing, isTrue);
+      expect(synchronization.synchronizeCalls, 1);
+      gate.complete();
+      await Future.wait([first, joined]);
+      expect(synchronization.synchronizeCalls, 2);
+      expect(synchronization.maximumConcurrentRuns, 1);
+      expect(joinedCompleted, isTrue);
+      expect(controller.syncSummary.isSynchronizing, isFalse);
+    },
+  );
 
   test('successful synchronization uses the injected UTC clock', () async {
     final synchronization = _FakeSynchronization();
@@ -217,6 +247,7 @@ final class _FakeSynchronization implements AppSynchronization {
     this.outcome = const SyncRunOutcome(status: SyncRunStatus.completed),
     this.connectivityGate,
     this.connectivityFailure,
+    this.synchronizeGate,
   });
 
   SyncRunOutcome outcome;
@@ -229,6 +260,9 @@ final class _FakeSynchronization implements AppSynchronization {
   final List<String> watchedHomes = <String>[];
   int connectivityCalls = 0;
   int synchronizeCalls = 0;
+  final Completer<void>? synchronizeGate;
+  int _activeRuns = 0;
+  int maximumConcurrentRuns = 0;
 
   @override
   Future<ConnectivityResult> connectivity() async {
@@ -241,6 +275,12 @@ final class _FakeSynchronization implements AppSynchronization {
   @override
   Future<SyncRunOutcome> synchronize(String homeId) async {
     synchronizeCalls++;
+    _activeRuns++;
+    if (_activeRuns > maximumConcurrentRuns) {
+      maximumConcurrentRuns = _activeRuns;
+    }
+    await synchronizeGate?.future;
+    _activeRuns--;
     return outcome;
   }
 

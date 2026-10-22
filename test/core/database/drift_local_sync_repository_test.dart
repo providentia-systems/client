@@ -46,6 +46,72 @@ void main() {
   });
 
   test(
+    'summary identifies the first queue barrier and preserves waiting work',
+    () async {
+      await repository.commitLocalMutation(_mutation());
+      await repository.commitLocalMutation(
+        _mutation(operationId: 'operation-2', entityId: 'record-2'),
+      );
+      await repository.markSyncing(const ['operation-1']);
+      await repository.applyPushResults(
+        results: [
+          PushOperationResult(
+            operationId: 'operation-1',
+            kind: PushResultKind.authorizationFailure,
+            code: 'device_binding_mismatch',
+            safeMessage:
+                'The synchronization device does not match the session.',
+          ),
+        ],
+        now: clock,
+        retryPolicy: RetryPolicy(),
+      );
+      final summary = await repository.watchSummary(homeId: 'home-1').first;
+      expect(summary.failureCode, 'device_binding_mismatch');
+      expect(summary.blockedAuthorization, 1);
+      expect(summary.pending, 1);
+      expect(summary.unresolved, 2);
+      expect(summary.lastSafeError, contains('device'));
+      expect(
+        await repository.pendingOperations(homeId: 'home-1', now: clock),
+        isEmpty,
+      );
+      expect(
+        await database.select(database.clientOperations).get(),
+        hasLength(2),
+      );
+    },
+  );
+
+  test(
+    'summary never attributes a later failure to a pending predecessor',
+    () async {
+      await repository.commitLocalMutation(_mutation());
+      await repository.commitLocalMutation(
+        _mutation(operationId: 'operation-2', entityId: 'record-2'),
+      );
+      await repository.markSyncing(const ['operation-2']);
+      await repository.applyPushResults(
+        results: [
+          PushOperationResult(
+            operationId: 'operation-2',
+            kind: PushResultKind.validationError,
+            code: 'invalid_command',
+            safeMessage: 'A later line needs review.',
+          ),
+        ],
+        now: clock,
+        retryPolicy: RetryPolicy(),
+      );
+      final summary = await repository.watchSummary(homeId: 'home-1').first;
+      expect(summary.failureCode, isNull);
+      expect(summary.lastSafeError, isNull);
+      expect(summary.pending, 1);
+      expect(summary.blockedValidation, 1);
+    },
+  );
+
+  test(
     'create operation keeps a nullable base revision and local revision 0',
     () async {
       await repository.commitLocalMutation(_mutation());

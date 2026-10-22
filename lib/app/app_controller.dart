@@ -32,6 +32,8 @@ final class AppController extends ChangeNotifier {
   SyncSummary _syncSummary = const SyncSummary.initial();
   bool _started = false;
   bool _refreshing = false;
+  Future<void>? _refreshFuture;
+  bool _refreshRequested = false;
   bool _disposed = false;
 
   AppSection get section => _section;
@@ -64,15 +66,42 @@ final class AppController extends ChangeNotifier {
     _notifyIfActive();
   }
 
-  Future<void> refresh() async {
-    final synchronization = _synchronization;
-    if (synchronization == null || _refreshing || _disposed) {
-      return;
+  /// Every caller observes the same serialized run. A request received during
+  /// that run schedules another pass, covering mutations saved after its queue
+  /// snapshot without allowing concurrent uploads.
+  Future<void> refresh() {
+    if (_synchronization == null || _disposed) return Future<void>.value();
+    final active = _refreshFuture;
+    if (active != null) {
+      _refreshRequested = true;
+      return active;
     }
-
+    final completer = Completer<void>();
+    _refreshFuture = completer.future;
     _refreshing = true;
     _syncSummary = _syncSummary.copyWith(isSynchronizing: true);
     _notifyIfActive();
+    unawaited(_drainRefreshRequests(completer));
+    return completer.future;
+  }
+
+  Future<void> _drainRefreshRequests(Completer<void> completer) async {
+    try {
+      do {
+        _refreshRequested = false;
+        await _refreshOnce();
+      } while (_refreshRequested && !_disposed);
+    } finally {
+      _refreshing = false;
+      _refreshFuture = null;
+      _syncSummary = _syncSummary.copyWith(isSynchronizing: false);
+      _notifyIfActive();
+      completer.complete();
+    }
+  }
+
+  Future<void> _refreshOnce() async {
+    final synchronization = _synchronization!;
     try {
       final availability = await synchronization.connectivity();
       if (_disposed) return;
@@ -80,17 +109,16 @@ final class AppController extends ChangeNotifier {
         availability: availability.availability,
         isSynchronizing: true,
         lastSafeError: availability.safeMessage,
-        clearError: availability.safeMessage == null,
+        clearError:
+            availability.safeMessage == null && _syncSummary.unresolved == 0,
       );
       _notifyIfActive();
-
-      if (availability.availability != SyncAvailability.online) {
-        return;
-      }
+      if (availability.availability != SyncAvailability.online) return;
 
       final outcome = await synchronization.synchronize(activeHomeId);
       if (_disposed) return;
       final after = await synchronization.connectivity();
+      if (_disposed) return;
       final outcomeAvailability = switch (outcome.status) {
         SyncRunStatus.authenticationRequired =>
           SyncAvailability.authenticationRequired,
@@ -104,23 +132,26 @@ final class AppController extends ChangeNotifier {
       };
       _syncSummary = _syncSummary.copyWith(
         availability: outcomeAvailability,
-        isSynchronizing: false,
+        isSynchronizing: true,
         lastSuccessfulSync: outcome.completed ? _clock().toUtc() : null,
         lastSafeError: outcome.safeMessage ?? after.safeMessage,
         clearError:
             outcome.completed &&
             outcome.safeMessage == null &&
             after.safeMessage == null,
+        failureCode: outcome.failureCode,
+        blockedOperationType: outcome.blockedOperationType,
+        nextRetryAt: outcome.nextRetryAt,
+        clearDiagnostics: outcome.completed,
       );
       _notifyIfActive();
     } on Exception {
+      if (_disposed) return;
       _syncSummary = _syncSummary.copyWith(
         availability: SyncAvailability.temporarilyUnavailable,
         lastSafeError: 'Synchronization was interrupted. Try again safely.',
+        failureCode: 'service_unavailable',
       );
-    } finally {
-      _refreshing = false;
-      _syncSummary = _syncSummary.copyWith(isSynchronizing: false);
       _notifyIfActive();
     }
   }

@@ -92,6 +92,11 @@ final class SyncCoordinator implements AppSynchronization {
               ? SyncRunStatus.authenticationRequired
               : SyncRunStatus.offline,
           safeMessage: connectivity.safeMessage,
+          failureCode:
+              connectivity.availability ==
+                  SyncAvailability.authenticationRequired
+              ? 'authentication_required'
+              : 'network_unavailable',
         );
       }
 
@@ -303,10 +308,13 @@ final class SyncCoordinator implements AppSynchronization {
           status: SyncRunStatus.uploadsBlocked,
           pullCompleted: true,
           remainingUploads: remaining.unresolved,
+          failureCode: remaining.failureCode,
+          blockedOperationType: remaining.blockedOperationType,
+          nextRetryAt: remaining.nextRetryAt,
           acknowledgedCount: acknowledged,
           pulledChangeCount: pulled,
           safeMessage:
-              'Downloads are current, but ${remaining.unresolved} saved upload(s) need attention. '
+              '${remaining.unresolved} saved household operation(s) remain unresolved. '
               '${remaining.lastSafeError ?? 'Review the first blocked operation before retrying.'}',
         );
       }
@@ -316,10 +324,13 @@ final class SyncCoordinator implements AppSynchronization {
           status: SyncRunStatus.uploadsPending,
           pullCompleted: true,
           remainingUploads: remaining.unresolved,
+          failureCode: remaining.failureCode,
+          blockedOperationType: remaining.blockedOperationType,
+          nextRetryAt: remaining.nextRetryAt,
           acknowledgedCount: acknowledged,
           pulledChangeCount: pulled,
           safeMessage:
-              'Downloads are current; ${remaining.unresolved} saved upload(s) are still queued.',
+              '${remaining.unresolved} saved household operation(s) are still queued; downloads completed.',
         );
       }
       _metrics.recordSuccess(
@@ -334,41 +345,81 @@ final class SyncCoordinator implements AppSynchronization {
       );
     } on AuthenticationSyncException catch (error) {
       _metrics.recordFailure(classification: 'authentication_required');
-      return SyncRunOutcome(
+      return await _failureOutcome(
+        homeId: homeId,
         status: SyncRunStatus.authenticationRequired,
         safeMessage: error.safeMessage,
-        acknowledgedCount: acknowledged,
-        pulledChangeCount: pulled,
+        failureCode: 'authentication_required',
+        acknowledged: acknowledged,
+        pulled: pulled,
       );
     } on AuthorizationSyncException catch (error) {
       _metrics.recordFailure(classification: 'authorization_failure');
-      return SyncRunOutcome(
+      return await _failureOutcome(
+        homeId: homeId,
         status: SyncRunStatus.authorizationFailure,
         safeMessage: error.safeMessage,
-        acknowledgedCount: acknowledged,
-        pulledChangeCount: pulled,
+        failureCode: 'home_access_denied',
+        acknowledged: acknowledged,
+        pulled: pulled,
       );
     } on RetryableSyncException catch (error) {
       _metrics.recordFailure(classification: 'retryable');
-      return SyncRunOutcome(
+      return await _failureOutcome(
+        homeId: homeId,
         status: SyncRunStatus.retryableFailure,
         safeMessage: error.safeMessage,
-        acknowledgedCount: acknowledged,
-        pulledChangeCount: pulled,
+        failureCode: 'service_unavailable',
+        acknowledged: acknowledged,
+        pulled: pulled,
       );
     } on Exception {
       _metrics.recordFailure(classification: 'retryable');
-      return SyncRunOutcome(
+      return await _failureOutcome(
+        homeId: homeId,
         status: SyncRunStatus.retryableFailure,
         safeMessage: 'Synchronization was interrupted. Try again safely.',
-        acknowledgedCount: acknowledged,
-        pulledChangeCount: pulled,
+        failureCode: 'network_unavailable',
+        acknowledged: acknowledged,
+        pulled: pulled,
       );
     } finally {
       elapsed.stop();
       _metrics.recordDuration(elapsed: elapsed.elapsed);
       _running = false;
     }
+  }
+
+  Future<SyncRunOutcome> _failureOutcome({
+    required String homeId,
+    required SyncRunStatus status,
+    required String safeMessage,
+    required String failureCode,
+    required int acknowledged,
+    required int pulled,
+  }) async {
+    // A download or transport failure must not erase an earlier durable
+    // predecessor block. Read only queue metadata, never private payloads.
+    SyncSummary? remaining;
+    try {
+      remaining = await _local.watchSummary(homeId: homeId).first;
+    } on Exception {
+      // The failed local read is not evidence that the upload queue is empty.
+    }
+    final preserveBlock =
+        status == SyncRunStatus.retryableFailure &&
+        remaining != null &&
+        remaining.blocked > 0;
+    return SyncRunOutcome(
+      status: status,
+      safeMessage: safeMessage,
+      failureCode: preserveBlock ? remaining.failureCode : failureCode,
+      blockedOperationType: remaining?.blockedOperationType,
+      nextRetryAt: remaining?.nextRetryAt,
+      remainingUploads: remaining?.unresolved ?? 0,
+      acknowledgedCount: acknowledged,
+      pulledChangeCount: pulled,
+    );
   }
 
   Future<SyncRunOutcome> retryOperation({

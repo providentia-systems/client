@@ -52,6 +52,9 @@ final class SyncRunOutcome {
     this.pulledChangeCount = 0,
     this.pullCompleted = false,
     this.remainingUploads = 0,
+    this.failureCode,
+    this.blockedOperationType,
+    this.nextRetryAt,
   });
 
   final SyncRunStatus status;
@@ -60,6 +63,14 @@ final class SyncRunOutcome {
   final int pulledChangeCount;
   final bool pullCompleted;
   final int remainingUploads;
+
+  /// Allowlisted classification, never inferred from translated server prose.
+  final String? failureCode;
+
+  /// Safe command type of the first unresolved household dependency.
+  /// No command payload or household/entity identity belongs in diagnostics.
+  final String? blockedOperationType;
+  final DateTime? nextRetryAt;
 
   bool get completed => status == SyncRunStatus.completed;
 }
@@ -395,6 +406,9 @@ final class SyncSummary {
     required this.isSynchronizing,
     this.lastSuccessfulSync,
     this.lastSafeError,
+    this.failureCode,
+    this.blockedOperationType,
+    this.nextRetryAt,
   });
 
   const SyncSummary.initial()
@@ -408,7 +422,10 @@ final class SyncSummary {
       availability = SyncAvailability.checking,
       isSynchronizing = false,
       lastSuccessfulSync = null,
-      lastSafeError = null;
+      lastSafeError = null,
+      failureCode = null,
+      blockedOperationType = null,
+      nextRetryAt = null;
 
   final int pending;
   final int syncing;
@@ -421,6 +438,13 @@ final class SyncSummary {
   final bool isSynchronizing;
   final DateTime? lastSuccessfulSync;
   final String? lastSafeError;
+  final String? failureCode;
+  final String? blockedOperationType;
+  final DateTime? nextRetryAt;
+
+  /// Later operations wait behind the first unresolved predecessor; this is
+  /// not a count of independently failing purchases or receipts.
+  int get waitingBehindFirst => unresolved > 0 ? unresolved - 1 : 0;
 
   int get waiting => pending + syncing + retryWaiting;
   int get blocked =>
@@ -440,6 +464,10 @@ final class SyncSummary {
     DateTime? lastSuccessfulSync,
     String? lastSafeError,
     bool clearError = false,
+    String? failureCode,
+    String? blockedOperationType,
+    DateTime? nextRetryAt,
+    bool clearDiagnostics = false,
   }) {
     return SyncSummary(
       pending: pending ?? this.pending,
@@ -453,6 +481,11 @@ final class SyncSummary {
       isSynchronizing: isSynchronizing ?? this.isSynchronizing,
       lastSuccessfulSync: lastSuccessfulSync ?? this.lastSuccessfulSync,
       lastSafeError: clearError ? null : (lastSafeError ?? this.lastSafeError),
+      failureCode: clearDiagnostics ? null : (failureCode ?? this.failureCode),
+      blockedOperationType: clearDiagnostics
+          ? null
+          : (blockedOperationType ?? this.blockedOperationType),
+      nextRetryAt: clearDiagnostics ? null : (nextRetryAt ?? this.nextRetryAt),
     );
   }
 }
@@ -509,6 +542,8 @@ final class BindingSyncException implements Exception {
 String? sanitizedSyncFailureCode(String? code) {
   if (code == null) return null;
   return const <String>{
+        'authentication_required',
+        'network_unavailable',
         'device_binding_mismatch',
         'account_binding_mismatch',
         'origin_account_unknown',
@@ -527,3 +562,83 @@ String? sanitizedSyncFailureCode(String? code) {
       ? code
       : 'unclassified_failure';
 }
+
+/// User-facing diagnosis is driven only by a documented safe code. In
+/// particular, command-level authorization blocks do not prove home revocation.
+String syncFailureHeading(String? code) => switch (code) {
+  'device_binding_mismatch' => 'Review this device and session',
+  'account_binding_mismatch' => 'Use the original account',
+  'origin_account_unknown' => 'Review saved-operation provenance',
+  'authentication_required' => 'Sign in to continue',
+  'home_access_denied' => 'Access to this home changed',
+  'permission_denied' => 'Review permission for this change',
+  'revision_conflict' ||
+  'revision_mismatch' ||
+  'concurrent_write' => 'Review a synchronization conflict',
+  'invalid_command' ||
+  'resource_unavailable' => 'Review a change before syncing',
+  'network_unavailable' || 'service_unavailable' => 'Synchronization paused',
+  _ => 'Review synchronization',
+};
+
+String syncRecoveryInstruction(String? code) => switch (code) {
+  'device_binding_mismatch' =>
+    'Open Review account/session and verify the original account. Device-binding recovery requires the supported backend recovery update; retry cannot reassign saved operations. Saved operations are preserved.',
+  'account_binding_mismatch' =>
+    'Sign in with the account that saved these changes, then review synchronization. Do not recreate the pending purchases.',
+  'origin_account_unknown' =>
+    'The original account could not be verified. Review account/session; saved-operation provenance requires supported recovery before retrying. Automatic reassignment is blocked.',
+  'authentication_required' =>
+    'Sign in again to continue synchronization. Saved local changes remain on this device.',
+  'home_access_denied' =>
+    'Review access to this home before continuing. A verified home denial cannot be repaired by retrying a purchase.',
+  'permission_denied' =>
+    'Review the permission required for the first blocked change. Later saved changes remain queued behind it.',
+  'revision_conflict' || 'revision_mismatch' || 'concurrent_write' =>
+    'Open synchronization conflict review in Home and compare the saved and server versions before retrying.',
+  'invalid_command' || 'resource_unavailable' =>
+    'Review and correct the first blocked change in Home synchronization. Later changes cannot skip this dependency.',
+  'operation_id_reuse' =>
+    'Review this saved operation before continuing. Its identity cannot be safely reused for a different change.',
+  'network_unavailable' || 'service_unavailable' =>
+    'Reconnect and use Retry synchronization to try again safely with the existing operation identities.',
+  _ =>
+    'Open Home synchronization to review the first unresolved change. Your saved queue is preserved.',
+};
+
+/// A command name is translated through a closed list so diagnostics cannot
+/// accidentally display a private description or an unrecognized raw value.
+String syncOperationLabel(String? type) => switch (type) {
+  'purchasing.receipt.create' => 'Create receipt',
+  'purchasing.receipt.update' => 'Update receipt details',
+  'purchasing.receipt.commit' => 'Finish receipt',
+  'purchasing.receipt.cancel' => 'Cancel receipt',
+  'purchasing.receipt-line.create' => 'Add receipt line',
+  'purchasing.receipt-line.purchase' => 'Save purchased receipt line',
+  'purchasing.receipt-line.update' => 'Correct receipt line',
+  'purchasing.receipt-line.remove' => 'Remove receipt line',
+  'purchasing.receipt-line.approve' => 'Approve receipt line',
+  'purchasing.receipt-line.unresolve' => 'Leave receipt line unresolved',
+  'purchasing.store.create' => 'Create store',
+  'purchasing.store.update' => 'Update store',
+  'shopping.list.create' => 'Create shopping list',
+  'shopping.list.update' => 'Update shopping list',
+  'shopping.list-line.create' => 'Add shopping item',
+  'shopping.list-line.update' => 'Update shopping item',
+  'shopping.list-line.checked' => 'Check shopping item',
+  'shopping.preference.put' => 'Update stock preference',
+  'shopping.suggestion-feedback.create' => 'Save shopping feedback',
+  'inventory.location.create' => 'Create storage location',
+  'inventory.location.update' => 'Update storage location',
+  'inventory.home-product.create' => 'Create household product',
+  'inventory.home-product.update' => 'Update household product',
+  'inventory.home-category.create' => 'Create household category',
+  'inventory.home-category.update' => 'Update household category',
+  'inventory.adjustment.create' => 'Adjust stock quantity',
+  'inventory.count-session.create' => 'Start stock count',
+  'inventory.count-line.upsert' => 'Save stock count line',
+  'inventory.count-line.remove' => 'Remove stock count line',
+  'inventory.count-session.close' => 'Finish stock count',
+  'inventory.count-session.cancel' => 'Cancel stock count',
+  _ => 'Household change',
+};
