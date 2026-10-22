@@ -19,7 +19,6 @@ class _ShoppingWorkspaceState extends State<ShoppingWorkspace> {
   bool _showRemoved = false;
   final TextEditingController _draft = TextEditingController();
   final TextEditingController _quantityDraft = TextEditingController(text: '1');
-  final FocusNode _productFocus = FocusNode();
   String? _selectedProductId;
   String? _entryError;
   var _quantityReset = 0;
@@ -66,7 +65,6 @@ class _ShoppingWorkspaceState extends State<ShoppingWorkspace> {
   void dispose() {
     _draft.removeListener(_textChanged);
     _draft.dispose();
-    _productFocus.dispose();
     _quantityDraft.dispose();
     super.dispose();
   }
@@ -138,7 +136,10 @@ class _ShoppingWorkspaceState extends State<ShoppingWorkspace> {
               ),
             ],
             if (list?.archived != true) ...<Widget>[
-              _manualEntry(),
+              KeyedSubtree(
+                key: ObjectKey(widget.controller),
+                child: _manualEntry(),
+              ),
               if (_selectedProduct case final product?)
                 Text(
                   'Selected household product: ${product.canonicalName}. '
@@ -293,7 +294,6 @@ class _ShoppingWorkspaceState extends State<ShoppingWorkspace> {
     final productField = DropdownMenu<String>(
       key: const Key('manual-list-input'),
       controller: _draft,
-      focusNode: _productFocus,
       expandedInsets: EdgeInsets.zero,
       enableFilter: true,
       enableSearch: true,

@@ -131,6 +131,84 @@ void main() {
     await _close(tester, controller, repository);
   });
 
+  testWidgets('a late save from the previous home cannot clear the new draft', (
+    tester,
+  ) async {
+    final previous = _Repository();
+    final oldController = _controller(previous);
+    await _show(tester, oldController);
+    previous.saveGate = Completer<void>();
+    await tester.enterText(
+      find.byKey(const Key('manual-list-input')),
+      'Old home item',
+    );
+    await tester.tap(find.byKey(const Key('manual-list-add')));
+    await tester.pump();
+    final next = _Repository(homeId: 'other-home');
+    final newController = _controller(next);
+    await _show(tester, newController);
+    expect(newController.manualBusy, false);
+    expect(
+      tester
+          .widget<DropdownMenu<String>>(
+            find.byKey(const Key('manual-list-input')),
+          )
+          .enabled,
+      true,
+    );
+    final editable = tester.widget<EditableText>(
+      find.descendant(
+        of: find.byKey(const Key('manual-list-input')),
+        matching: find.byType(EditableText),
+      ),
+    );
+    expect(editable.readOnly, false);
+    expect(
+      identical(
+        editable.controller,
+        tester
+            .widget<DropdownMenu<String>>(
+              find.byKey(const Key('manual-list-input')),
+            )
+            .controller,
+      ),
+      true,
+    );
+    await tester.tap(find.byKey(const Key('manual-list-input')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('manual-list-input')),
+      'New home draft',
+    );
+    await tester.pump();
+    expect(
+      tester
+          .widget<DropdownMenu<String>>(
+            find.byKey(const Key('manual-list-input')),
+          )
+          .controller!
+          .text,
+      'New home draft',
+      reason: 'before prior save completion',
+    );
+    previous.saveGate!.complete();
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<DropdownMenu<String>>(
+            find.byKey(const Key('manual-list-input')),
+          )
+          .controller!
+          .text,
+      'New home draft',
+    );
+    expect(newController.state.list!.lines, isEmpty);
+    expect(previous.current.lines.single.homeId, 'home');
+    oldController.dispose();
+    await previous.close();
+    await _close(tester, newController, next);
+  });
+
   test(
     'item-master isolation rejects foreign rows and stale selections',
     () async {
@@ -181,7 +259,7 @@ ShoppingController _controller(_Repository repository) {
   return ShoppingController(
     repository: repository,
     itemMasterRepository: repository,
-    homeId: 'home',
+    homeId: repository.homeId,
     idGenerator: () => 'line-${++sequence}',
   );
 }
@@ -218,9 +296,9 @@ InventoryItem _item(String id, {String homeId = 'home'}) => InventoryItem(
   isHomeProduct: true,
 );
 
-ShoppingList _list(String id) => ShoppingList(
+ShoppingList _list(String id, {String homeId = 'home'}) => ShoppingList(
   id: id,
-  homeId: 'home',
+  homeId: homeId,
   name: id,
   createdAt: DateTime.utc(2026),
 );
@@ -230,10 +308,16 @@ class _Repository
         ShoppingRepository,
         ShoppingListLifecycleRepository,
         InventoryRepository {
-  ShoppingList current = _list('new');
+  _Repository({this.homeId = 'home'})
+    : current = _list('new', homeId: homeId),
+      items = [_item('rice', homeId: homeId), _item('milk', homeId: homeId)];
+
+  final String homeId;
+  ShoppingList current;
+  Completer<void>? saveGate;
   ShoppingList? other;
   bool failSave = false;
-  final items = [_item('rice'), _item('milk')];
+  final List<InventoryItem> items;
   final itemUpdates = StreamController<List<InventoryItem>>.broadcast(
     sync: true,
   );
@@ -259,6 +343,7 @@ class _Repository
 
   @override
   Future<void> saveList(ShoppingList list) async {
+    await saveGate?.future;
     if (failSave) throw StateError('Save failed');
     current = list;
     updates.add([current, ?other]);

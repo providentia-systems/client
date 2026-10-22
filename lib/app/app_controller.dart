@@ -50,7 +50,9 @@ final class AppController extends ChangeNotifier {
           _syncSummary = summary.copyWith(
             availability: _syncSummary.availability,
             lastSuccessfulSync: _syncSummary.lastSuccessfulSync,
-            isSynchronizing: _refreshing || summary.isSynchronizing,
+            // A durable syncing row can survive process death. Only the
+            // observed network attempt proves active progress.
+            isSynchronizing: _refreshing,
             lastSafeError: summary.lastSafeError ?? _syncSummary.lastSafeError,
           );
           _notifyIfActive();
@@ -145,12 +147,17 @@ final class AppController extends ChangeNotifier {
         clearDiagnostics: outcome.completed,
       );
       _notifyIfActive();
-    } on Exception {
+    } catch (_) {
       if (_disposed) return;
       _syncSummary = _syncSummary.copyWith(
         availability: SyncAvailability.temporarilyUnavailable,
-        lastSafeError: 'Synchronization was interrupted. Try again safely.',
-        failureCode: 'service_unavailable',
+        lastSafeError: _syncSummary.blocked > 0
+            ? _syncSummary.lastSafeError ??
+                  'A saved operation needs review before synchronization.'
+            : 'Synchronization was interrupted. Try again safely.',
+        failureCode: _syncSummary.blocked > 0
+            ? _syncSummary.failureCode
+            : 'service_unavailable',
       );
       _notifyIfActive();
     }
