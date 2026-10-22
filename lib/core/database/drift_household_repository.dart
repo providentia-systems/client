@@ -3351,15 +3351,11 @@ final class DriftHouseholdRepository
           canonicalItemId: homeProductId,
           canonicalName: homeProductId == null ? null : products[homeProductId],
           lineTotal: lineTotal == null
-              ? (unitPrice == null
-                    ? null
-                    : calculatePurchasedLineTotal(
-                        quantityText: _requiredString(payload, 'quantity'),
-                        unitPrice: Money(
-                          minorUnits: _moneyMinorUnits(unitPrice),
-                          currency: currency,
-                        ),
-                      ))
+              ? _derivedHistoryLineTotal(
+                  quantityText: _requiredString(payload, 'quantity'),
+                  unitPrice: unitPrice,
+                  currency: currency,
+                )
               : Money(
                   minorUnits: _moneyMinorUnits(lineTotal),
                   currency: currency,
@@ -3374,6 +3370,29 @@ final class DriftHouseholdRepository
       (left, right) => right.purchasedAt.compareTo(left.purchasedAt),
     );
     return projected;
+  }
+
+  Money? _derivedHistoryLineTotal({
+    required String quantityText,
+    required String? unitPrice,
+    required String currency,
+  }) {
+    if (unitPrice == null) return null;
+    try {
+      return calculatePurchasedLineTotal(
+        quantityText: quantityText,
+        unitPrice: Money(
+          minorUnits: _moneyMinorUnits(unitPrice),
+          currency: currency,
+        ),
+      );
+    } on ArgumentError {
+      // A preview outside the exact supported money range is unknown. It
+      // must not take the other saved purchases out of the history stream.
+      return null;
+    } on FormatException {
+      return null;
+    }
   }
 
   List<ShoppingList> _projectShoppingLists(

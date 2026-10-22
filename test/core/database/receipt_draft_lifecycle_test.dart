@@ -54,6 +54,43 @@ void main() {
   }
 
   test(
+    'overflowing derived history price stays unknown without losing receipt',
+    () async {
+      final draft = await repository.createReceiptDraft(
+        PurchaseReceiptDraftRequest(
+          homeId: _home,
+          purchaseDate: at,
+          currency: 'NAD',
+        ),
+      );
+      final line = await repository.addReceiptLine(
+        PurchaseReceiptLineRequest(
+          homeId: _home,
+          receiptId: draft.entityId,
+          rawDescription: 'Imported large quantity',
+          quantity: 999999999,
+          quantityText: '999999999',
+          unitPrice: Money(minorUnits: 99999999999999, currency: 'NAD'),
+        ),
+      );
+      await repository.markReceiptLineUnresolved(
+        homeId: _home,
+        receiptId: draft.entityId,
+        lineId: line.entityId,
+      );
+      await repository.commitReceipt(homeId: _home, receiptId: draft.entityId);
+      final history = await repository.watchPurchaseLines(homeId: _home).first;
+      expect(history, hasLength(1));
+      expect(history.single.lineTotal, isNull);
+      expect(history.single.rawDescription, 'Imported large quantity');
+      final capture = (await repository
+          .watchActiveReceiptCapture(homeId: _home)
+          .first)!;
+      expect(ReceiptAmounts.fromReceipt(capture).isComplete, isFalse);
+    },
+  );
+
+  test(
     'unit-price-only totals survive restart and commit without stock effects',
     () async {
       final draft = await repository.createReceiptDraft(

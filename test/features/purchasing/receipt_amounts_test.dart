@@ -62,6 +62,46 @@ void main() {
       expect(amounts.hasDiscrepancy, isTrue);
     });
 
+    test('retains valid explicit zero or total when comparison overflows', () {
+      for (final entered in [0, 9000]) {
+        final line = _line(
+          quantity: 999999999,
+          quantityText: '999999999',
+          unitPrice: _money(99999999999999),
+          total: _money(entered),
+        );
+        final amounts = ReceiptLineAmounts.resolve(line, currency: 'NAD');
+        expect(amounts.total, _money(entered));
+        expect(amounts.calculatedTotal, isNull);
+        expect(amounts.hasDiscrepancy, isFalse);
+        expect(amounts.error, contains('arithmetic comparison is unavailable'));
+        final receipt = ReceiptAmounts.fromReceipt(
+          _receipt([line], total: _money(entered)),
+        );
+        expect(receipt.knownTotal, _money(entered));
+        expect(receipt.isComplete, isTrue);
+        expect(receipt.difference, _money(0));
+      }
+    });
+
+    test('overflow without explicit amount remains unknown and actionable', () {
+      final amounts = ReceiptLineAmounts.resolve(
+        _line(quantity: 999999999, unitPrice: _money(99999999999999)),
+        currency: 'NAD',
+      );
+      expect(amounts.total, isNull);
+      expect(amounts.error, contains('exceeds the supported range'));
+      expect(amounts.error, contains('Enter a valid receipt line total'));
+      for (final invalidPrice in [-1, 9007199254740992]) {
+        final invalid = ReceiptLineAmounts.resolve(
+          _line(unitPrice: _money(invalidPrice), total: _money(9000)),
+          currency: 'NAD',
+        );
+        expect(invalid.total, isNull);
+        expect(invalid.error, isNotNull);
+      }
+    });
+
     test('total-only does not invent a unit price', () {
       final amounts = ReceiptLineAmounts.resolve(
         _line(quantity: 3, total: _money(1000)),
