@@ -464,10 +464,18 @@ class _ShoppingWorkspaceState extends State<ShoppingWorkspace> {
   }
 
   Future<void> _add({bool asCustom = false}) async {
-    if (widget.controller.manualBusy) return;
+    final controller = widget.controller;
+    if (controller.manualBusy) return;
     final quantity = double.tryParse(_quantityDraft.text.trim());
     if (quantity == null || !quantity.isFinite || quantity <= 0) {
       setState(() => _entryError = 'Enter a quantity greater than zero.');
+      return;
+    }
+    if (!asCustom && _selectedProductId != null && _selectedProduct == null) {
+      setState(
+        () => _entryError =
+            'The selected product is unavailable. Choose it again or explicitly add a custom item.',
+      );
       return;
     }
     final product = asCustom ? null : _selectedProduct;
@@ -478,10 +486,10 @@ class _ShoppingWorkspaceState extends State<ShoppingWorkspace> {
       );
       return;
     }
-    final listId = widget.controller.state.list?.id;
+    final listId = controller.state.list?.id;
     final duplicate = product == null
         ? null
-        : widget.controller.duplicateForProduct(product.id);
+        : controller.duplicateForProduct(product.id);
     var separate = false;
     if (duplicate != null) {
       final choice = await showDialog<bool>(
@@ -508,10 +516,11 @@ class _ShoppingWorkspaceState extends State<ShoppingWorkspace> {
           ],
         ),
       );
-      if (!mounted || choice == null) return;
+      if (!mounted || widget.controller != controller || choice == null) return;
       separate = choice;
     }
-    if (widget.controller.state.list?.id != listId) {
+    if (widget.controller != controller) return;
+    if (controller.state.list?.id != listId) {
       setState(
         () => _entryError =
             'The selected list changed. Review your entry before adding.',
@@ -519,14 +528,14 @@ class _ShoppingWorkspaceState extends State<ShoppingWorkspace> {
       return;
     }
     final saved = duplicate != null && !separate
-        ? await widget.controller.increaseDuplicateQuantity(duplicate, quantity)
-        : await widget.controller.addManual(
+        ? await controller.increaseDuplicateQuantity(duplicate, quantity)
+        : await controller.addManual(
             value,
             quantity: quantity,
             homeProductId: product?.id,
             allowDuplicate: separate,
           );
-    if (mounted && saved) {
+    if (mounted && widget.controller == controller && saved) {
       setState(() {
         _selectedProductId = null;
         _draft.clear();
@@ -538,42 +547,10 @@ class _ShoppingWorkspaceState extends State<ShoppingWorkspace> {
   }
 
   Future<void> _addSuggestion(OnlineShoppingSuggestion suggestion) async {
-    var input = suggestion.requiredQuantity.value;
-    final quantityController = TextEditingController(text: input);
     final quantity = await showDialog<ExactDecimal>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Add ${suggestion.productName} to the list'),
-        content: QuantityField(
-          key: Key('online-suggestion-quantity-${suggestion.id}'),
-          controller: quantityController,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Quantity greater than zero',
-          ),
-          onChanged: (value) => input = value,
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            key: Key('confirm-add-online-suggestion-${suggestion.id}'),
-            onPressed: () {
-              try {
-                final parsed = ExactDecimal(input);
-                if (parsed.isPositive) Navigator.pop(context, parsed);
-              } on ArgumentError {
-                // Invalid values remain in the dialog for correction.
-              }
-            },
-            child: const Text('Add to list'),
-          ),
-        ],
-      ),
+      builder: (context) => _SuggestionQuantityDialog(suggestion: suggestion),
     );
-    quantityController.dispose();
     if (quantity == null || !mounted) return;
     final added = await widget.controller.addOnlineSuggestion(
       suggestion,
@@ -704,6 +681,67 @@ class _ShoppingWorkspaceState extends State<ShoppingWorkspace> {
       );
     }
   }
+}
+
+class _SuggestionQuantityDialog extends StatefulWidget {
+  const _SuggestionQuantityDialog({required this.suggestion});
+  final OnlineShoppingSuggestion suggestion;
+
+  @override
+  State<_SuggestionQuantityDialog> createState() =>
+      _SuggestionQuantityDialogState();
+}
+
+class _SuggestionQuantityDialogState extends State<_SuggestionQuantityDialog> {
+  late final TextEditingController _quantity = TextEditingController(
+    text: widget.suggestion.requiredQuantity.value,
+  );
+  String? _error;
+
+  @override
+  void dispose() {
+    _quantity.dispose();
+    super.dispose();
+  }
+
+  void _confirm() {
+    try {
+      final parsed = ExactDecimal(_quantity.text.trim());
+      if (parsed.isPositive) {
+        Navigator.pop(context, parsed);
+        return;
+      }
+    } on ArgumentError {
+      // Invalid input remains visible for correction.
+    }
+    setState(() => _error = 'Enter a quantity greater than zero.');
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text('Add ${widget.suggestion.productName} to the list'),
+    content: QuantityField(
+      key: Key('online-suggestion-quantity-${widget.suggestion.id}'),
+      controller: _quantity,
+      autofocus: true,
+      decoration: InputDecoration(
+        labelText: 'Quantity greater than zero',
+        errorText: _error,
+      ),
+      onFieldSubmitted: (_) => _confirm(),
+    ),
+    actions: <Widget>[
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        key: Key('confirm-add-online-suggestion-${widget.suggestion.id}'),
+        onPressed: _confirm,
+        child: const Text('Add to list'),
+      ),
+    ],
+  );
 }
 
 class _ShoppingLineEditor extends StatefulWidget {
