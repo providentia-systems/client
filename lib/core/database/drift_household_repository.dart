@@ -2233,7 +2233,7 @@ final class DriftHouseholdRepository
             'uncertain': true,
             'limitations': {
               ...limitations,
-              'purchase-date-correction-pending',
+              'Purchase day correction awaits authoritative stock readback',
             }.toList(),
           },
           at: at,

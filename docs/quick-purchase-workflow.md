@@ -42,6 +42,50 @@ previously confirmed finished receipt synchronizes those corrections without
 creating another commit. Corrections
 that exceed available stock are rejected locally and on the server.
 
+On a confirmed finished receipt whose backend advertises line corrections,
+**Add omitted purchase** opens an audited correction editor. Choose an existing
+active home product and a published pack or stock measurement, enter the
+quantity and a correction reason, and save. Missing prices may remain blank;
+an explicit line total preserves discounts and rounding. This creates one new
+line and adds only that line's stock. The receipt remains finished and its
+original identity, date and already-applied lines are retained.
+
+An intentionally unresolved finished line offers **Edit line**, **Remove line**
+and **Resolve purchase**. Editing its description, quantity or prices keeps it
+unresolved and does not change stock. Removing it excludes it without a stock
+reversal. Resolving explicitly selects a home product/measurement and records
+that purchase once. A committed approved line with unconfirmed stock remains
+blocked until authoritative refresh; it is not treated as an unresolved line.
+
+The correction editor retains typed values on local validation or revision
+failure. A successful local save writes its stock projection and immutable
+`purchasing.receipt-line.correct` command atomically, including the original
+home/device/account binding, parent receipt revision, optional existing line
+revision, correction ID and reason. Restart and network retries retain that
+saved operation. Pending confirmation is displayed separately from accepted
+readback; a rejected/conflicting operation remains visible in synchronization
+review and must not be recreated with a new identity to force it through.
+Older backend responses without the correction capability show a refresh
+instruction instead of exposing an unsupported finish transition.
+
+Receipt days are calendar labels. The metadata editor, creation requests,
+local projection and queued commands preserve the selected `YYYY-MM-DD`
+without converting local midnight to UTC. Saving store, notes or total cannot
+shift the purchase day across a month/year boundary, and repeated saves retain
+that day. Known older local ISO date representations normalize to their
+recorded day before ordinary history checks; malformed dates remain errors.
+Ordinary metadata saves still reject a real date/currency change once stock
+history exists or the receipt is finished.
+
+The application-owned `PurchaseReceiptDateCorrectionRepository` exposes the
+separate audited `purchasing.receipt.correct-date` operation with a parent
+revision and reason. Its local projection updates the calendar day while
+retaining all line identities and stock amounts. Affected balances show
+chronology as pending until authoritative readback reconciles the purchase
+against counts. Restart/retry uses the existing immutable outbox identity.
+This adapter foundation does not add the separate user-facing date correction
+workflow tracked in Client #41.
+
 **Finish receipt** closes the group. It applies approved imported lines which
 have not yet affected stock and skips manual lines already applied. Repeating
 commit or synchronizing confirms the original operation; it never adds the

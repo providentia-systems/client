@@ -115,7 +115,7 @@ class _ReceiptDraftEditorState extends State<ReceiptDraftEditor> {
     final text = value.trim();
     String? error;
     if (name == 'date') {
-      final date = DateTime.tryParse(text);
+      final date = DateTime.tryParse('${text}T00:00:00Z');
       if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(text) ||
           date == null ||
           date.toIso8601String().split('T').first != text) {
@@ -227,6 +227,9 @@ class _ReceiptDraftEditorState extends State<ReceiptDraftEditor> {
                   Text(
                     widget.line!.stockApplied
                         ? 'Saving this correction adjusts stock by the difference. The selected product and pack stay the same.'
+                        : widget.receipt.status ==
+                              PurchaseReceiptStatus.committed
+                        ? 'This line remains intentionally unresolved. Editing its details does not add stock. Use Resolve purchase to record it.'
                         : 'Review the edited line again before committing this receipt.',
                   ),
                 ],
@@ -361,7 +364,7 @@ class _ReceiptDraftEditorState extends State<ReceiptDraftEditor> {
       bool saved;
       if (line == null) {
         final text = _fields['date']!.text.trim();
-        final date = DateTime.tryParse(text);
+        final date = DateTime.tryParse('${text}T00:00:00Z');
         if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(text) ||
             date == null ||
             date.toIso8601String().split('T').first != text) {

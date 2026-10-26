@@ -6,6 +6,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:providentia/core/database/app_database.dart';
 import 'package:providentia/core/database/drift_household_repository.dart';
+import 'package:providentia/core/database/drift_local_sync_repository.dart';
+import 'package:providentia/core/synchronization/sync_models.dart';
+import 'package:providentia/core/synchronization/sync_ports.dart';
 import 'package:providentia/features/purchasing/domain/purchase_models.dart';
 import 'package:providentia/features/purchasing/presentation/purchasing_controller.dart';
 import 'package:providentia/features/purchasing/presentation/receipt_draft_editor.dart';
@@ -310,7 +313,7 @@ void main() {
       expect(balance['uncertain'], isTrue);
       expect(
         balance['limitations'],
-        contains('purchase-date-correction-pending'),
+        contains('Purchase day correction awaits authoritative stock readback'),
       );
       final operation = await database
           .select(database.clientOperations)
@@ -340,6 +343,68 @@ void main() {
       expect(preserved.operationId, operation.operationId);
       expect(preserved.payload, operation.payload);
       expect((await row('inventory-balance', _product))['quantity'], '4');
+      final local = DriftLocalSyncRepository(database);
+      await local.applyPushResults(
+        results: [
+          PushOperationResult(
+            operationId: operation.operationId,
+            kind: PushResultKind.acknowledged,
+            acceptedRevision: 5,
+          ),
+        ],
+        now: at,
+        retryPolicy: RetryPolicy(),
+      );
+      await local.applyPullPage(
+        homeId: _home,
+        page: PullPage(
+          protocolVersion: 1,
+          fromCursor: null,
+          pageCursor: 'date-readback',
+          highWaterCursor: 'date-readback',
+          hasMore: false,
+          requestId: _device,
+          changes: [
+            RemoteChange(
+              cursor: 'date-readback',
+              homeId: _home,
+              entityType: 'purchasing-receipt',
+              entityId: _receipt,
+              kind: RemoteChangeKind.upsert,
+              revision: 5,
+              serverTimestamp: at,
+              payload: {...saved, 'purchaseDate': '2025-12-31'},
+            ),
+            RemoteChange(
+              cursor: 'date-readback',
+              homeId: _home,
+              entityType: 'inventory-balance',
+              entityId: _product,
+              kind: RemoteChangeKind.upsert,
+              revision: 1,
+              serverTimestamp: at,
+              payload: {
+                'homeProductId': _product,
+                'quantity': '4',
+                'uncertain': false,
+                'limitations': <String>[],
+              },
+            ),
+          ],
+        ),
+      );
+      expect((await row('inventory-balance', _product))['quantity'], '4');
+      expect((await row('inventory-balance', _product))['uncertain'], isFalse);
+      expect(
+        (await repository.watchReceiptCaptures(homeId: _home).first)
+            .single
+            .synchronizationState,
+        PurchaseSynchronizationState.synchronized,
+      );
+      expect(
+        (await database.select(database.clientOperations).getSingle()).payload,
+        operation.payload,
+      );
     },
   );
 }

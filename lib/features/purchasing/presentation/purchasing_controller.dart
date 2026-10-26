@@ -10,6 +10,7 @@ import 'package:providentia/features/purchasing/application/purchase_store_repos
 import 'package:providentia/features/purchasing/domain/purchase_models.dart';
 import 'package:providentia/features/purchasing/domain/purchase_quantity.dart';
 import 'package:providentia/features/purchasing/domain/purchase_services.dart';
+import 'package:providentia/features/purchasing/domain/receipt_spend.dart';
 
 enum PurchaseView { recent, history }
 
@@ -249,12 +250,19 @@ final class PurchasingController extends ChangeNotifier {
   }
 
   PurchasingState get state => _state;
-  List<PurchaseGroup> get recentGroups =>
-      _grouper.groupRecent(homeId: homeId, lines: _state.lines);
+  List<PurchaseGroup> get recentGroups => _grouper.groupRecent(
+    homeId: homeId,
+    lines: _state.lines,
+    receipts: canSelectReceipts ? _receipts : null,
+  );
   List<MonthlyPurchaseSummary> get monthlyHistory =>
       _grouper.summarizeHistory(homeId: homeId, lines: _state.lines);
+  ReceiptSpendSummary get receiptSpendSummary =>
+      ReceiptSpendSummary.fromReceipts(homeId: homeId, receipts: _receipts);
   Money? get recentSpend =>
-      _grouper.recentSpend(homeId: homeId, lines: _state.lines);
+      canSelectReceipts ? receiptSpendSummary.singleCurrencyAmount : null;
+  Money? get recentProductSubtotal =>
+      _grouper.recentProductSubtotal(homeId: homeId, lines: _state.lines);
   bool get captureEnabled => _mayWrite && _captureRepository != null;
   bool get canAddPublishedPack =>
       captureEnabled &&
@@ -328,7 +336,6 @@ final class PurchasingController extends ChangeNotifier {
           },
         );
     final captureRepository = _captureRepository;
-    if (!captureEnabled || captureRepository == null) return;
     if (_repository is PurchaseReceiptSelectionRepository) {
       _receiptsSubscription =
           (_repository as PurchaseReceiptSelectionRepository)
@@ -357,7 +364,7 @@ final class PurchasingController extends ChangeNotifier {
                   _setCaptureError(_captureSafeError(error));
                 },
               );
-    } else {
+    } else if (captureEnabled && captureRepository != null) {
       _captureSubscription = captureRepository
           .watchActiveReceiptCapture(homeId: homeId)
           .listen(
@@ -368,6 +375,7 @@ final class PurchasingController extends ChangeNotifier {
             },
           );
     }
+    if (!captureEnabled || captureRepository == null) return;
     _candidateSubscription = captureRepository
         .watchPurchaseMatchCandidates(homeId: homeId)
         .listen(
@@ -526,6 +534,8 @@ final class PurchasingController extends ChangeNotifier {
       ),
       queuedNotice: original.stockApplied
           ? 'Purchase corrected. Stock is updated locally; synchronization is pending.'
+          : _state.capture?.status == PurchaseReceiptStatus.committed
+          ? 'Unresolved line changes are saved locally; no stock is added.'
           : 'Line changes are saved locally. Review the edited line before committing.',
     );
   }
@@ -543,6 +553,64 @@ final class PurchasingController extends ChangeNotifier {
       ),
       queuedNotice:
           'Line removal is saved locally and queued for synchronization.',
+    );
+  }
+
+  bool get canCorrectFinishedReceipt {
+    final receipt = _state.capture;
+    return captureEnabled &&
+        _repository is PurchaseFinishedReceiptCorrectionRepository &&
+        receipt?.status == PurchaseReceiptStatus.committed &&
+        receipt!.commitConfirmed &&
+        receipt.lineCorrectionState == 'available';
+  }
+
+  Future<bool> completeFinishedLine({
+    required PurchaseReceiptCapture originalReceipt,
+    required String homeProductId,
+    required String rawDescription,
+    required String quantityText,
+    required String reason,
+    PurchaseReceiptLineCapture? originalLine,
+    String? packId,
+    String? originalPackText,
+    Money? unitPrice,
+    Money? lineTotal,
+  }) {
+    if (!canCorrectFinishedReceipt ||
+        _state.capture?.id != originalReceipt.id ||
+        originalReceipt.homeId != homeId ||
+        (originalLine != null &&
+            (originalLine.receiptId != originalReceipt.id ||
+                !originalLine.unresolved ||
+                originalLine.stockApplied))) {
+      return _rejectCapture(
+        'Refresh this finished receipt before correcting an omitted or unresolved purchase.',
+      );
+    }
+    return _runCaptureMutation(
+      () => (_repository as PurchaseFinishedReceiptCorrectionRepository)
+          .completeFinishedReceiptLine(
+            line: PurchaseReceiptLineRequest(
+              allowUnknownPrice: true,
+              homeId: homeId,
+              receiptId: originalReceipt.id,
+              rawDescription: rawDescription,
+              quantity: double.tryParse(quantityText) ?? double.nan,
+              quantityText: quantityText,
+              originalPackText: originalPackText,
+              unitPrice: unitPrice,
+              lineTotal: lineTotal,
+            ),
+            expectedReceiptRevision: originalReceipt.revision,
+            homeProductId: homeProductId,
+            packId: packId,
+            existingLineId: originalLine?.id,
+            expectedLineRevision: originalLine?.revision,
+            reason: reason,
+          ),
+      queuedNotice:
+          'Purchase correction saved locally and queued. Only this line adds stock; the finished receipt and existing purchases are retained.',
     );
   }
 

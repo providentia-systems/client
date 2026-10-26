@@ -111,11 +111,24 @@ final class PurchaseHistoryGrouper {
   List<PurchaseGroup> groupRecent({
     required String homeId,
     required Iterable<PurchaseLine> lines,
+    Iterable<PurchaseReceiptCapture>? receipts,
   }) {
+    final headers = <String, PurchaseReceiptCapture>{};
+    for (final receipt in receipts ?? const <PurchaseReceiptCapture>[]) {
+      _requireHome(homeId, receipt.homeId);
+      if (headers.containsKey(receipt.id)) {
+        throw StateError('A receipt cannot be grouped twice.');
+      }
+      headers[receipt.id] = receipt;
+    }
     final groups = <String, List<PurchaseLine>>{};
     for (final line in lines) {
       _requireHome(homeId, line.homeId);
       if (line.source != PurchaseSource.recentReceipt) {
+        continue;
+      }
+      final header = headers[line.receiptId];
+      if (header != null && header.status != PurchaseReceiptStatus.committed) {
         continue;
       }
       final date = line.purchasedAt.toUtc();
@@ -128,16 +141,27 @@ final class PurchaseHistoryGrouper {
           : 'legacy:$dateKey:${line.storeName}';
       groups.putIfAbsent(key, () => <PurchaseLine>[]).add(line);
     }
+    for (final receipt in headers.values) {
+      if (receipt.status == PurchaseReceiptStatus.committed) {
+        groups.putIfAbsent('receipt:${receipt.id}', () => <PurchaseLine>[]);
+      }
+    }
     final result =
         groups.entries
             .map((entry) {
-              final first = entry.value.first;
+              final first = entry.value.firstOrNull;
+              final receipt = entry.key.startsWith('receipt:')
+                  ? headers[entry.key.substring(8)]
+                  : null;
               return PurchaseGroup(
                 id: entry.key,
-                purchasedAt: first.purchasedAt,
-                storeName: first.storeName,
+                purchasedAt: receipt?.purchaseDate ?? first!.purchasedAt,
+                storeName: receipt != null
+                    ? receipt.storeName ?? 'Unspecified store'
+                    : first!.storeName,
                 lines: entry.value,
                 inferred: entry.key.startsWith('legacy:'),
+                receipt: receipt,
               );
             })
             .toList(growable: false)
@@ -178,7 +202,8 @@ final class PurchaseHistoryGrouper {
     return List<MonthlyPurchaseSummary>.unmodifiable(summaries);
   }
 
-  Money? recentSpend({
+  /// Legacy entered-product subtotal only; receipt spend requires headers.
+  Money? recentProductSubtotal({
     required String homeId,
     required Iterable<PurchaseLine> lines,
   }) {
