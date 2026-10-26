@@ -309,6 +309,8 @@ const generatedClientAdapters = new Set([
   'lib/core/networking/api_client_factory.dart',
   'lib/core/networking/generated_api_connectivity_probe.dart',
   'lib/core/synchronization/generated_sync_gateway.dart',
+  'lib/core/synchronization/generated_sync_recovery_gateway.dart',
+  'lib/core/networking/verified_home_denial.dart',
   'lib/features/ai_integration/infrastructure/api17_ai_gateway.dart',
   'lib/features/ai_integration/infrastructure/api17_server_credential_provisioning.dart',
   'lib/features/ai_integration/infrastructure/generated_server_ai_repository.dart',
@@ -435,11 +437,11 @@ const generatedManifest = JSON.parse(
 );
 assert(
   generatedManifest.clientProfile === 'homeowner' &&
-    generatedManifest.contractVersion === '2.2.0' &&
+    generatedManifest.contractVersion === '2.4.0' &&
     generatedManifest.contractSha256 ===
-      '75701b9ef65edc964f50762ba428ca425bfad40f574cb1abc0ce03086ca19cc1' &&
-    generatedManifest.canonicalOperationCount === 236 &&
-    generatedManifest.generatedOperationCount === 168,
+      '2b7b38490dc42ad967cfff7e32dd56db41d30842a7d39845b9beecb7f7d4e254' &&
+    generatedManifest.canonicalOperationCount === 244 &&
+    generatedManifest.generatedOperationCount === 176,
   'Generated client manifest must distinguish the canonical and homeowner surfaces.',
 );
 try {

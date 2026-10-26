@@ -133,8 +133,18 @@ void main() {
       );
     });
 
-    test('publishes only the API 2.2.0 homeowner operation registry', () {
-      expect(ProvidentiaApiClient.operations, hasLength(168));
+    test('publishes only the API 2.4.0 homeowner operation registry', () {
+      expect(ProvidentiaApiClient.operations, hasLength(176));
+      for (final operation in <String>[
+        'correctFinishedReceiptLine',
+        'correctReceiptPurchaseDate',
+        'reviewStockCountSession',
+        'relinkShoppingListLine',
+        'getSynchronizationDiagnostics',
+        'revalidateSynchronizationOperations',
+      ]) {
+        expect(ProvidentiaApiClient.operations, contains(operation));
+      }
       expect(
         ProvidentiaApiClient.operations['purchaseReceiptLine'],
         isA<ApiOperation>()

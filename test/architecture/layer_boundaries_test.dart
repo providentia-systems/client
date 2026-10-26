@@ -103,6 +103,8 @@ void main() {
       'lib/core/networking/generated_api_connectivity_probe.dart',
       'lib/core/networking/generated_stock_preference_reader.dart',
       'lib/core/synchronization/generated_sync_gateway.dart',
+      'lib/core/synchronization/generated_sync_recovery_gateway.dart',
+      'lib/core/networking/verified_home_denial.dart',
       'lib/features/ai_integration/infrastructure/api17_ai_gateway.dart',
       'lib/features/ai_integration/infrastructure/api17_server_credential_provisioning.dart',
       'lib/features/ai_integration/infrastructure/generated_server_ai_repository.dart',

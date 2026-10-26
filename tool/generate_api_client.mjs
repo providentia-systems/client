@@ -74,7 +74,7 @@ const outputs = new Map([
     path.join(generatedDirectory, 'generation-manifest.json'),
     json({
       generator: 'tool/generate_api_client.mjs',
-      generatorVersion: 7,
+      generatorVersion: 8,
       clientProfile: 'homeowner',
       contract: '../../providentia-v1.json',
       contractVersion: contract.info.version,
@@ -131,7 +131,7 @@ function validateContract(document) {
   }
   if (
     document.info?.title !== 'Providentia API' ||
-    document.info?.version !== '2.2.0'
+    document.info?.version !== '2.4.0'
   ) {
     throw new Error('Unexpected API identity or version.');
   }
@@ -164,6 +164,12 @@ function validateContract(document) {
     ['get', '/api/v1/catalog-contributions', 'listPublishedCatalogContributions'],
     ['get', '/api/v1/catalog-admin/workbench', 'getCatalogWorkbench'],
     ['get', '/api/v1/homes/{homeId}/reports/inventory', 'getInventoryReport'],
+    ['post', '/api/v1/homes/{homeId}/receipts/{receiptId}/line-corrections', 'correctFinishedReceiptLine'],
+    ['post', '/api/v1/homes/{homeId}/receipts/{receiptId}/date-corrections', 'correctReceiptPurchaseDate'],
+    ['post', '/api/v1/homes/{homeId}/stock-count-sessions/{sessionId}/review', 'reviewStockCountSession'],
+    ['put', '/api/v1/homes/{homeId}/shopping-lists/{listId}/lines/{lineId}/product', 'relinkShoppingListLine'],
+    ['get', '/api/v1/homes/{homeId}/sync/diagnostics', 'getSynchronizationDiagnostics'],
+    ['post', '/api/v1/homes/{homeId}/sync/revalidate', 'revalidateSynchronizationOperations'],
   ];
   for (const [method, resourcePath, operationId] of expectedOperations) {
     if (document.paths?.[resourcePath]?.[method]?.operationId !== operationId) {
@@ -191,8 +197,8 @@ function validateContract(document) {
       operationIds.add(operation.operationId);
     }
   }
-  if (operationIds.size !== 236) {
-    throw new Error(`Expected the API 2.2 surface, found ${operationIds.size} operations.`);
+  if (operationIds.size !== 244) {
+    throw new Error(`Expected the API 2.4 surface, found ${operationIds.size} operations.`);
   }
 
   // Human authentication uses bound email codes. Password and approval-link
@@ -425,6 +431,29 @@ function validateContract(document) {
     document.components.schemas.SyncPantryCommand.properties?.commandType?.enum ?? [];
   if (!pantryCommands.includes('purchasing.receipt-line.unresolve')) {
     throw new Error('SyncPantryCommand must expose receipt-line unresolve.');
+  }
+  for (const command of [
+    'purchasing.receipt-line.correct',
+    'purchasing.receipt.correct-date',
+    'inventory.count-session.review',
+    'shopping.list-line.relink',
+  ]) {
+    if (!pantryCommands.includes(command)) {
+      throw new Error(`Supported synchronization command missing: ${command}.`);
+    }
+  }
+  const calendarDate = document.components.schemas.Receipt.properties.purchaseDate;
+  if (calendarDate.format !== 'date' || calendarDate.type !== 'string') {
+    throw new Error('Receipt purchaseDate must retain calendar-date semantics.');
+  }
+  const signedQuantity = document.components.schemas.InventoryBalance.properties.quantity;
+  if (typeof signedQuantity.pattern !== 'string' || !new RegExp(signedQuantity.pattern).test('-1.25')) {
+    throw new Error('InventoryBalance must preserve signed ledger quantities.');
+  }
+  for (const field of ['uncertain', 'pendingQuantity', 'limitations', 'checkpointId']) {
+    if (!document.components.schemas.InventoryBalance.properties[field]) {
+      throw new Error(`InventoryBalance must retain ${field} evidence.`);
+    }
   }
   assertRequiredFields(document, 'RecipientHomeInvitation', [
     'id',

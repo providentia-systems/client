@@ -13,21 +13,33 @@ local `providentia_api_client` Dart package.
 
 ## Current pin
 
-- Client OpenAPI version: `2.2.0`
-- Contract SHA-256:
-  `ef5714a6298326d6fb449b966117e8b61c74de67d1bfc274ad8ec431aecd802d`
-- Canonical backend operations: 235
-- Generated homeowner operations: 167
+- Client OpenAPI version: `2.4.0`
+- Exact contract SHA-256 and operation counts: [contract lock](../contracts/contract.lock.json)
+  and [generation manifest](../contracts/generated/providentia_api_client/generation-manifest.json).
+- Backend source: the paired `providentia-systems/backend#39` implementation.
 
-API 2.2.0 adds household product overrides, stock-unit labels, global-category
-selection and independent canonical metadata to the existing inventory
-operations. It retains numeric email-code authentication, country onboarding,
-account aliases and media, scoped access groups, operator approval and
-per-member permission overrides. The generator rejects retired password and
-login-link routes. Existing installations must use a compatible backend;
-deploy backend #25 and its migration before the matching Client #21 and
-Admin #13 builds. See [Household workflows](household-workflows.md) for
-migration, unit-label semantics and production acceptance requirements.
+API 2.4 extends 2.3 chronology, count evidence, calendar-day receipt dates,
+independent shopping packs/relinking, session namespaces and binding recovery
+with atomic audited finished-receipt line corrections and truthful reporting
+completeness. The generator verifies the exact supported operation surface and
+rejects changes that remove required dates, signed balances, chronology
+metadata or synchronization commands. Frozen archives, materialization
+checksums, locks and generated files move together.
+
+API 2.2 installations remain a historical regression boundary, not a supported
+pairing for the new workflows. A receipt response without
+`lineCorrectionState: available` cannot authorize a finished-line correction;
+older report responses show evidence as unavailable instead of certifying a
+quantity. Missing recovery endpoints retain saved operations and require a
+compatible backend. Deploy the paired backend migrations and release before
+installing this Client build. CI compatibility evidence is separate from
+installed browser/native acceptance and recovery of a real household.
+
+Browser requests consistently select `X-Providentia-Application: homeowner`
+for email-code verification, refresh, logout and authenticated reads/writes.
+The HttpOnly homeowner cookie namespace and its CSRF proof remain distinct
+from Admin and legacy cookies. Native requests retain bearer transport and do
+not select a browser cookie namespace.
 
 Application-owned adapters compose:
 
