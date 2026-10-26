@@ -554,6 +554,11 @@ String? sanitizedSyncFailureCode(String? code) {
         'revision_mismatch',
         'operation_id_reuse',
         'invalid_command',
+        'unsupported_operation',
+        'unsupported_command',
+        'unsupported_payload_schema',
+        'unsupported_schema_version',
+        'unsupported_protocol_version',
         'service_unavailable',
         'concurrent_write',
         'unclassified_http_denial',
@@ -562,6 +567,16 @@ String? sanitizedSyncFailureCode(String? code) {
       ? code
       : 'unclassified_failure';
 }
+
+/// Explicit machine classifications for a capability the remote cannot accept.
+/// Neither HTTP 422 alone nor backend prose establishes an installed version.
+bool isUnsupportedBackendFailureCode(String? code) => const <String>{
+  'unsupported_operation',
+  'unsupported_command',
+  'unsupported_payload_schema',
+  'unsupported_schema_version',
+  'unsupported_protocol_version',
+}.contains(code);
 
 /// User-facing diagnosis is driven only by a documented safe code. In
 /// particular, command-level authorization blocks do not prove home revocation.
@@ -575,6 +590,11 @@ String syncFailureHeading(String? code) => switch (code) {
   'revision_conflict' ||
   'revision_mismatch' ||
   'concurrent_write' => 'Review a synchronization conflict',
+  'unsupported_operation' ||
+  'unsupported_command' ||
+  'unsupported_payload_schema' ||
+  'unsupported_schema_version' ||
+  'unsupported_protocol_version' => 'Verify the supported backend',
   'invalid_command' ||
   'resource_unavailable' => 'Review a change before syncing',
   'network_unavailable' || 'service_unavailable' => 'Synchronization paused',
@@ -596,7 +616,15 @@ String syncRecoveryInstruction(String? code) => switch (code) {
     'Review the permission required for the first blocked change. Later saved changes remain queued behind it.',
   'revision_conflict' || 'revision_mismatch' || 'concurrent_write' =>
     'Open synchronization conflict review in Home and compare the saved and server versions before retrying.',
-  'invalid_command' || 'resource_unavailable' =>
+  'unsupported_operation' ||
+  'unsupported_command' ||
+  'unsupported_payload_schema' ||
+  'unsupported_schema_version' ||
+  'unsupported_protocol_version' =>
+    'This server cannot accept the saved command or its schema. Verify the supported API 2.4.0 backend and required capability before retrying. The original queue, operation IDs and order are preserved; do not re-enter purchases or reassign saved work.',
+  'invalid_command' =>
+    'Review the first blocked entry and verify that the server supports this Client’s API 2.4.0 commands and payload schema. This rejection alone does not identify the installed version. The saved queue and original operation IDs are preserved; retry after correcting the entry or server compatibility.',
+  'resource_unavailable' =>
     'Review and correct the first blocked change in Home synchronization. Later changes cannot skip this dependency.',
   'operation_id_reuse' =>
     'Review this saved operation before continuing. Its identity cannot be safely reused for a different change.',
