@@ -103,6 +103,9 @@ jobs:
       - name: Enforce handwritten production coverage
         run: node tool/check_coverage.mjs coverage/lcov.info 80
 
+      - name: Record exact Client and contract acceptance scope
+        run: node tool/write_compatibility_evidence.mjs
+
       - name: Produce dependency inventory
         run: |
           mkdir -p build/compliance
@@ -116,6 +119,7 @@ jobs:
           path: |
             coverage/lcov.info
             build/compliance/dart-dependencies.json
+            build/compliance/client-compatibility.json
             build/browser-security-proof/result.json
           if-no-files-found: error
           retention-days: 14
