@@ -178,7 +178,7 @@ InventoryReportFact _inventoryFact(Map<String, Object?> object, String homeId) {
   return InventoryReportFact(
     homeId: homeId,
     homeProductId: _uuid(object, 'homeProductId'),
-    productName: _string(object, 'productName'),
+    productName: _optionalString(object['productName']) ?? 'Unresolved product',
     packText: _string(object, 'packText', allowEmpty: true),
     factualQuantity: quantity,
     stockUnit: _optionalString(object['stockUnit'], allowEmpty: true) ?? '',
@@ -610,7 +610,7 @@ DateTime? _optionalDate(Object? value) {
 final RegExp _uuidPattern = RegExp(
   r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
 );
-final RegExp _decimalPattern = RegExp(r'^-?(?:0|[1-9]\d{0,8})(?:\.\d{1,8})?$');
+final RegExp _decimalPattern = RegExp(r'^-?(?:0|[1-9]\d*)(?:\.\d{1,8})?$');
 final RegExp _confidencePattern = RegExp(
   r'^(?:0(?:\.\d{1,4})?|1(?:\.0{1,4})?)$',
 );

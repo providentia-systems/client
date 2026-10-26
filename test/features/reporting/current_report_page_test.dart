@@ -84,7 +84,7 @@ void main() {
       expect(controller.status, ReportingStatus.ready);
       expect(find.textContaining('Quantity unknown'), findsOneWidget);
       expect(find.textContaining('No stock evidence'), findsOneWidget);
-      expect(find.text('2026-10 · Total unknown'), findsOneWidget);
+      expect(find.text('2026-10 · NAD total unknown'), findsOneWidget);
       expect(find.textContaining('Known subtotal NAD 12.50'), findsOneWidget);
       expect(find.textContaining('Incomplete pricing'), findsOneWidget);
       expect(find.textContaining('NAD null'), findsNothing);
