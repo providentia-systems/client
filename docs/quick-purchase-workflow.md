@@ -1,6 +1,7 @@
 # Recording purchases and correcting receipts
 
-Purchases offers a direct manual entry path: start a receipt, choose an existing
+Purchases offers a direct manual entry path: start a receipt, set its purchase
+day (defaulting to the local calendar day), choose an existing
 home product, select a published pack or the product's stock measurement, enter
 the bought quantity and a unit price or line total, then press **Add purchase**.
 The deliberate product selection and Add action confirm that line. There is no
@@ -9,7 +10,11 @@ second matching step. The line, exact stock addition and durable
 transaction. The next product can be entered immediately.
 
 Stock is an addition to the current balance. Buying 5 kg with 2 kg recorded
-shows 7 kg immediately, pending synchronization. A selected 1 kg pack purchased
+shows 7 kg locally while synchronization is pending when no accepted count
+checkpoint constrains the history. For a counted product the existing factual
+balance remains visible and the new effect is shown separately until the server
+places the purchase in the chronology; an older receipt is not added over a
+later accepted count. A selected 1 kg pack purchased
 four times and a selected 4 kg pack purchased once both add 4 kg when stock is
 tracked in kg; each line preserves its selected pack, bought pack count, price,
 converted stock quantity and conversion snapshot. Future changes to catalog
@@ -26,7 +31,8 @@ without a base pack accepts canonical count packs in units; mass/volume packs
 require an explicit stock measurement. Different units must not be silently mixed. Exact decimal
 arithmetic rejects quantities that require more than eight fractional digits.
 
-Open receipts coexist. **Open receipts** switches between them; **Start another
+Receipts coexist. **Receipts** switches between saved active, finished and
+cancelled headers; **Start another
 receipt** works while a previous receipt awaits confirmation. **Add store** is
 visible beside the receipt store selection. Store management remains available
 from the Purchases header. **Edit receipt** can correct store, notes and total
@@ -39,8 +45,10 @@ after both the receipt and line have been confirmed by authoritative readback.
 A locally pending older commit receives no inferred stock or confirmation;
 refresh its details before attempting a correction. Retrying corrections to a
 previously confirmed finished receipt synchronizes those corrections without
-creating another commit. Corrections
-that exceed available stock are rejected locally and on the server.
+creating another commit. Historical corrections and cancellations preserve a
+signed ledger even when the original stock has since been consumed. A negative
+result is shown with uncertainty and must not be read as a negative physical
+count. Observation/count inputs remain non-negative.
 
 On a confirmed finished receipt whose backend advertises line corrections,
 **Add omitted purchase** opens an audited correction editor. Choose an existing
@@ -52,8 +60,9 @@ original identity, date and already-applied lines are retained.
 
 An intentionally unresolved finished line offers **Edit line**, **Remove line**
 and **Resolve purchase**. Editing its description, quantity or prices keeps it
-unresolved and does not change stock. Removing it excludes it without a stock
-reversal. Resolving explicitly selects a home product/measurement and records
+unresolved and does not change stock. Its missing prices can remain blank;
+ordinary entry and applied-line edits retain their existing price requirement.
+Removing it excludes it without a stock reversal. Resolving explicitly selects a home product/measurement and records
 that purchase once. A committed approved line with unconfirmed stock remains
 blocked until authoritative refresh; it is not treated as an unresolved line.
 
@@ -83,8 +92,31 @@ revision and reason. Its local projection updates the calendar day while
 retaining all line identities and stock amounts. Affected balances show
 chronology as pending until authoritative readback reconciles the purchase
 against counts. Restart/retry uses the existing immutable outbox identity.
-This adapter foundation does not add the separate user-facing date correction
-workflow tracked in Client #41.
+**Correct purchase day** opens the dedicated audited flow for eligible saved
+receipts, including finished receipts and drafts whose formerly applied lines
+have since been removed. It shows the existing and proposed day, requires a
+reason of 1–500 characters, and retains the opened revision and typed values on
+failure. Refreshing does not silently resubmit against a newer revision.
+The receipt's automatic creation time is displayed separately; where the saved
+snapshot lacks it, **Refresh receipt creation and correction history** reads
+and caches the server's immutable timestamp without substituting purchase day
+or last-update time.
+
+**Cancel receipt** on a finished receipt, or **Cancel draft**, requires a
+confirmation explaining the whole-receipt stock reversal. Only remaining
+applied lines reverse; unresolved lines do not change stock. The receipt is
+retained, and repeated clicks/restarts use the original cancellation operation.
+Queued cancellation, server acceptance awaiting readback, and synchronized
+cancellation have different labels. Rejected/conflicting changes remain
+visible with their saved context in correction history and synchronization.
+
+Open **History** to filter all, active, finished, empty or cancelled receipts.
+Expanding a receipt shows its header, removed lines and accepted/pending/failed
+corrections. Removing the final line leaves an empty corrected receipt rather
+than cancelling or deleting it. Cancelled receipts remain discoverable and are
+excluded from active receipt spending. Historical creation/correction metadata
+is cached in the existing protected local database; online refresh respects the
+current household and account and never clears pending operations.
 
 **Finish receipt** closes the group. It applies approved imported lines which
 have not yet affected stock and skips manual lines already applied. Repeating

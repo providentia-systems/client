@@ -201,6 +201,41 @@ void main() {
   });
 
   testWidgets(
+    'spending loading and failed reads do not claim an empty receipt history',
+    (tester) async {
+      final empty = ReceiptSpendSummary.fromReceipts(
+        homeId: 'home-a',
+        receipts: [],
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ReceiptSpendCard(summary: empty, hasLoaded: false),
+          ),
+        ),
+      );
+      expect(find.text('Loading saved receipt spending…'), findsOneWidget);
+      expect(find.text('No finished receipt spending recorded.'), findsNothing);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ReceiptSpendCard(
+              summary: empty,
+              hasLoaded: false,
+              readFailed: true,
+            ),
+          ),
+        ),
+      );
+      expect(
+        find.textContaining('Receipt spending is unavailable'),
+        findsOneWidget,
+      );
+      expect(find.text('No finished receipt spending recorded.'), findsNothing);
+    },
+  );
+
+  testWidgets(
     'spend card separates currencies and incomplete product breakdown',
     (tester) async {
       final summary = ReceiptSpendSummary.fromReceipts(

@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:providentia/core/domain/household_product_lookup.dart';
 import 'package:providentia/core/presentation/place_management_dialog.dart';
 import 'package:providentia/core/presentation/quantity_field.dart';
+import 'package:providentia/features/purchasing/domain/purchase_calendar.dart';
 import 'package:providentia/features/purchasing/domain/purchase_models.dart';
 import 'package:providentia/features/purchasing/domain/receipt_amounts.dart';
 import 'package:providentia/features/purchasing/domain/receipt_spend.dart';
 import 'package:providentia/features/purchasing/presentation/finished_receipt_line_editor.dart';
 import 'package:providentia/features/purchasing/presentation/purchasing_controller.dart';
+import 'package:providentia/features/purchasing/presentation/receipt_date_correction_dialog.dart';
 import 'package:providentia/features/purchasing/presentation/receipt_draft_editor.dart';
+import 'package:providentia/features/purchasing/presentation/receipt_history_section.dart';
 import 'package:providentia/features/purchasing/presentation/receipt_price_widgets.dart';
 import 'package:providentia/features/purchasing/presentation/receipt_spend_card.dart';
 
@@ -110,7 +113,11 @@ class _PurchasingWorkspaceState extends State<PurchasingWorkspace> {
               ),
               const SizedBox(height: 12),
               if (widget.controller.canSelectReceipts)
-                ReceiptSpendCard(summary: widget.controller.receiptSpendSummary)
+                ReceiptSpendCard(
+                  summary: widget.controller.receiptSpendSummary,
+                  hasLoaded: widget.controller.hasLoadedReceipts,
+                  readFailed: widget.controller.receiptReadFailed,
+                )
               else
                 Card(
                   child: ListTile(
@@ -129,7 +136,9 @@ class _PurchasingWorkspaceState extends State<PurchasingWorkspace> {
                 ),
               for (final group in widget.controller.recentGroups)
                 _PurchaseGroupCard(group: group),
-            ] else
+            ] else ...[
+              ReceiptHistorySection(controller: widget.controller),
+              const SizedBox(height: 12),
               for (final summary in widget.controller.monthlyHistory)
                 ListTile(
                   title: Text(
@@ -138,6 +147,7 @@ class _PurchasingWorkspaceState extends State<PurchasingWorkspace> {
                   subtitle: Text('${summary.lineCount} purchase lines'),
                   trailing: Text(_quantity(summary.quantity)),
                 ),
+            ],
           ],
         );
       },
@@ -161,6 +171,9 @@ class _PurchaseCapturePanel extends StatefulWidget {
 
 class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
   final _currency = TextEditingController(text: 'NAD');
+  final _purchaseDate = TextEditingController(
+    text: formatPurchaseDay(DateTime.now()),
+  );
   final _receiptTotal = TextEditingController();
   final _notes = TextEditingController();
   final _sourceReference = TextEditingController();
@@ -204,6 +217,7 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
     _productFocus.dispose();
     _productSearch.dispose();
     _currency.dispose();
+    _purchaseDate.dispose();
     _receiptTotal.dispose();
     _notes.dispose();
     _sourceReference.dispose();
@@ -307,7 +321,7 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
               DropdownButtonFormField<String>(
                 key: ValueKey('purchase-receipt-selector-${capture?.id}'),
                 initialValue: capture?.id,
-                decoration: const InputDecoration(labelText: 'Open receipts'),
+                decoration: const InputDecoration(labelText: 'Receipts'),
                 isExpanded: true,
                 items: [
                   for (final receipt in controller.receipts)
@@ -403,6 +417,15 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
             label: const Text('Add store'),
           ),
         TextField(
+          key: const Key('purchase-receipt-date'),
+          controller: _purchaseDate,
+          decoration: const InputDecoration(
+            labelText: 'Purchase day (YYYY-MM-DD)',
+            helperText:
+                'Choose the day on the receipt before entering products.',
+          ),
+        ),
+        TextField(
           key: const Key('purchase-receipt-currency'),
           controller: _currency,
           maxLength: 3,
@@ -460,11 +483,23 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
   Widget _captureEditor(BuildContext context, PurchaseReceiptCapture capture) {
     final pending =
         capture.synchronizationState == PurchaseSynchronizationState.pending;
+    if (capture.status == PurchaseReceiptStatus.cancelled) {
+      return ReceiptHistoryDetails(
+        receipt: capture,
+        controller: widget.controller,
+        showRetainedLines: true,
+      );
+    }
     if (capture.status == PurchaseReceiptStatus.committed) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Text('Receipt revision ${capture.revision}'),
+          ReceiptHistoryDetails(
+            receipt: capture,
+            controller: widget.controller,
+          ),
+          _receiptDateAndCancellationActions(capture),
           ReceiptAmountSummary(receipt: capture),
           const SizedBox(height: 4),
           Text(
@@ -553,6 +588,12 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
+        ReceiptHistoryDetails(receipt: capture, controller: widget.controller),
+        if (capture.purchaseBasisFixed)
+          _receiptDateAndCancellationActions(
+            capture,
+            includeCancellation: false,
+          ),
         Text(
           'Draft revision ${capture.revision} · '
           '${pending ? 'awaiting authoritative confirmation' : 'synchronized'}',
@@ -865,7 +906,7 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
           label: const Text('Add purchase'),
         ),
         const Text(
-          'Add saves this purchase and increases stock immediately. Items remain grouped under this receipt.',
+          'Add saves this purchase and queues its stock effect. Stock can show a local estimate; when a count anchors stock, the server places the purchase correctly in history. Finish receipt completes the receipt and never adds the stock again.',
         ),
       ],
     );
@@ -1029,13 +1070,48 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
 
   Future<void> _cancelDraft(PurchaseReceiptCapture receipt) async {
     if (await _confirmRemoval(
-          'Cancel draft?',
-          'This receipt will be cancelled. Purchases already added from this receipt will be reversed in stock; history is kept.',
+          receipt.status == PurchaseReceiptStatus.committed
+              ? 'Cancel finished receipt?'
+              : 'Cancel draft?',
+          'This cancels the whole receipt. Every remaining stock-applied line is reversed exactly once; unresolved lines do not change stock. The receipt, purchase day, totals and removed-line history remain accessible in Receipt history. Cancellation is queued locally until the server confirms it.',
         ) &&
         mounted) {
       await widget.controller.cancelDraft(receipt);
     }
   }
+
+  Widget _receiptDateAndCancellationActions(
+    PurchaseReceiptCapture receipt, {
+    bool includeCancellation = true,
+  }) => Wrap(
+    spacing: 8,
+    children: [
+      if (widget.controller.canCorrectReceiptDate)
+        OutlinedButton.icon(
+          key: const Key('purchase-correct-date'),
+          onPressed: widget.controller.state.captureBusy
+              ? null
+              : () => showDialog<void>(
+                  context: context,
+                  builder: (_) => ReceiptDateCorrectionDialog(
+                    controller: widget.controller,
+                    receipt: receipt,
+                  ),
+                ),
+          icon: const Icon(Icons.event_note_outlined),
+          label: const Text('Correct purchase day'),
+        ),
+      if (includeCancellation && widget.controller.canMaintainDraft)
+        TextButton.icon(
+          key: const Key('purchase-cancel-receipt'),
+          onPressed: widget.controller.state.captureBusy
+              ? null
+              : () => _cancelDraft(receipt),
+          icon: const Icon(Icons.cancel_outlined),
+          label: const Text('Cancel receipt'),
+        ),
+    ],
+  );
 
   Future<void> _completeFinishedLine(
     PurchaseReceiptCapture receipt, [
@@ -1112,7 +1188,7 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
             ),
             Text(
               line.stockApplied
-                  ? 'Stock added: ${line.stockQuantity} ${line.stockUnit ?? match?.stockUnit ?? 'stock units'} · ${line.synchronizationState == PurchaseSynchronizationState.pending ? 'synchronization pending' : 'synchronized'}'
+                  ? 'Stock effect: ${line.stockQuantity} ${line.stockUnit ?? match?.stockUnit ?? 'stock units'} · ${line.synchronizationState == PurchaseSynchronizationState.pending ? 'synchronization pending' : 'synchronized'}'
                   : capture.status == PurchaseReceiptStatus.committed
                   ? 'Stock confirmation is uncertain. Refresh receipt details before correcting this purchase.'
                   : 'Approved: ${match?.name ?? 'Private home product'} · revision ${line.revision}${line.stockQuantityPerPack == null ? '' : ' · ${widget.controller.approvedStockPreview(line)}'}',
@@ -1347,8 +1423,15 @@ class _PurchaseCapturePanelState extends State<_PurchaseCapturePanel> {
       );
       return;
     }
+    DateTime day;
+    try {
+      day = parsePurchaseDay(_purchaseDate.text.trim());
+    } on FormatException catch (error) {
+      widget.controller.reportCaptureValidation(error.message);
+      return;
+    }
     final saved = await widget.controller.createDraft(
-      purchaseDate: DateTime.now().toUtc(),
+      purchaseDate: day,
       storeId:
           widget.controller.stores.any(
             (store) => store.id == _storeId && !store.archived,
