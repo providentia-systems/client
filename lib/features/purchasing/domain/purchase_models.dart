@@ -270,6 +270,7 @@ final class PurchaseReceiptCapture {
     this.total,
     this.sourceReference,
     this.commitConfirmed = false,
+    this.lineCorrectionState,
   }) : lines = List<PurchaseReceiptLineCapture>.unmodifiable(lines) {
     _requireText(id, 'id');
     _requireText(homeId, 'homeId');
@@ -295,6 +296,10 @@ final class PurchaseReceiptCapture {
   /// An immutable operation result or previously validated committed server
   /// receipt confirms the commit even while later corrections await readback.
   final bool commitConfirmed;
+
+  /// Server-advertised capability. An older response cannot authorize a new
+  /// finished-line operation merely because its receipt is committed.
+  final String? lineCorrectionState;
   final int revision;
   final PurchaseReceiptStatus status;
   final PurchaseSynchronizationState synchronizationState;
@@ -365,6 +370,7 @@ final class PurchaseReceiptLineRequest {
     this.lineTotal,
     this.clientLineId,
     this.quantityText,
+    this.allowUnknownPrice = false,
   }) {
     _requireText(homeId, 'homeId');
     _requireText(receiptId, 'receiptId');
@@ -387,7 +393,7 @@ final class PurchaseReceiptLineRequest {
         'must not exceed 191 characters',
       );
     }
-    if (unitPrice == null && lineTotal == null) {
+    if (!allowUnknownPrice && unitPrice == null && lineTotal == null) {
       throw ArgumentError('A unit price or line total is required.');
     }
     if (unitPrice != null &&
@@ -409,6 +415,7 @@ final class PurchaseReceiptLineRequest {
   final Money? lineTotal;
   final String? clientLineId;
   final String? quantityText;
+  final bool allowUnknownPrice;
 }
 
 final class PurchaseLine {
@@ -463,6 +470,7 @@ final class PurchaseGroup {
     required this.storeName,
     required List<PurchaseLine> lines,
     required this.inferred,
+    this.receipt,
   }) : lines = List<PurchaseLine>.unmodifiable(lines);
 
   final String id;
@@ -474,9 +482,14 @@ final class PurchaseGroup {
   /// used only for display parity.
   final bool inferred;
 
+  /// Authoritative receipt metadata, including header-only receipts.
+  final PurchaseReceiptCapture? receipt;
+
   bool get pendingSynchronization =>
+      receipt?.synchronizationState == PurchaseSynchronizationState.pending ||
       lines.any((line) => line.pendingSynchronization);
 
+  /// Complete entered-products subtotal; a physical receipt total may differ.
   Money? get total {
     final priced = lines.where((line) => line.lineTotal != null).toList();
     if (priced.isEmpty ||

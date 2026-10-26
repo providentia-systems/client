@@ -60,3 +60,12 @@ abstract interface class InventoryMetadataRepository {
     int? expectedRevision,
   });
 }
+
+/// Local evidence can prohibit a unit change, but cannot certify the absence of
+/// server history. The server always makes the final revision-checked decision.
+abstract interface class InventoryUnitChangeRepository {
+  Future<InventoryUnitChangeEligibility> unitChangeEligibility({
+    required String homeId,
+    required String productId,
+  });
+}

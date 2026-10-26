@@ -151,6 +151,17 @@ final class InventoryProductCreationException implements Exception {
   final String safeMessage;
 }
 
+enum InventoryUnitChangeEligibility {
+  inUse,
+  unavailable,
+  serverConfirmationRequired,
+}
+
+final class InventoryUnitChangeException implements Exception {
+  const InventoryUnitChangeException(this.safeMessage);
+  final String safeMessage;
+}
+
 enum StockMovementKind {
   openingBalance,
   purchase,
@@ -174,6 +185,10 @@ final class InventoryItem {
     this.unit = 'units',
     List<String> aliases = const <String>[],
     this.currentQuantity,
+    this.stockUncertain,
+    this.pendingStockQuantity,
+    List<String> stockLimitations = const <String>[],
+    this.stockCheckpointId,
     this.isHomeProduct = false,
     this.productId,
     this.packId,
@@ -189,14 +204,23 @@ final class InventoryItem {
     this.normalizedBaseAmount,
     this.normalizedBaseUnit,
     this.packStatus,
-  }) : aliases = List<String>.unmodifiable(aliases) {
+  }) : aliases = List<String>.unmodifiable(aliases),
+       stockLimitations = List<String>.unmodifiable(stockLimitations) {
     _requireText(id, 'id');
     _requireText(homeId, 'homeId');
     _requireText(canonicalName, 'canonicalName');
     _requireText(packSize, 'packSize');
     _requireText(category, 'category');
     _requireText(unit, 'unit');
-    _requireQuantity(currentQuantity, 'currentQuantity', nullable: true);
+    // This is a signed ledger projection, not a physical observation. A
+    // negative source balance must remain readable without authorizing a
+    // negative count or adjustment input.
+    _requireQuantity(
+      currentQuantity,
+      'currentQuantity',
+      nullable: true,
+      allowNegative: true,
+    );
   }
 
   final String id;
@@ -208,6 +232,12 @@ final class InventoryItem {
   final String unit;
   final List<String> aliases;
   final double? currentQuantity;
+
+  /// Null means chronology evidence was unavailable in this source revision.
+  final bool? stockUncertain;
+  final String? pendingStockQuantity;
+  final List<String> stockLimitations;
+  final String? stockCheckpointId;
   final bool isHomeProduct;
   final String? productId;
   final String? packId;
@@ -246,6 +276,10 @@ final class InventoryItem {
       currentQuantity: clearQuantity
           ? null
           : (currentQuantity ?? this.currentQuantity),
+      stockUncertain: clearQuantity ? null : stockUncertain,
+      pendingStockQuantity: clearQuantity ? null : pendingStockQuantity,
+      stockLimitations: clearQuantity ? const <String>[] : stockLimitations,
+      stockCheckpointId: clearQuantity ? null : stockCheckpointId,
       isHomeProduct: isHomeProduct,
       productId: productId,
       packId: packId,
@@ -305,6 +339,7 @@ final class StockCountLine {
     required this.status,
     required this.source,
     this.observedQuantity,
+    this.unit,
     this.photoId,
     this.possibleDuplicate = false,
     this.duplicateReviewed = false,
@@ -325,6 +360,9 @@ final class StockCountLine {
   final CountLineStatus status;
   final CountSource source;
   final double? observedQuantity;
+
+  /// Unit captured with this observation; null means unavailable evidence.
+  final String? unit;
   final String? photoId;
   final bool possibleDuplicate;
   final bool duplicateReviewed;
@@ -341,6 +379,7 @@ final class StockCountLine {
       status: status ?? this.status,
       source: source,
       observedQuantity: observedQuantity ?? this.observedQuantity,
+      unit: unit,
       photoId: photoId,
       possibleDuplicate: possibleDuplicate ?? this.possibleDuplicate,
       duplicateReviewed: duplicateReviewed ?? this.duplicateReviewed,
@@ -356,6 +395,10 @@ final class StockCountSession {
     required this.startedAt,
     this.status = CountSessionStatus.open,
     this.closedAt,
+    this.scopeComplete,
+    this.reliability,
+    this.observedAt,
+    this.observedTimezone,
     List<StockPhotoReference> photos = const <StockPhotoReference>[],
     List<StockCountLine> lines = const <StockCountLine>[],
   }) : photos = List<StockPhotoReference>.unmodifiable(photos),
@@ -374,6 +417,12 @@ final class StockCountSession {
   final DateTime startedAt;
   final CountSessionStatus status;
   final DateTime? closedAt;
+
+  /// Null evidence remains unassessed; entry/closing time is not observation time.
+  final bool? scopeComplete;
+  final String? reliability;
+  final DateTime? observedAt;
+  final String? observedTimezone;
   final List<StockPhotoReference> photos;
   final List<StockCountLine> lines;
 
@@ -471,6 +520,10 @@ final class StockCountSession {
       startedAt: startedAt,
       status: status ?? this.status,
       closedAt: closedAt ?? this.closedAt,
+      scopeComplete: scopeComplete,
+      reliability: reliability,
+      observedAt: observedAt,
+      observedTimezone: observedTimezone,
       photos: photos ?? this.photos,
       lines: lines ?? this.lines,
     );
@@ -564,7 +617,11 @@ final class ManualAdjustmentIntent {
     _requireText(itemId, 'itemId');
     _requireText(locationId, 'locationId');
     _requireText(reason, 'reason');
-    _requireQuantity(projectedQuantity, 'projectedQuantity');
+    _requireQuantity(
+      projectedQuantity,
+      'projectedQuantity',
+      allowNegative: true,
+    );
     _requireQuantity(observedQuantity, 'observedQuantity');
   }
 

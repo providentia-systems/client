@@ -1213,11 +1213,15 @@ void main() {
         operations.every((operation) => operation.operationId.contains('-')),
         isTrue,
       );
-      final balance =
-          await (database.select(database.localRecords)
-                ..where((row) => row.entityType.equals('inventory-balance')))
-              .getSingle();
-      expect(jsonDecode(balance.payload), containsPair('quantity', '8'));
+      final balances = await (database.select(
+        database.localRecords,
+      )..where((row) => row.entityType.equals('inventory-balance'))).get();
+      expect(
+        balances,
+        isEmpty,
+        reason:
+            'Closing unassessed observations must await authoritative chronology readback.',
+      );
     },
   );
 
@@ -1286,7 +1290,7 @@ void main() {
   );
 
   test(
-    'photo count queues an ordinary line and changes balance only on one close',
+    'photo count closes once and waits for authoritative eligible stock readback',
     () async {
       var idIndex = 0;
       final operationIds = <String>[
@@ -1360,11 +1364,14 @@ void main() {
         ),
         hasLength(1),
       );
-      final balance =
-          await (database.select(database.localRecords)
-                ..where((row) => row.entityType.equals('inventory-balance')))
-              .getSingle();
-      expect(jsonDecode(balance.payload), containsPair('quantity', '6'));
+      final balances = await (database.select(
+        database.localRecords,
+      )..where((row) => row.entityType.equals('inventory-balance'))).get();
+      expect(
+        balances,
+        isEmpty,
+        reason: 'Photo confirmation alone does not certify count eligibility.',
+      );
       await expectLater(repository.saveCountSession(closed), throwsStateError);
     },
   );
@@ -2208,6 +2215,7 @@ void main() {
         'description': 'Flour',
         'quantity': '2',
         'suggestionId': _suggestionId,
+        'selectedPackId': _selectedPackId,
       });
       expect(
         operations.any(

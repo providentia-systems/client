@@ -17,6 +17,9 @@ final class ShoppingListLine {
     this.suggestionId,
     this.homeProductId,
     this.selectedPackId,
+    this.productId,
+    this.stockUnit,
+    this.quantityBasis,
     @Deprecated(
       'Legacy field retained until the Drift shopping projection is migrated. '
       'New suggestion lines must use suggestionId, homeProductId, and '
@@ -36,9 +39,19 @@ final class ShoppingListLine {
       (suggestionId, 'suggestionId'),
       (homeProductId, 'homeProductId'),
       (selectedPackId, 'selectedPackId'),
+      (productId, 'productId'),
       (productPackId, 'productPackId'),
     ]) {
       if (value != null) _requireText(value, label);
+    }
+    if (quantityBasis != null &&
+        quantityBasis != 'pack-count' &&
+        quantityBasis != 'stock-unit') {
+      throw ArgumentError.value(quantityBasis, 'quantityBasis');
+    }
+    if (stockUnit != null &&
+        !const <String>{'units', 'g', 'kg', 'ml', 'l'}.contains(stockUnit)) {
+      throw ArgumentError.value(stockUnit, 'stockUnit');
     }
     if (suggestionId != null &&
         (origin != ShoppingLineOrigin.suggestion || homeProductId == null)) {
@@ -58,6 +71,11 @@ final class ShoppingListLine {
   final String? suggestionId;
   final String? homeProductId;
   final String? selectedPackId;
+
+  /// Server-resolved identities and measurement basis; null is unavailable.
+  final String? productId;
+  final String? stockUnit;
+  final String? quantityBasis;
 
   /// Legacy local suggestion identity. It was historically populated with a
   /// home-product ID despite its name, so it must not be used by new code.
@@ -87,6 +105,9 @@ final class ShoppingListLine {
       suggestionId: suggestionId,
       homeProductId: homeProductId,
       selectedPackId: selectedPackId,
+      productId: productId,
+      stockUnit: stockUnit,
+      quantityBasis: quantityBasis,
       productPackId: productPackId,
       checked: checked ?? this.checked,
       archived: archived ?? this.archived,

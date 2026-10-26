@@ -7,9 +7,10 @@ import 'package:providentia/core/security/uuid_v4.dart';
 import 'package:providentia/core/synchronization/receipt_projection_validation.dart';
 import 'package:providentia/core/synchronization/sync_models.dart';
 import 'package:providentia/core/synchronization/sync_ports.dart';
+import 'package:providentia/core/synchronization/synchronization_recovery.dart';
 
 final class DriftLocalSyncRepository
-    implements LocalSyncRepository, ReceiptReadbackRecovery {
+    implements LocalSyncRepository, ReceiptReadbackRecovery, SyncRecoveryStore {
   factory DriftLocalSyncRepository(
     AppDatabase database, {
     DateTime Function()? clock,
@@ -53,15 +54,18 @@ final class DriftLocalSyncRepository
         'inventory.count-line.remove': 'inventory-count-line',
         'inventory.count-session.close': 'inventory-count-session',
         'inventory.count-session.cancel': 'inventory-count-session',
+        'inventory.count-session.review': 'inventory-count-session',
         'purchasing.store.create': 'purchasing-store',
         'purchasing.store.update': 'purchasing-store',
         'purchasing.receipt.update': 'purchasing-receipt',
+        'purchasing.receipt.correct-date': 'purchasing-receipt',
         'purchasing.receipt.cancel': 'purchasing-receipt',
         'purchasing.receipt-line.update': 'purchasing-receipt-line',
         'purchasing.receipt-line.remove': 'purchasing-receipt-line',
         'purchasing.receipt.create': 'purchasing-receipt',
         'purchasing.receipt-line.create': 'purchasing-receipt-line',
         'purchasing.receipt-line.purchase': 'purchasing-receipt-line',
+        'purchasing.receipt-line.correct': 'purchasing-receipt-line',
         'purchasing.receipt-line.approve': 'purchasing-receipt-line',
         'purchasing.receipt-line.unresolve': 'purchasing-receipt-line',
         'purchasing.receipt.commit': 'purchasing-receipt',
@@ -72,6 +76,7 @@ final class DriftLocalSyncRepository
         'shopping.list-line.update': 'shopping-list-line',
         'shopping.list-line.create': 'shopping-list-line',
         'shopping.list-line.checked': 'shopping-list-line',
+        'shopping.list-line.relink': 'shopping-list-line',
       };
 
   static const Set<String> _localOnlyRecordTypes =
@@ -199,6 +204,158 @@ final class DriftLocalSyncRepository
               state: ClientOperationState.pending.storageValue,
             ),
             mode: InsertMode.insertOrAbort,
+          );
+    });
+  }
+
+  @override
+  Future<void> requireOriginalRecoveryBinding({
+    required String homeId,
+    required String accountId,
+    required String deviceId,
+  }) async {
+    _requireCurrent();
+    final mismatched =
+        await (_database.select(_database.clientOperations)
+              ..where(
+                (row) =>
+                    row.homeId.equals(homeId) &
+                    row.state.isIn(_unacknowledgedOperationStates) &
+                    (row.originatingAccountId.isNull() |
+                        row.originatingAccountId.equals(accountId).not() |
+                        row.deviceId.equals(deviceId).not()),
+              )
+              ..limit(1))
+            .get();
+    _requireCurrent();
+    if (mismatched.isNotEmpty) {
+      throw const BindingSyncException(
+        'Saved work requires its original account and device. Unknown or different provenance needs recovery review; no saved records were changed.',
+        code: 'device_binding_mismatch',
+      );
+    }
+  }
+
+  @override
+  Future<List<SyncRecoveryOperation>> recoveryOperations({
+    required String homeId,
+  }) async {
+    _requireCurrent();
+    final rows =
+        await (_database.select(_database.clientOperations)
+              ..where(
+                (row) =>
+                    row.homeId.equals(homeId) &
+                    row.state.isIn(_unacknowledgedOperationStates),
+              )
+              ..orderBy([
+                (row) => OrderingTerm.asc(row.enqueueSequence),
+                (row) => OrderingTerm.asc(row.clientTimestamp),
+                (row) => OrderingTerm.asc(row.operationId),
+              ])
+              ..limit(100))
+            .get();
+    _requireCurrent();
+    return rows
+        .map(
+          (row) => SyncRecoveryOperation(
+            state: ClientOperationState.fromStorage(row.state),
+            blockedCode: row.safeFailureCode,
+            operation: PendingClientOperation(
+              operationId: row.operationId,
+              deviceId: row.deviceId,
+              originatingAccountId: row.originatingAccountId,
+              homeId: row.homeId,
+              entityType: row.entityType,
+              entityId: row.entityId,
+              operationType: row.operationType,
+              baseRevision: row.baseRevision,
+              clientTimestamp: row.clientTimestamp.toUtc(),
+              payloadSchemaVersion: row.payloadSchemaVersion,
+              payload: _decodePayload(row.payload),
+              retryCount: row.retryCount,
+              enqueueSequence: row.enqueueSequence,
+            ),
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  @override
+  Future<void> replaceWithRecoveryBootstrap({
+    required String homeId,
+    required PullPage page,
+  }) {
+    return _transaction(() async {
+      // The complete queue, including conflict/validation state and raw JSON,
+      // remains inside the existing encrypted database. A crash rolls back the
+      // entire replacement; no plaintext backup or destructive reset is needed.
+      final before =
+          await (_database.select(_database.clientOperations)
+                ..where((row) => row.homeId.equals(homeId))
+                ..orderBy([(row) => OrderingTerm.asc(row.operationId)]))
+              .get();
+      await replaceWithBootstrap(homeId: homeId, page: page);
+      final after =
+          await (_database.select(_database.clientOperations)
+                ..where((row) => row.homeId.equals(homeId))
+                ..orderBy([(row) => OrderingTerm.asc(row.operationId)]))
+              .get();
+      if (before.length != after.length ||
+          List.generate(
+            before.length,
+            (index) => before[index] != after[index],
+          ).any((changed) => changed)) {
+        throw StateError(
+          'Recovery changed saved operation identities or state.',
+        );
+      }
+    });
+  }
+
+  @override
+  Future<void> requeueRevalidatedOperation({
+    required SyncRecoveryOperation operation,
+    required DateTime now,
+  }) {
+    return _transaction(() async {
+      final expected = operation.operation;
+      final row =
+          await (_database.select(_database.clientOperations)..where(
+                (row) =>
+                    row.operationId.equals(expected.operationId) &
+                    row.homeId.equals(expected.homeId),
+              ))
+              .getSingle();
+      if (row.deviceId != expected.deviceId ||
+          row.originatingAccountId != expected.originatingAccountId ||
+          row.operationType != expected.operationType ||
+          row.entityId != expected.entityId ||
+          row.entityType != expected.entityType ||
+          row.payloadSchemaVersion != expected.payloadSchemaVersion ||
+          row.enqueueSequence != expected.enqueueSequence ||
+          row.baseRevision != expected.baseRevision ||
+          row.clientTimestamp.toUtc() != expected.clientTimestamp.toUtc() ||
+          jsonEncode(_decodePayload(row.payload)) !=
+              jsonEncode(expected.payload) ||
+          row.state != operation.state.storageValue ||
+          row.safeFailureCode != 'device_binding_mismatch' ||
+          operation.blockedCode != 'device_binding_mismatch' ||
+          operation.state != ClientOperationState.blockedAuthorization) {
+        throw StateError(
+          'Saved work changed or is not eligible for original-binding retry.',
+        );
+      }
+      await (_database.update(_database.clientOperations)
+            ..where((value) => value.operationId.equals(expected.operationId)))
+          .write(
+            ClientOperationsCompanion(
+              state: Value(ClientOperationState.pending.storageValue),
+              retryCount: Value(row.retryCount + 1),
+              nextAttemptAt: Value(now.toUtc()),
+              lastSafeError: const Value(null),
+              safeFailureCode: const Value(null),
+            ),
           );
     });
   }
@@ -369,12 +526,32 @@ final class DriftLocalSyncRepository
           ),
         );
 
+        var requiresUnitReadback = false;
+        if (operation.entityType == 'inventory-home-product') {
+          final product =
+              await (_database.select(_database.localRecords)..where(
+                    (row) =>
+                        row.homeId.equals(operation.homeId) &
+                        row.entityType.equals(operation.entityType) &
+                        row.entityId.equals(operation.entityId),
+                  ))
+                  .getSingleOrNull();
+          requiresUnitReadback =
+              product != null &&
+              _decodePayload(
+                    product.payload,
+                  )['_clientUnitChangeAwaitingReadback'] ==
+                  true;
+        }
         if (result.kind == PushResultKind.acknowledged &&
             result.acceptedRevision != null &&
-            !operation.operationType.startsWith('purchasing.receipt')) {
-          // A receipt command result confirms execution, not a fully decoded
-          // resource. Keep its optimistic projection pending until validated
-          // authoritative readback, even when an acknowledgement has a revision.
+            !operation.operationType.startsWith('purchasing.receipt') &&
+            !requiresUnitReadback &&
+            !(operation.operationType == 'inventory.home-product.update' &&
+                _decodePayload(operation.payload)['unit'] != null)) {
+          // Receipt and unit-change results confirm execution, not a fully
+          // decoded resource. A unit request retains the old label locally;
+          // only authoritative readback can confirm the new quantity meaning.
           await (_database.update(_database.localRecords)..where(
                 (row) =>
                     row.homeId.equals(operation.homeId) &
@@ -790,6 +967,7 @@ final class DriftLocalSyncRepository
           'purchasing.receipt-line.remove' ||
           'purchasing.receipt-line.create' ||
           'purchasing.receipt-line.purchase' ||
+          'purchasing.receipt-line.correct' ||
           'purchasing.receipt-line.approve' ||
           'purchasing.receipt-line.unresolve' => (
             entityType: 'purchasing-receipt',
@@ -797,7 +975,8 @@ final class DriftLocalSyncRepository
           ),
           'shopping.list-line.create' ||
           'shopping.list-line.checked' ||
-          'shopping.list-line.update' => (
+          'shopping.list-line.update' ||
+          'shopping.list-line.relink' => (
             entityType: 'shopping-list',
             entityId: payload['listId'],
           ),
@@ -808,7 +987,8 @@ final class DriftLocalSyncRepository
             '${auxiliary.entityType}\u0000${auxiliary.entityId as String}',
           );
         }
-        if (operation.operationType == 'inventory.count-session.close') {
+        if (operation.operationType == 'inventory.count-session.close' ||
+            operation.operationType == 'inventory.count-session.review') {
           final countLines =
               await (_database.select(_database.localRecords)..where(
                     (row) =>
@@ -822,6 +1002,7 @@ final class DriftLocalSyncRepository
             if (linePayload['sessionId'] == operation.entityId &&
                 homeProductId is String) {
               intentKeys.add('inventory-balance\u0000$homeProductId');
+              intentKeys.add('inventory-count-line\u0000${line.entityId}');
             }
           }
         }
@@ -1005,6 +1186,7 @@ final class DriftLocalSyncRepository
         }
         final line = linePayloads[operation.entityId];
         if (command == 'purchasing.receipt-line.purchase' ||
+            command == 'purchasing.receipt-line.correct' ||
             ((command == 'purchasing.receipt-line.update' ||
                     command == 'purchasing.receipt-line.remove') &&
                 line?['stockQuantity'] != null)) {
@@ -1014,7 +1196,8 @@ final class DriftLocalSyncRepository
           }
         }
       } else if (command == 'purchasing.receipt.cancel' ||
-          command == 'purchasing.receipt.commit') {
+          command == 'purchasing.receipt.commit' ||
+          command == 'purchasing.receipt.correct-date') {
         for (final entry in linePayloads.entries) {
           final line = entry.value;
           final productId = line['homeProductId'];

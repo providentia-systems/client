@@ -91,3 +91,30 @@ abstract interface class PurchasePackReviewRepository {
     String? packId,
   });
 }
+
+/// Deliberate audited completion of one omitted or unresolved purchase on an
+/// already finished receipt. The parent and optional existing line revisions
+/// bind the correction; the ordinary finish command is never replayed.
+abstract interface class PurchaseFinishedReceiptCorrectionRepository {
+  Future<PurchaseMutationResult> completeFinishedReceiptLine({
+    required PurchaseReceiptLineRequest line,
+    required int expectedReceiptRevision,
+    required String homeProductId,
+    required String reason,
+    String? packId,
+    String? existingLineId,
+    int? expectedLineRevision,
+  });
+}
+
+/// Audited calendar-day correction. This command retains the receipt and line
+/// identities; the backend reconciles historical stock and price evidence.
+abstract interface class PurchaseReceiptDateCorrectionRepository {
+  Future<PurchaseMutationResult> correctReceiptPurchaseDate({
+    required String homeId,
+    required String receiptId,
+    required int expectedRevision,
+    required DateTime purchaseDate,
+    required String reason,
+  });
+}

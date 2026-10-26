@@ -57,11 +57,14 @@ final class DriftHouseholdRepository
     implements
         InventoryProductCreationRepository,
         InventoryMetadataRepository,
+        InventoryUnitChangeRepository,
         HomeLocationRepository,
         PurchaseStoreRepository,
         StockPreferenceRepository,
         PurchaseCaptureRepository,
         PurchaseQuickEntryRepository,
+        PurchaseFinishedReceiptCorrectionRepository,
+        PurchaseReceiptDateCorrectionRepository,
         PurchasePackReviewRepository,
         PurchaseReceiptSelectionRepository,
         PurchaseIntakeRecoveryRepository,
@@ -663,6 +666,90 @@ final class DriftHouseholdRepository
   }
 
   @override
+  Future<InventoryUnitChangeEligibility> unitChangeEligibility({
+    required String homeId,
+    required String productId,
+  }) async {
+    _requireHomeUuid(homeId);
+    _requireUuid(productId, 'home product');
+    final product = await _record(
+      homeId: homeId,
+      entityType: _homeProductType,
+      entityId: productId,
+    );
+    if (product == null) throw StateError('The product is unavailable.');
+    final data = _validatedProjection(product, homeId);
+    if (data['_clientUnitChangeAwaitingReadback'] == true) {
+      return InventoryUnitChangeEligibility.unavailable;
+    }
+    return _hasKnownUnitEvidence(homeId, productId);
+  }
+
+  Future<InventoryUnitChangeEligibility> _hasKnownUnitEvidence(
+    String homeId,
+    String productId,
+  ) async {
+    final records = await (_database.select(
+      _database.localRecords,
+    )..where((row) => row.homeId.equals(homeId))).get();
+    for (final record in records) {
+      if (record.entityType == _homeProductType ||
+          record.entityType == _catalogItemType ||
+          record.entityType == _catalogBaseType) {
+        continue;
+      }
+      final data = _decodeObject(record.payload, 'unit evidence');
+      final referencesProduct =
+          data['homeProductId'] == productId || data['itemId'] == productId;
+      if (record.entityType == _balanceType &&
+          (referencesProduct || record.entityId == productId)) {
+        final quantity = double.tryParse('${data['quantity']}');
+        if (quantity == null ||
+            !quantity.isFinite ||
+            quantity != 0 ||
+            data['lastMovementId'] != null ||
+            data['checkpointId'] != null ||
+            data['uncertain'] == true ||
+            (data['pendingQuantity'] != null &&
+                double.tryParse('${data['pendingQuantity']}') != 0)) {
+          return InventoryUnitChangeEligibility.inUse;
+        }
+      } else if (record.entityType == _stockPreferenceType &&
+          (referencesProduct || record.entityId == productId)) {
+        if (data['minimumQuantity'] != null || data['alwaysKeep'] == true) {
+          return InventoryUnitChangeEligibility.inUse;
+        }
+      } else if (referencesProduct &&
+          (record.entityType == _movementType ||
+              record.entityType == 'inventory-movement' ||
+              record.entityType == 'inventory-stock-movement' ||
+              record.entityType == _serverShoppingLineType ||
+              record.entityType == _purchaseLineType ||
+              record.entityType == _receiptLineType ||
+              (record.entityType == _serverCountLineType &&
+                  data['status'] != 'removed'))) {
+        return InventoryUnitChangeEligibility.inUse;
+      } else if (record.entityType == _countSessionType ||
+          record.entityType == _shoppingListType) {
+        final lines = data['lines'];
+        if (lines is List<Object?> &&
+            lines.any(
+              (line) =>
+                  line is Map<String, Object?> &&
+                  (line['itemId'] == productId ||
+                      line['homeProductId'] == productId ||
+                      line['productPackId'] == productId),
+            )) {
+          return InventoryUnitChangeEligibility.inUse;
+        }
+      }
+    }
+    // A snapshot is not a complete historical audit. Only the server can
+    // establish that no past count, preference revision or movement uses it.
+    return InventoryUnitChangeEligibility.serverConfirmationRequired;
+  }
+
+  @override
   Future<void> updateHomeProduct({
     required String homeId,
     required String productId,
@@ -706,6 +793,21 @@ final class DriftHouseholdRepository
       if (data['productId'] == null && privateName == null) {
         throw ArgumentError('A private product must retain a name.');
       }
+      final changesUnit =
+          unit != null &&
+          unit != _optionalString(data['unit'], fallback: 'units');
+      if (changesUnit && data['_clientUnitChangeAwaitingReadback'] == true) {
+        throw const InventoryUnitChangeException(
+          'A stock-unit request is awaiting server readback or conflict resolution. Keep the current unit while saving other details, then synchronize and refresh.',
+        );
+      }
+      if (changesUnit &&
+          await _hasKnownUnitEvidence(homeId, productId) ==
+              InventoryUnitChangeEligibility.inUse) {
+        throw const InventoryUnitChangeException(
+          'This stock unit is already used by quantities or historical evidence. Keep the current unit and save the other details; an ordinary edit cannot convert stock.',
+        );
+      }
       if (archived) {
         final balance = await _record(
           homeId: homeId,
@@ -728,7 +830,7 @@ final class DriftHouseholdRepository
         'originalPackText': _trimToNull(draft.originalPackText),
         'homeCategoryId': draft.homeCategoryId,
         'globalCategoryId': draft.globalCategoryId,
-        'unit': ?unit,
+        if (changesUnit) 'unit': unit,
         'status': archived ? 'archived' : 'active',
       };
       await _writeProjection(
@@ -736,7 +838,16 @@ final class DriftHouseholdRepository
         entityType: _homeProductType,
         entityId: productId,
         revision: previous.revision + 1,
-        representation: {..._withoutProjectionMetadata(data), ...payload},
+        // Do not relabel existing quantities optimistically. A unit change
+        // is a request until the revision-checked server representation arrives.
+        representation: {
+          ..._withoutProjectionMetadata(data),
+          ...payload,
+          if (changesUnit)
+            'unit': _optionalString(data['unit'], fallback: 'units'),
+          if (changesUnit) '_clientUnitChangeAwaitingReadback': true,
+          if (changesUnit) '_clientRequestedStockUnit': unit,
+        },
         at: at,
       );
       await _insertGeneratedCommand(
@@ -1741,6 +1852,194 @@ final class DriftHouseholdRepository
     return result;
   }
 
+  @override
+  Future<PurchaseMutationResult> completeFinishedReceiptLine({
+    required PurchaseReceiptLineRequest line,
+    required int expectedReceiptRevision,
+    required String homeProductId,
+    required String reason,
+    String? packId,
+    String? existingLineId,
+    int? expectedLineRevision,
+  }) async {
+    _requireSynchronizedPurchasing();
+    _requireHomeUuid(line.homeId);
+    _requireUuid(line.receiptId, 'purchase receipt');
+    _requireUuid(homeProductId, 'purchase home product');
+    if (packId != null) _requireUuid(packId, 'purchase pack');
+    if (existingLineId != null) _requireUuid(existingLineId, 'receipt line');
+    if ((existingLineId == null) != (expectedLineRevision == null) ||
+        (expectedLineRevision != null && expectedLineRevision < 1) ||
+        expectedReceiptRevision < 1) {
+      throw const PurchaseCaptureException(
+        'Reopen the receipt and line before completing this purchase.',
+      );
+    }
+    final explanation = reason.trim();
+    if (explanation.isEmpty || explanation.length > 500) {
+      throw const PurchaseCaptureException(
+        'Give a correction reason of at most 500 characters.',
+      );
+    }
+    final at = _clock().toUtc();
+    final result = await _transaction(() async {
+      final receipt = await _requiredDraftReceipt(
+        homeId: line.homeId,
+        receiptId: line.receiptId,
+        allowCommitted: true,
+      );
+      final receiptValue = _validatedProjection(receipt, line.homeId);
+      _requireFinishedLineCorrection(receipt, receiptValue);
+      if (receipt.revision != expectedReceiptRevision) {
+        throw const PurchaseCaptureException(
+          'The finished receipt changed. Reopen it before correcting a line.',
+        );
+      }
+      final id =
+          existingLineId ??
+          line.clientLineId ??
+          _nextUuid('purchase receipt line');
+      _requireUuid(id, 'purchase receipt line');
+      final prior = await _record(
+        homeId: line.homeId,
+        entityType: _receiptLineType,
+        entityId: id,
+      );
+      if (existingLineId != null) {
+        if (prior == null || prior.revision != expectedLineRevision) {
+          throw const PurchaseCaptureException(
+            'This pending line changed. Reopen it before correcting it.',
+          );
+        }
+        final priorValue = _validatedProjection(prior, line.homeId);
+        if (priorValue['receiptId'] != line.receiptId ||
+            priorValue['approvalStatus'] != 'unresolved' ||
+            priorValue['stockQuantity'] != null) {
+          throw const PurchaseCaptureException(
+            'Only an intentionally unresolved line can be completed here. Refresh uncertain stock, or use the existing edit action for an applied purchase.',
+          );
+        }
+      } else if (prior != null) {
+        throw const PurchaseCaptureException(
+          'This line already exists. Refresh the receipt before adding it.',
+        );
+      }
+      final currency = _requiredString(receiptValue, 'currency');
+      _requireRequestMoneyCurrency(line.unitPrice, currency);
+      _requireRequestMoneyCurrency(line.lineTotal, currency);
+      final product = await _record(
+        homeId: line.homeId,
+        entityType: _homeProductType,
+        entityId: homeProductId,
+      );
+      if (product == null) {
+        throw const PurchaseCaptureException(
+          'Choose a product from this home.',
+        );
+      }
+      final productValue = _validatedProjection(product, line.homeId);
+      if (productValue['status'] != 'active') {
+        throw const PurchaseCaptureException(
+          'Choose an active product from this home.',
+        );
+      }
+      final quantity = PurchaseQuantity.parse(
+        line.quantityText ?? _decimal(line.quantity),
+        positive: true,
+      );
+      final factor = await _purchasePackFactor(
+        homeId: line.homeId,
+        product: productValue,
+        packId: packId,
+      );
+      final stock = quantity * factor;
+      final correctionId = _nextUuid('receipt line correction');
+      final command = <String, Object?>{
+        'receiptId': line.receiptId,
+        'correctionId': correctionId,
+        'expectedLineRevision': expectedLineRevision,
+        'reason': explanation,
+        'homeProductId': homeProductId,
+        'packId': packId,
+        'unit': _optionalString(productValue['unit'], fallback: 'units'),
+        'stockQuantityPerPack': factor.toString(),
+        'rawDescription': line.rawDescription.trim(),
+        'quantity': quantity.toString(),
+        'originalPackText': _trimToNull(line.originalPackText),
+        'unitPrice': line.unitPrice == null
+            ? null
+            : _moneyDecimal(line.unitPrice!),
+        'lineTotal': line.lineTotal == null
+            ? null
+            : _moneyDecimal(line.lineTotal!),
+      };
+      final nextRevision = (expectedLineRevision ?? 0) + 1;
+      await _writeProjection(
+        homeId: line.homeId,
+        entityType: _receiptLineType,
+        entityId: id,
+        revision: nextRevision,
+        representation:
+            {
+                ...command,
+                'approvalStatus': 'approved',
+                'stockQuantity': stock.toString(),
+                'stockUnit': command['unit'],
+              }
+              ..remove('expectedLineRevision')
+              ..remove('reason'),
+        at: at,
+      );
+      await _writeProjection(
+        homeId: line.homeId,
+        entityType: _receiptType,
+        entityId: line.receiptId,
+        revision: expectedReceiptRevision + 1,
+        representation: {
+          ..._withoutProjectionMetadata(receiptValue),
+          '_clientCommitVerified': true,
+        },
+        at: at,
+      );
+      await _applyPurchaseStockDelta(
+        homeId: line.homeId,
+        homeProductId: homeProductId,
+        delta: stock,
+        at: at,
+      );
+      await _insertGeneratedCommand(
+        homeId: line.homeId,
+        entityType: _receiptLineType,
+        entityId: id,
+        commandType: 'purchasing.receipt-line.correct',
+        baseRevision: expectedReceiptRevision,
+        payload: command,
+        at: at,
+      );
+      return PurchaseMutationResult(
+        entityId: id,
+        revision: nextRevision,
+        disposition: PurchaseMutationDisposition.queued,
+      );
+    });
+    _triggerForegroundSync();
+    return result;
+  }
+
+  void _requireFinishedLineCorrection(
+    LocalRecord receipt,
+    Map<String, Object?> value,
+  ) {
+    if (value['status'] != 'committed' ||
+        value['lineCorrectionState'] != 'available' ||
+        (receipt.synchronizedAt == null &&
+            value['_clientCommitVerified'] != true)) {
+      throw const PurchaseCaptureException(
+        'Refresh this finished receipt from a supported backend before correcting pending or omitted lines. An unconfirmed finish cannot be replayed as a correction.',
+      );
+    }
+  }
+
   Future<PurchaseQuantity> _purchasePackFactor({
     required String homeId,
     required Map<String, Object?> product,
@@ -1807,13 +2106,16 @@ final class DriftHouseholdRepository
       entityType: _balanceType,
       entityId: homeProductId,
     );
+    final previousValue = balance == null
+        ? const <String, Object?>{}
+        : _validatedProjection(balance, homeId);
     final previous = balance == null
         ? PurchaseQuantity.parse('0')
-        : PurchaseQuantity.parse(
-            _requiredString(_validatedProjection(balance, homeId), 'quantity'),
-          );
+        : PurchaseQuantity.parse(_requiredString(previousValue, 'quantity'));
     final next = previous + delta;
-    if (next.isNegative) {
+    // A signed ledger can remain negative after a legitimate inbound purchase.
+    // Keep the existing overdraw safeguard only for reductions, not additions.
+    if (next.isNegative && delta.isNegative) {
       throw const PurchaseCaptureException(
         'This correction exceeds the available stock. Adjust the receipt quantity before removing it.',
       );
@@ -1824,6 +2126,7 @@ final class DriftHouseholdRepository
       entityId: homeProductId,
       revision: balance?.revision ?? 0,
       representation: {
+        ..._withoutProjectionMetadata(previousValue),
         'homeProductId': homeProductId,
         'quantity': next.toString(),
       },
@@ -1849,6 +2152,123 @@ final class DriftHouseholdRepository
       'notes': draft.notes.trim(),
     },
   );
+
+  @override
+  Future<PurchaseMutationResult> correctReceiptPurchaseDate({
+    required String homeId,
+    required String receiptId,
+    required int expectedRevision,
+    required DateTime purchaseDate,
+    required String reason,
+  }) async {
+    _requireSynchronizedPurchasing();
+    _requireHomeUuid(homeId);
+    _requireUuid(receiptId, 'purchase receipt');
+    final explanation = reason.trim();
+    if (expectedRevision < 1 ||
+        explanation.isEmpty ||
+        explanation.length > 500) {
+      throw const PurchaseCaptureException(
+        'Reopen the receipt and give a correction reason of at most 500 characters.',
+      );
+    }
+    final day = _dateOnly(purchaseDate);
+    final at = _clock().toUtc();
+    final result = await _transaction(() async {
+      final receipt = await _requiredDraftReceipt(
+        homeId: homeId,
+        receiptId: receiptId,
+        allowCommitted: true,
+      );
+      final value = _validatedProjection(receipt, homeId);
+      if (receipt.revision != expectedRevision) {
+        throw const PurchaseCaptureException(
+          'This receipt changed. Reopen it before correcting its purchase day.',
+        );
+      }
+      if (value['status'] == 'committed' &&
+          receipt.synchronizedAt == null &&
+          value['_clientCommitVerified'] != true) {
+        throw const PurchaseCaptureException(
+          'Confirm the saved receipt finish before correcting its purchase day.',
+        );
+      }
+      if (_receiptCalendarDay(_requiredString(value, 'purchaseDate')) == day) {
+        throw const PurchaseCaptureException(
+          'Choose a different purchase day.',
+        );
+      }
+      final lines = await _receiptLineRecords(
+        homeId: homeId,
+        receiptId: receiptId,
+      );
+      final affectedProducts = <String>{};
+      for (final row in lines.values) {
+        final line = _validatedProjection(row, homeId);
+        if (line['stockQuantity'] != null &&
+            line['approvalStatus'] != 'removed') {
+          affectedProducts.add(_requiredString(line, 'homeProductId'));
+        }
+      }
+      // Reordering a historical purchase can change chronology around counts.
+      // Retain the amount until the server reconciles it; never add it again.
+      for (final productId in affectedProducts) {
+        final balance = await _record(
+          homeId: homeId,
+          entityType: _balanceType,
+          entityId: productId,
+        );
+        if (balance == null) continue;
+        final prior = _validatedProjection(balance, homeId);
+        final limitations = prior['limitations'] == null
+            ? <String>[]
+            : _stringList(prior['limitations'], 'stock limitations');
+        await _writeProjection(
+          homeId: homeId,
+          entityType: _balanceType,
+          entityId: productId,
+          revision: balance.revision,
+          representation: {
+            ..._withoutProjectionMetadata(prior),
+            'uncertain': true,
+            'limitations': {
+              ...limitations,
+              'purchase-date-correction-pending',
+            }.toList(),
+          },
+          at: at,
+        );
+      }
+      await _writeProjection(
+        homeId: homeId,
+        entityType: _receiptType,
+        entityId: receiptId,
+        revision: expectedRevision + 1,
+        representation: {
+          ..._withoutProjectionMetadata(value),
+          'purchaseDate': day,
+          if (value['status'] == 'committed') '_clientCommitVerified': true,
+        },
+        at: at,
+      );
+      await _insertGeneratedCommand(
+        homeId: homeId,
+        entityType: _receiptType,
+        entityId: receiptId,
+        commandType: 'purchasing.receipt.correct-date',
+        baseRevision: expectedRevision,
+        payload: {'purchaseDate': day, 'reason': explanation},
+        at: at,
+      );
+      return PurchaseMutationResult(
+        entityId: receiptId,
+        revision: expectedRevision + 1,
+        disposition: PurchaseMutationDisposition.queued,
+      );
+    });
+    _triggerForegroundSync();
+    return result;
+  }
 
   @override
   Future<PurchaseMutationResult> cancelReceiptDraft({
@@ -1924,7 +2344,10 @@ final class DriftHouseholdRepository
           lineHistory.any((line) => line['stockQuantity'] != null);
       if (purchaseBasisFixed &&
           commandType == 'purchasing.receipt.update' &&
-          (fields['purchaseDate'] != payload['purchaseDate'] ||
+          (fields['purchaseDate'] !=
+                  _receiptCalendarDay(
+                    _requiredString(payload, 'purchaseDate'),
+                  ) ||
               fields['currency'] != payload['currency'])) {
         throw const PurchaseCaptureException(
           'The purchase date and currency cannot change after stock was recorded or the receipt was finished. Store, notes and total remain editable.',
@@ -2061,7 +2484,13 @@ final class DriftHouseholdRepository
         payload,
       );
       final applied = payload['stockQuantity'] != null || legacyApplied;
-      if (receiptPayload['status'] == 'committed' && !applied) {
+      final correctingUnresolved =
+          receiptPayload['status'] == 'committed' &&
+          !applied &&
+          payload['approvalStatus'] == 'unresolved';
+      if (correctingUnresolved) {
+        _requireFinishedLineCorrection(receipt, receiptPayload);
+      } else if (receiptPayload['status'] == 'committed' && !applied) {
         throw const PurchaseCaptureException(
           'Refresh the receipt details before correcting this line. An uncertain commit must not be treated as confirmed stock.',
         );
@@ -2112,6 +2541,8 @@ final class DriftHouseholdRepository
               ? 'removed'
               : applied
               ? 'approved'
+              : correctingUnresolved
+              ? 'unresolved'
               : 'unreviewed',
         },
         at: at,
@@ -2768,6 +3199,7 @@ final class DriftHouseholdRepository
       productBases[row.entityId] = base;
     }
     final balances = <String, double>{};
+    final balanceEvidence = <String, Map<String, Object?>>{};
     final globalCategories = <String, String>{
       for (final row in rows.where(
         (row) => row.entityType == _publishedCategoryType,
@@ -2802,6 +3234,7 @@ final class DriftHouseholdRepository
         );
       }
       balances[homeProductId] = _requiredDecimal(payload, 'quantity');
+      balanceEvidence[homeProductId] = payload;
     }
 
     for (final row in rows.where(
@@ -2940,6 +3373,19 @@ final class DriftHouseholdRepository
                 ? const <String>[]
                 : _stringList(payload['aliases'], 'aliases')),
         currentQuantity: balances[row.entityId],
+        stockUncertain: balanceEvidence[row.entityId]?['uncertain'] as bool?,
+        pendingStockQuantity: _nullableString(
+          balanceEvidence[row.entityId]?['pendingQuantity'],
+        ),
+        stockLimitations: balanceEvidence[row.entityId]?['limitations'] == null
+            ? const <String>[]
+            : _stringList(
+                balanceEvidence[row.entityId]!['limitations'],
+                'limitations',
+              ),
+        stockCheckpointId: _nullableString(
+          balanceEvidence[row.entityId]?['checkpointId'],
+        ),
         isHomeProduct: true,
         productId: productId,
         packId: packId,
@@ -3027,6 +3473,7 @@ final class DriftHouseholdRepository
               // file reference. The factual count remains visible and read-only.
               source: CountSource.manual,
               observedQuantity: _requiredDecimal(payload, 'quantity'),
+              unit: _nullableString(payload['unit']),
             ),
           );
     }
@@ -3052,6 +3499,10 @@ final class DriftHouseholdRepository
           locationId: _nullableString(payload['locationId']) ?? 'primary',
           startedAt: occurredAt,
           status: status,
+          scopeComplete: payload['scopeComplete'] as bool?,
+          reliability: _nullableString(payload['reliability']),
+          observedAt: _optionalDateTime(payload['observedAt']),
+          observedTimezone: _nullableString(payload['observedTimezone']),
           closedAt: status == CountSessionStatus.closed
               ? (_optionalDateTime(payload['_clientClosedAt']) ??
                     row.updatedAt.toUtc())
@@ -3210,7 +3661,9 @@ final class DriftHouseholdRepository
       storeName: storeId == null
           ? null
           : (stores[storeId] ?? 'Unavailable store'),
-      purchaseDate: _parseDateOnly(_requiredString(payload, 'purchaseDate')),
+      purchaseDate: _parseDateOnly(
+        _receiptCalendarDay(_requiredString(payload, 'purchaseDate')),
+      ),
       currency: currency,
       total: totalAmount == null
           ? null
@@ -3220,6 +3673,7 @@ final class DriftHouseholdRepository
             ),
       notes: _optionalString(payload['notes']),
       sourceReference: _nullableString(payload['sourceReference']),
+      lineCorrectionState: _nullableString(payload['lineCorrectionState']),
       commitConfirmed:
           confirmedCommits.contains(receipt.entityId) ||
           (receiptStatus == PurchaseReceiptStatus.committed &&
@@ -3336,7 +3790,9 @@ final class DriftHouseholdRepository
         PurchaseLine(
           id: row.entityId,
           homeId: homeId,
-          purchasedAt: _parseDateOnly(_requiredString(receipt, 'purchaseDate')),
+          purchasedAt: _parseDateOnly(
+            _receiptCalendarDay(_requiredString(receipt, 'purchaseDate')),
+          ),
           datePrecision: PurchaseDatePrecision.exactDay,
           storeName: storeId == null
               ? 'Unspecified store'
@@ -3457,6 +3913,9 @@ final class DriftHouseholdRepository
                 _nullableString(linePayload['suggestionId']) ??
                 (link == null ? null : _requiredString(link, 'suggestionId')),
             homeProductId: _nullableString(linePayload['homeProductId']),
+            productId: _nullableString(linePayload['productId']),
+            stockUnit: _nullableString(linePayload['stockUnit']),
+            quantityBasis: _nullableString(linePayload['quantityBasis']),
             archived:
                 linePayload['archived'] == true ||
                 linePayload['archivedAt'] != null,
@@ -3635,8 +4094,10 @@ final class DriftHouseholdRepository
                 ? session.locationId
                 : null,
             'notes': '',
-            'scopeComplete': false,
-            'reliability': 'unassessed',
+            'scopeComplete': session.scopeComplete ?? false,
+            'reliability': session.reliability ?? 'unassessed',
+            if (session.observedAt != null)
+              'observedAt': session.observedAt!.toUtc().toIso8601String(),
           },
           at: at,
         );
@@ -3757,39 +4218,22 @@ final class DriftHouseholdRepository
           representation: _countSessionRepresentation(session),
           at: at,
         );
-        for (final line in session.confirmedLines) {
-          final product = await _record(
-            homeId: session.homeId,
-            entityType: _homeProductType,
-            entityId: line.itemId,
-          );
-          if (product == null) {
-            throw StateError('A counted inventory item no longer exists.');
-          }
-          final balance = await _record(
-            homeId: session.homeId,
-            entityType: _balanceType,
-            entityId: line.itemId,
-          );
-          await _writeProjection(
-            homeId: session.homeId,
-            entityType: _balanceType,
-            entityId: line.itemId,
-            revision: balance?.revision ?? 0,
-            representation: <String, Object?>{
-              'homeProductId': line.itemId,
-              'quantity': _decimal(line.observedQuantity!),
-            },
-            at: at,
-          );
-        }
+        // Closing saves observations. Only authoritative chronology readback
+        // can replace a balance: scope, unit and reliability may make a count
+        // ineligible, and the device can have intervening stock operations.
         await _insertGeneratedCommand(
           homeId: session.homeId,
           entityType: _serverCountSessionType,
           entityId: session.id,
           commandType: 'inventory.count-session.close',
           baseRevision: existing.revision,
-          payload: const <String, Object?>{},
+          payload: <String, Object?>{
+            if (session.scopeComplete != null)
+              'scopeComplete': session.scopeComplete,
+            if (session.reliability != null) 'reliability': session.reliability,
+            if (session.observedAt != null)
+              'observedAt': session.observedAt!.toUtc().toIso8601String(),
+          },
           at: at,
         );
         changed = true;
@@ -4049,6 +4493,8 @@ final class DriftHouseholdRepository
             'description': line.name,
             'quantity': _decimal(line.quantity),
             if (line.suggestionId != null) 'suggestionId': line.suggestionId,
+            if (line.selectedPackId != null)
+              'selectedPackId': line.selectedPackId,
           },
           at: at,
         );
@@ -4452,8 +4898,10 @@ final class DriftHouseholdRepository
       <String, Object?>{
         'locationId': isUuid(session.locationId) ? session.locationId : null,
         'notes': '',
-        'scopeComplete': false,
-        'reliability': 'unassessed',
+        'scopeComplete': session.scopeComplete ?? false,
+        'reliability': session.reliability ?? 'unassessed',
+        'observedAt': session.observedAt?.toUtc().toIso8601String(),
+        'observedTimezone': session.observedTimezone,
         'status': switch (session.status) {
           CountSessionStatus.open => 'open',
           CountSessionStatus.closed => 'closed',
@@ -4474,6 +4922,7 @@ final class DriftHouseholdRepository
     'source': line.source == CountSource.photo ? 'photo-confirmed' : 'manual',
     'notes': '',
     'status': 'confirmed',
+    'unit': line.unit,
   };
 
   Map<String, Object?> _shoppingLineRepresentation(
@@ -4484,6 +4933,9 @@ final class DriftHouseholdRepository
     'homeProductId': _shoppingHomeProductId(line),
     'suggestionId': line.suggestionId,
     'selectedPackId': line.selectedPackId,
+    'productId': line.productId,
+    'stockUnit': line.stockUnit,
+    'quantityBasis': line.quantityBasis,
     'description': line.name,
     'source': line.origin == ShoppingLineOrigin.suggestion
         ? 'suggestion'
@@ -4821,6 +5273,34 @@ final class DriftHouseholdRepository
       throw StateError('Synchronized mutation has no device identity.');
     }
     _requireCurrentWriter();
+    if (commandType != 'inventory.home-product.update' &&
+        commandType != 'inventory.home-product.create') {
+      final productIds = <String>{
+        if (entityType == _balanceType || entityType == _stockPreferenceType)
+          entityId,
+      };
+      void collect(Object? value) {
+        if (value is Map<String, Object?>) {
+          for (final entry in value.entries) {
+            if ((entry.key == 'homeProductId' || entry.key == 'itemId') &&
+                entry.value is String) {
+              productIds.add(entry.value! as String);
+            } else {
+              collect(entry.value);
+            }
+          }
+        } else if (value is List<Object?>) {
+          for (final entry in value) {
+            collect(entry);
+          }
+        }
+      }
+
+      collect(payload);
+      for (final productId in productIds) {
+        await _requireConfirmedUnit(homeId, productId);
+      }
+    }
     final sequence = await _database.allocateOperationSequence();
     await _database
         .into(_database.clientOperations)
@@ -4843,6 +5323,43 @@ final class DriftHouseholdRepository
           ),
           mode: InsertMode.insertOrAbort,
         );
+  }
+
+  Future<void> _requireConfirmedUnit(String homeId, String productId) async {
+    final product = await _record(
+      homeId: homeId,
+      entityType: _homeProductType,
+      entityId: productId,
+    );
+    if (product == null) return;
+    final productData = _validatedProjection(product, homeId);
+    final currentUnit = _optionalString(productData['unit'], fallback: 'units');
+    if (productData['_clientUnitChangeAwaitingReadback'] == true &&
+        productData['_clientRequestedStockUnit'] != currentUnit) {
+      throw const InventoryUnitChangeException(
+        'The requested stock unit has not been read back from the server. Synchronize and refresh before entering quantities for this product.',
+      );
+    }
+    final requests =
+        await (_database.select(_database.clientOperations)..where(
+              (row) =>
+                  row.homeId.equals(homeId) &
+                  row.entityId.equals(productId) &
+                  row.operationType.equals('inventory.home-product.update') &
+                  row.state.isNotIn([
+                    ClientOperationState.acknowledged.storageValue,
+                    ClientOperationState.superseded.storageValue,
+                  ]),
+            ))
+            .get();
+    for (final request in requests) {
+      final payload = _decodeObject(request.payload, 'unit change request');
+      if (payload['unit'] != null && payload['unit'] != currentUnit) {
+        throw const InventoryUnitChangeException(
+          'A stock-unit change is awaiting server confirmation or conflict resolution. Synchronize and refresh before entering quantities for this product.',
+        );
+      }
+    }
   }
 
   String _nextUuid(String purpose) {
@@ -4928,6 +5445,13 @@ Map<String, Object?> _encodeInventoryItem(
   if (item.packStatus != null) 'packStatus': item.packStatus,
   'aliases': item.aliases,
   'currentQuantity': item.currentQuantity,
+  if (item.stockUncertain != null) 'stockUncertain': item.stockUncertain,
+  if (item.pendingStockQuantity != null)
+    'pendingStockQuantity': item.pendingStockQuantity,
+  if (item.stockLimitations.isNotEmpty)
+    'stockLimitations': item.stockLimitations,
+  if (item.stockCheckpointId != null)
+    'stockCheckpointId': item.stockCheckpointId,
   'isHomeProduct': item.isHomeProduct,
   if (item.productId != null) 'productId': item.productId,
   if (item.packId != null) 'packId': item.packId,
@@ -4979,6 +5503,12 @@ InventoryItem _decodeInventoryItem(String encoded) {
     unit: _optionalString(json['unit'], fallback: 'units'),
     aliases: _stringList(json['aliases'], 'aliases'),
     currentQuantity: _optionalNumber(json['currentQuantity']),
+    stockUncertain: json['stockUncertain'] as bool?,
+    pendingStockQuantity: _nullableString(json['pendingStockQuantity']),
+    stockLimitations: json['stockLimitations'] == null
+        ? const <String>[]
+        : _stringList(json['stockLimitations'], 'stockLimitations'),
+    stockCheckpointId: _nullableString(json['stockCheckpointId']),
     isHomeProduct: json['isHomeProduct'] == true,
     productId: _nullableString(json['productId']),
     packId: _nullableString(json['packId']),
@@ -5004,6 +5534,10 @@ Map<String, Object?> _encodeCountSession(StockCountSession session) =>
       'startedAt': session.startedAt.toUtc().toIso8601String(),
       'status': session.status.name,
       'closedAt': session.closedAt?.toUtc().toIso8601String(),
+      'scopeComplete': session.scopeComplete,
+      'reliability': session.reliability,
+      'observedAt': session.observedAt?.toUtc().toIso8601String(),
+      'observedTimezone': session.observedTimezone,
       'photos': session.photos
           .map(
             (photo) => <String, Object?>{
@@ -5023,6 +5557,7 @@ Map<String, Object?> _encodeCountSession(StockCountSession session) =>
               'status': line.status.name,
               'source': line.source.name,
               'observedQuantity': line.observedQuantity,
+              'unit': line.unit,
               'photoId': line.photoId,
               'possibleDuplicate': line.possibleDuplicate,
               'duplicateReviewed': line.duplicateReviewed,
@@ -5040,6 +5575,10 @@ StockCountSession _decodeCountSession(String encoded) {
     startedAt: DateTime.parse(_requiredString(json, 'startedAt')).toUtc(),
     status: CountSessionStatus.values.byName(_requiredString(json, 'status')),
     closedAt: _optionalDateTime(json['closedAt']),
+    scopeComplete: json['scopeComplete'] as bool?,
+    reliability: _nullableString(json['reliability']),
+    observedAt: _optionalDateTime(json['observedAt']),
+    observedTimezone: _nullableString(json['observedTimezone']),
     photos: _objectList(json['photos'], 'photos')
         .map(
           (photo) => StockPhotoReference(
@@ -5061,6 +5600,7 @@ StockCountSession _decodeCountSession(String encoded) {
             ),
             source: CountSource.values.byName(_requiredString(line, 'source')),
             observedQuantity: _optionalNumber(line['observedQuantity']),
+            unit: _nullableString(line['unit']),
             photoId: _nullableString(line['photoId']),
             possibleDuplicate: line['possibleDuplicate'] == true,
             duplicateReviewed: line['duplicateReviewed'] == true,
@@ -5183,6 +5723,9 @@ Map<String, Object?> _encodeShoppingList(ShoppingList list) =>
               'suggestionId': line.suggestionId,
               'homeProductId': line.homeProductId,
               'selectedPackId': line.selectedPackId,
+              'productId': line.productId,
+              'stockUnit': line.stockUnit,
+              'quantityBasis': line.quantityBasis,
               'productPackId': line.productPackId,
               'checked': line.checked,
               'archived': line.archived,
@@ -5219,6 +5762,9 @@ ShoppingList _decodeShoppingList(String encoded) {
             suggestionId: _nullableString(line['suggestionId']),
             homeProductId: _nullableString(line['homeProductId']),
             selectedPackId: _nullableString(line['selectedPackId']),
+            productId: _nullableString(line['productId']),
+            stockUnit: _nullableString(line['stockUnit']),
+            quantityBasis: _nullableString(line['quantityBasis']),
             productPackId: _nullableString(line['productPackId']),
             checked: line['checked'] == true,
             archived: line['archived'] == true,
@@ -5384,10 +5930,30 @@ String _moneyDecimal(Money value) {
 }
 
 String _dateOnly(DateTime value) {
-  final utc = value.toUtc();
-  return '${utc.year.toString().padLeft(4, '0')}-'
-      '${utc.month.toString().padLeft(2, '0')}-'
-      '${utc.day.toString().padLeft(2, '0')}';
+  // A purchase day is a calendar label, not an instant. Converting local
+  // midnight to UTC would change the selected day in positive UTC offsets.
+  return '${value.year.toString().padLeft(4, '0')}-'
+      '${value.month.toString().padLeft(2, '0')}-'
+      '${value.day.toString().padLeft(2, '0')}';
+}
+
+String _receiptCalendarDay(String value) {
+  if (RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(value)) {
+    _parseDateOnly(value);
+    return value;
+  }
+  // Older local DTO projections could serialize a DateTime as ISO text.
+  // Normalize only that known representation and retain its recorded day;
+  // canonical server responses and all new queued payloads remain date-only.
+  if (RegExp(
+        r'^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,6})?(?:Z|[+-](?:0\d|1[0-4]):[0-5]\d)?$',
+      ).hasMatch(value) &&
+      DateTime.tryParse(value) != null) {
+    final day = value.substring(0, 10);
+    _parseDateOnly(day);
+    return day;
+  }
+  throw const FormatException('Receipt purchase date must be a calendar day.');
 }
 
 String? _trimToNull(String? value) {

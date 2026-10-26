@@ -87,7 +87,8 @@ void main() {
             clientTimestamp: now,
             payload: jsonEncode(<String, Object?>{
               if (!parentCommand) 'receiptId': 'receipt-1',
-              if (command == 'purchasing.receipt-line.purchase')
+              if (command == 'purchasing.receipt-line.purchase' ||
+                  command == 'purchasing.receipt-line.correct')
                 'homeProductId': 'product-1',
             }),
             state: ClientOperationState.pending.storageValue,
@@ -136,6 +137,7 @@ void main() {
 
   for (final command in <String>[
     'purchasing.receipt-line.purchase',
+    'purchasing.receipt-line.correct',
     'purchasing.receipt-line.update',
     'purchasing.receipt-line.remove',
     'purchasing.receipt.cancel',
