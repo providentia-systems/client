@@ -26,7 +26,13 @@ final class HouseholdReportMetadata implements HomeScopedReportLine {
   final DateTime? through;
 }
 
-/// Complete factual inventory row from the current HomeReport contract.
+/// Evidence classification supplied by the reporting contract.
+///
+/// [unavailable] is an older/incomplete response, not confirmation that its
+/// numeric projection was physically counted.
+enum InventoryReportQuantityState { unknown, recorded, uncertain, unavailable }
+
+/// A signed ledger projection and its independently described stock evidence.
 final class InventoryReportFact implements HomeScopedReportLine {
   const InventoryReportFact({
     required this.homeId,
@@ -34,6 +40,12 @@ final class InventoryReportFact implements HomeScopedReportLine {
     required this.productName,
     required this.packText,
     required this.factualQuantity,
+    this.quantityState = InventoryReportQuantityState.unavailable,
+    this.stockUnit,
+    this.uncertain,
+    this.pendingQuantity,
+    this.limitations = const <String>[],
+    this.checkpointId,
     this.balanceRevision,
     this.lastMovementId,
     this.balanceUpdatedAt,
@@ -47,7 +59,13 @@ final class InventoryReportFact implements HomeScopedReportLine {
   final String homeProductId;
   final String productName;
   final String packText;
-  final String factualQuantity;
+  final String? factualQuantity;
+  final InventoryReportQuantityState quantityState;
+  final String? stockUnit;
+  final bool? uncertain;
+  final String? pendingQuantity;
+  final List<String> limitations;
+  final String? checkpointId;
   final int? balanceRevision;
   final String? lastMovementId;
   final DateTime? balanceUpdatedAt;
@@ -56,7 +74,19 @@ final class InventoryReportFact implements HomeScopedReportLine {
   final bool? neverSuggest;
 }
 
+enum PurchaseReportAmountSource {
+  declared,
+  derived,
+  mixed,
+  partial,
+  unknown,
+  unavailable,
+}
+
 /// Currency-isolated monthly/store purchase aggregate.
+///
+/// A null total is incomplete spending, never an implied zero. [knownSubtotal]
+/// retains only the available amounts when some receipts are unpriced.
 final class PurchaseReportTotal implements HomeScopedReportLine {
   const PurchaseReportTotal({
     required this.homeId,
@@ -64,6 +94,14 @@ final class PurchaseReportTotal implements HomeScopedReportLine {
     required this.currency,
     required this.receiptCount,
     required this.total,
+    this.knownSubtotal,
+    this.pricingComplete,
+    this.amountSource = PurchaseReportAmountSource.unavailable,
+    this.completeReceiptCount,
+    this.partialReceiptCount,
+    this.unknownReceiptCount,
+    this.declaredReceiptCount,
+    this.derivedReceiptCount,
     this.storeId,
     this.storeName,
   });
@@ -75,7 +113,15 @@ final class PurchaseReportTotal implements HomeScopedReportLine {
   final String? storeId;
   final String? storeName;
   final int receiptCount;
-  final String total;
+  final String? total;
+  final String? knownSubtotal;
+  final bool? pricingComplete;
+  final PurchaseReportAmountSource amountSource;
+  final int? completeReceiptCount;
+  final int? partialReceiptCount;
+  final int? unknownReceiptCount;
+  final int? declaredReceiptCount;
+  final int? derivedReceiptCount;
 }
 
 final class ConsumptionReportEstimate implements HomeScopedReportLine {

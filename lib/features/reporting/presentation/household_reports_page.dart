@@ -66,6 +66,75 @@ final class HouseholdReportsPage extends StatelessWidget {
   }
 }
 
+String _inventoryDetail(InventoryReportFact line) {
+  final unit = line.stockUnit == null ? '' : ' ${line.stockUnit}';
+  return <String>[
+    line.factualQuantity == null
+        ? 'Quantity unknown'
+        : 'Quantity ${line.factualQuantity}$unit',
+    switch (line.quantityState) {
+      InventoryReportQuantityState.unknown => 'No recorded stock evidence',
+      InventoryReportQuantityState.uncertain =>
+        'Uncertain ledger balance; requires review',
+      InventoryReportQuantityState.recorded => 'Recorded ledger balance',
+      InventoryReportQuantityState.unavailable =>
+        'Stock evidence unavailable in this response',
+    },
+    if (line.quantityState == InventoryReportQuantityState.unavailable &&
+        line.uncertain == true)
+      'Uncertainty reported; review stock evidence',
+    if (line.factualQuantity != null)
+      'Ledger quantity is not a verified physical count',
+    if (line.stockUnit == null) 'Stock unit unavailable',
+    if (line.pendingQuantity != null)
+      'Pending quantity ${line.pendingQuantity}$unit',
+    if (line.checkpointId != null)
+      'An observation checkpoint anchors this ledger balance',
+    if (line.balanceUpdatedAt != null)
+      'Balance updated ${line.balanceUpdatedAt!.toUtc().toIso8601String()}',
+    ...line.limitations,
+    if (line.packText.isNotEmpty) line.packText,
+    if (line.configuredMinimum != null)
+      'Minimum ${line.configuredMinimum}$unit',
+  ].join(' · ');
+}
+
+String _purchaseTitle(PurchaseReportTotal line) {
+  final prefix = '${line.month} · ${line.currency}';
+  if (line.total != null) return '$prefix ${line.total}';
+  if (line.knownSubtotal != null) {
+    return '$prefix ${line.knownSubtotal} known subtotal';
+  }
+  return '$prefix · Spend unknown';
+}
+
+String _purchaseDetail(PurchaseReportTotal line) {
+  return <String>[
+    '${line.receiptCount} receipt${line.receiptCount == 1 ? '' : 's'}',
+    if (line.storeName != null) line.storeName!,
+    switch (line.pricingComplete) {
+      true => 'Complete receipt spend',
+      false => 'Incomplete pricing; total spend is unknown',
+      null => 'Pricing completeness unavailable in this response',
+    },
+    switch (line.amountSource) {
+      PurchaseReportAmountSource.declared => 'Declared receipt totals',
+      PurchaseReportAmountSource.derived =>
+        'Derived from entered product prices',
+      PurchaseReportAmountSource.mixed => 'Declared and derived receipt totals',
+      PurchaseReportAmountSource.partial => 'Available amounts only',
+      PurchaseReportAmountSource.unknown => 'Receipt amounts unavailable',
+      PurchaseReportAmountSource.unavailable => 'Amount source unavailable',
+    },
+    if (line.completeReceiptCount != null)
+      '${line.completeReceiptCount} completely priced',
+    if (line.partialReceiptCount != null)
+      '${line.partialReceiptCount} partially priced',
+    if (line.unknownReceiptCount != null)
+      '${line.unknownReceiptCount} with unknown prices',
+  ].join(' · ');
+}
+
 final class _ReadyReport extends StatelessWidget {
   const _ReadyReport({required this.report, required this.onRefresh});
 
@@ -85,10 +154,7 @@ final class _ReadyReport extends StatelessWidget {
               .map(
                 (line) => _ReportRow(
                   title: line.productName,
-                  detail:
-                      'Quantity ${line.factualQuantity}'
-                      '${line.packText.isEmpty ? '' : ' · ${line.packText}'}'
-                      '${line.configuredMinimum == null ? '' : ' · Minimum ${line.configuredMinimum}'}',
+                  detail: _inventoryDetail(line),
                 ),
               )
               .toList(growable: false),
@@ -100,11 +166,8 @@ final class _ReadyReport extends StatelessWidget {
           children: report.purchaseTotals
               .map(
                 (line) => _ReportRow(
-                  title: '${line.month} · ${line.currency} ${line.total}',
-                  detail:
-                      '${line.receiptCount} receipt'
-                      '${line.receiptCount == 1 ? '' : 's'}'
-                      '${line.storeName == null ? '' : ' · ${line.storeName}'}',
+                  title: _purchaseTitle(line),
+                  detail: _purchaseDetail(line),
                 ),
               )
               .toList(growable: false),

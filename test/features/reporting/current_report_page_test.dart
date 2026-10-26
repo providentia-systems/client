@@ -52,6 +52,147 @@ void main() {
     },
   );
 
+  testWidgets(
+    'inventory evidence distinguishes unknown, zero, uncertainty and legacy',
+    (tester) async {
+      final controller = _controller((request) async {
+        final body = _body(request.url.path);
+        if (request.url.path.endsWith('/inventory')) {
+          body['data'] = <Object?>[
+            <String, Object?>{
+              'homeProductId': _product,
+              'productName': 'Uncounted rice',
+              'packText': '',
+              'stockUnit': 'kg',
+              'factualQuantity': null,
+              'quantityState': 'unknown',
+              'uncertain': false,
+              'limitations': <String>['No recorded balance.'],
+            },
+            <String, Object?>{
+              'homeProductId': _product,
+              'productName': 'Zero rice',
+              'packText': '',
+              'stockUnit': 'kg',
+              'factualQuantity': '0',
+              'quantityState': 'recorded',
+              'uncertain': false,
+              'pendingQuantity': '0',
+            },
+            <String, Object?>{
+              'homeProductId': _product,
+              'productName': 'Uncertain rice',
+              'packText': '',
+              'stockUnit': 'kg',
+              'factualQuantity': '-1.25',
+              'quantityState': 'uncertain',
+              'uncertain': true,
+              'pendingQuantity': '2.5',
+              'limitations': <String>['Purchase/count order requires review.'],
+              'checkpointId': _product,
+              'balanceUpdatedAt': '2026-10-03T11:00:00Z',
+            },
+            <String, Object?>{
+              'homeProductId': _product,
+              'productName': 'Legacy rice',
+              'packText': '',
+              'factualQuantity': '3.5',
+            },
+          ];
+        }
+        return _json(body);
+      });
+      addTearDown(controller.dispose);
+      await controller.load();
+      await _show(tester, controller);
+
+      expect(controller.status, ReportingStatus.ready);
+      expect(find.textContaining('Quantity unknown'), findsOneWidget);
+      expect(find.textContaining('No recorded stock evidence'), findsOneWidget);
+      expect(find.textContaining('Quantity 0 kg'), findsOneWidget);
+      expect(find.textContaining('Quantity -1.25 kg'), findsOneWidget);
+      expect(find.textContaining('Uncertain ledger balance'), findsOneWidget);
+      expect(find.textContaining('Pending quantity 2.5 kg'), findsOneWidget);
+      expect(
+        find.textContaining('Purchase/count order requires review.'),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining(
+          'An observation checkpoint anchors this ledger balance',
+        ),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Stock evidence unavailable'), findsOneWidget);
+      expect(find.textContaining('Stock unit unavailable'), findsOneWidget);
+      expect(
+        find.textContaining('Ledger quantity is not a verified physical count'),
+        findsNWidgets(3),
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'purchase reports label partial and unknown spending without zero',
+    (tester) async {
+      final controller = _controller((request) async {
+        final body = _body(request.url.path);
+        if (request.url.path.endsWith('/purchases')) {
+          body['data'] = <Object?>[
+            <String, Object?>{
+              'month': '2026-10',
+              'currency': 'NAD',
+              'receiptCount': 2,
+              'total': null,
+              'knownSubtotal': '25',
+              'pricingComplete': false,
+              'amountSource': 'partial',
+              'partialReceiptCount': 1,
+              'unknownReceiptCount': 1,
+            },
+            <String, Object?>{
+              'month': '2026-10',
+              'currency': 'USD',
+              'receiptCount': 1,
+              'total': null,
+              'knownSubtotal': null,
+              'pricingComplete': false,
+              'amountSource': 'unknown',
+            },
+            <String, Object?>{
+              'month': '2026-10',
+              'currency': 'EUR',
+              'receiptCount': 1,
+              'total': '0',
+              'knownSubtotal': '0',
+              'pricingComplete': true,
+              'amountSource': 'declared',
+            },
+          ];
+        }
+        return _json(body);
+      });
+      addTearDown(controller.dispose);
+      await controller.load();
+      await _show(tester, controller);
+
+      expect(controller.status, ReportingStatus.ready);
+      expect(find.text('2026-10 · NAD 25 known subtotal'), findsOneWidget);
+      expect(find.text('2026-10 · USD · Spend unknown'), findsOneWidget);
+      expect(find.text('2026-10 · EUR 0'), findsOneWidget);
+      expect(
+        find.textContaining('Incomplete pricing; total spend is unknown'),
+        findsNWidgets(2),
+      );
+      expect(find.textContaining('1 partially priced'), findsOneWidget);
+      expect(find.textContaining('1 with unknown prices'), findsOneWidget);
+      expect(find.textContaining('Complete receipt spend'), findsOneWidget);
+      expect(find.text('2026-10 · USD 0'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('empty current reports do not fall back to legacy collections', (
     tester,
   ) async {
