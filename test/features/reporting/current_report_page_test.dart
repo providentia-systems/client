@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -127,7 +128,10 @@ void main() {
         find.textContaining('Ledger quantity is not a verified physical count'),
         findsWidgets,
       );
-      await tester.drag(find.byType(ListView).first, const Offset(0, -400));
+      await tester.drag(
+        find.byKey(const Key('household-report-scroll')),
+        const Offset(0, -400),
+      );
       await tester.pumpAndSettle();
       expect(find.textContaining('Stock evidence unavailable'), findsOneWidget);
       expect(find.textContaining('Stock unit unavailable'), findsOneWidget);
@@ -194,6 +198,56 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('long report sections expose every row through one page scroll', (
+    tester,
+  ) async {
+    final controller = _controller((request) async {
+      final body = _body(request.url.path);
+      if (request.url.path.endsWith('/inventory')) {
+        body['data'] = [
+          for (var index = 0; index < 60; index++)
+            <String, Object?>{
+              'homeProductId': _product,
+              'productName': 'Synthetic row $index',
+              'factualQuantity': '0',
+              'stockUnit': 'units',
+              'quantityState': 'recorded',
+              'uncertain': false,
+            },
+        ];
+      }
+      return _json(body);
+    });
+    addTearDown(controller.dispose);
+    await controller.load();
+    await _show(tester, controller);
+    expect(find.byType(ListView), findsNothing);
+    expect(
+      find.textContaining('Scroll this page to see every report row'),
+      findsOneWidget,
+    );
+    final scroll = find.byKey(const Key('household-report-scroll'));
+    expect(find.text('Synthetic row 59').hitTestable(), findsNothing);
+    await tester.dragUntilVisible(
+      find.text('Synthetic row 59'),
+      scroll,
+      const Offset(0, -700),
+      maxIteration: 30,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Synthetic row 59').hitTestable(), findsOneWidget);
+    final position = tester
+        .state<ScrollableState>(
+          find.descendant(of: scroll, matching: find.byType(Scrollable)).first,
+        )
+        .position;
+    final before = position.pixels;
+    await tester.sendKeyEvent(LogicalKeyboardKey.pageUp);
+    await tester.pumpAndSettle();
+    expect(position.pixels, lessThan(before));
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('empty current reports do not fall back to legacy collections', (
     tester,

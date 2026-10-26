@@ -20,6 +20,14 @@ import 'package:providentia/features/inventory/domain/inventory_models.dart';
 import 'package:providentia/features/shopping/application/shopping_interaction_capabilities.dart';
 import 'package:providentia_api_client/providentia_api_client.dart';
 
+enum _MembershipProbe {
+  omitted,
+  member,
+  unavailable,
+  authentication,
+  malformed,
+}
+
 void main() {
   test(
     'production household composition binds device and foreground sync trigger',
@@ -63,15 +71,18 @@ void main() {
         ),
       );
     }
-    testWidgets(
-      'production verified home denial $status purges protected data and routes once',
-      (tester) => _verifyProductionAiDenialBoundary(
-        tester,
-        status: status,
-        verifiedHomeDenial: true,
-        receiptOnly: true,
-      ),
-    );
+    for (final probe in _MembershipProbe.values) {
+      testWidgets(
+        'production typed AI denial $status verifies membership ${probe.name} before any purge',
+        (tester) => _verifyProductionAiDenialBoundary(
+          tester,
+          status: status,
+          verifiedHomeDenial: true,
+          receiptOnly: true,
+          membershipProbe: probe,
+        ),
+      );
+    }
   }
 
   test('production AI routes share the single revocation boundary', () {
@@ -80,16 +91,18 @@ void main() {
     ).readAsStringSync();
     expect(
       RegExp(
-        r'onAuthorizationDenied:\s*_handleHomeAuthorizationLost',
+        r'onAuthorizationDenied:\s*_handleAiAuthorizationLost',
       ).hasMatch(source),
       isTrue,
     );
     expect(
       RegExp(
-        r'onAuthorizationLost:\s*_handleHomeAuthorizationLost',
+        r'onAuthorizationLost:\s*_handleAiAuthorizationLost',
       ).hasMatch(source),
       isTrue,
     );
+    expect(source, contains('unawaited(_handleHomeAuthorizationLost());'));
+    expect(source, contains('verifyProductionAiHomeRevocation('));
     expect(source, contains('ReceiptPageMediaEditor(sources: _sources)'));
     expect(source, contains('ReceiptPdfRasterizer(sources: _sources)'));
     expect(source, contains('pickMultipleImages: _pickMultipleImages'));
@@ -105,6 +118,46 @@ void main() {
     );
     expect(source, contains('limit: 8'));
   });
+
+  test(
+    'AI membership verification rejects a stale binding before and after transport',
+    () async {
+      var current = false;
+      var requests = 0;
+      final api = ProvidentiaApiClient(
+        baseUri: Uri.parse('https://api.example.test'),
+        httpClient: MockClient((_) async {
+          requests++;
+          current = false;
+          return http.Response(
+            jsonEncode({'data': <Object?>[]}),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }),
+      );
+      addTearDown(api.close);
+      expect(
+        await verifyProductionAiHomeRevocation(
+          api: api,
+          homeId: _homeId,
+          bindingIsCurrent: () => current,
+        ),
+        isFalse,
+      );
+      expect(requests, 0);
+      current = true;
+      expect(
+        await verifyProductionAiHomeRevocation(
+          api: api,
+          homeId: _homeId,
+          bindingIsCurrent: () => current,
+        ),
+        isFalse,
+      );
+      expect(requests, 1);
+    },
+  );
 
   test('production household composition rejects a non-UUID device', () async {
     final database = AppDatabase(NativeDatabase.memory());
@@ -224,6 +277,7 @@ Future<void> _verifyProductionAiDenialBoundary(
   required int status,
   required bool verifiedHomeDenial,
   required bool receiptOnly,
+  _MembershipProbe membershipProbe = _MembershipProbe.omitted,
 }) async {
   final database = AppDatabase(NativeDatabase.memory());
   addTearDown(database.close);
@@ -267,9 +321,45 @@ Future<void> _verifyProductionAiDenialBoundary(
   expect(operationsBefore.single.homeId, _homeId);
 
   var transportRequests = 0;
+  var membershipRequests = 0;
   final api = ProvidentiaApiClient(
     baseUri: Uri.parse('https://api.example.test'),
-    httpClient: MockClient((_) async {
+    httpClient: MockClient((request) async {
+      if (request.url.path == '/api/v1/homes') {
+        membershipRequests++;
+        final probeStatus = switch (membershipProbe) {
+          _MembershipProbe.unavailable => 503,
+          _MembershipProbe.authentication => 401,
+          _ => 200,
+        };
+        return http.Response(
+          jsonEncode(switch (membershipProbe) {
+            _MembershipProbe.omitted => {'data': <Object?>[]},
+            _MembershipProbe.member => {
+              'data': [
+                <String, Object?>{
+                  'id': _homeId,
+                  'name': 'Synthetic home',
+                  'defaultLocale': 'en',
+                  'defaultCurrency': 'NAD',
+                  'defaultTimezone': 'UTC',
+                  'role': 'owner',
+                  'revision': 1,
+                },
+              ],
+            },
+            _MembershipProbe.malformed => <String, Object?>{},
+            _ => <String, Object?>{
+              'type': 'about:blank',
+              'title': 'Unavailable',
+              'status': probeStatus,
+              'requestId': _requestId,
+            },
+          }),
+          probeStatus,
+          headers: const {'content-type': 'application/json'},
+        );
+      }
       transportRequests++;
       return http.Response(
         jsonEncode(<String, Object?>{
@@ -309,6 +399,7 @@ Future<void> _verifyProductionAiDenialBoundary(
     },
   );
   final revoked = Completer<void>();
+  final verificationComplete = Completer<void>();
   var authorizationCallbacks = 0;
   await tester.pumpWidget(
     MaterialApp(
@@ -327,12 +418,22 @@ Future<void> _verifyProductionAiDenialBoundary(
         protectedRouteRegistry: ProductionProtectedRouteRegistry(),
         onAuthorizationLost: () async {
           authorizationCallbacks++;
-          await boundary.revokePurgeAndRoute(
+          final membershipRevoked = await verifyProductionAiHomeRevocation(
+            api: api,
             homeId: _homeId,
-            resumeSyncGate: resumeGate,
-            routeAway: () async => routeCalls++,
+            bindingIsCurrent: () => true,
           );
-          if (!revoked.isCompleted) revoked.complete();
+          if (membershipRevoked) {
+            await boundary.revokePurgeAndRoute(
+              homeId: _homeId,
+              resumeSyncGate: resumeGate,
+              routeAway: () async => routeCalls++,
+            );
+            if (!revoked.isCompleted) revoked.complete();
+          }
+          if (!verificationComplete.isCompleted) {
+            verificationComplete.complete();
+          }
         },
       ),
     ),
@@ -340,12 +441,14 @@ Future<void> _verifyProductionAiDenialBoundary(
   await tester.pumpAndSettle();
 
   if (verifiedHomeDenial) {
-    // A bounded real-async wait lets Drift finish the purge without an
-    // unresolvable fake-async completer hanging this acceptance test.
     await tester.runAsync(
-      () => revoked.future.timeout(const Duration(seconds: 5)),
+      () => verificationComplete.future.timeout(const Duration(seconds: 5)),
     );
     await tester.pumpAndSettle();
+  }
+  final shouldPurge =
+      verifiedHomeDenial && membershipProbe == _MembershipProbe.omitted;
+  if (shouldPurge) {
     expect(transportRequests, 1);
     expect(authorizationCallbacks, 1);
     expect(purgeCalls, 1);
@@ -355,25 +458,29 @@ Future<void> _verifyProductionAiDenialBoundary(
     expect(find.textContaining('Access to this household'), findsOneWidget);
   } else {
     expect(transportRequests, 1);
-    expect(authorizationCallbacks, 0);
+    expect(authorizationCallbacks, verifiedHomeDenial ? 1 : 0);
     expect(purgeCalls, 0);
     expect(routeCalls, 0);
     expect(revoked.isCompleted, isFalse);
-    expect(find.textContaining('Access to this household'), findsNothing);
-    expect(
-      find.text(
-        status == 403
-            ? 'Your current household role does not allow this AI action.'
-            : 'Household AI is temporarily unavailable.',
-      ),
-      findsOneWidget,
-    );
-    // Permission/resource failures leave the same authorized home usable for
-    // refresh, including subsequent failures, without creating another queue.
-    await tester.tap(find.byTooltip('Refresh AI settings'));
-    await tester.pumpAndSettle();
-    expect(transportRequests, 2);
-    expect(authorizationCallbacks, 0);
+    if (verifiedHomeDenial) {
+      expect(find.textContaining('Access to this household'), findsOneWidget);
+      expect(find.text('AI access unavailable'), findsOneWidget);
+    } else {
+      expect(find.textContaining('Access to this household'), findsNothing);
+      expect(
+        find.text(
+          status == 403
+              ? 'Your current household role does not allow this AI action.'
+              : 'Household AI is temporarily unavailable.',
+        ),
+        findsOneWidget,
+      );
+      // Generic failures remain retryable without changing the home or queue.
+      await tester.tap(find.byTooltip('Refresh AI settings'));
+      await tester.pumpAndSettle();
+      expect(transportRequests, 2);
+      expect(authorizationCallbacks, 0);
+    }
     expect(await database.select(database.localRecords).get(), recordsBefore);
     expect(
       await database.select(database.clientOperations).get(),
@@ -393,7 +500,8 @@ Future<void> _verifyProductionAiDenialBoundary(
 
   resumeGate.resume();
   await resumeGate.settle();
-  expect(resumeRefreshes, verifiedHomeDenial ? 0 : 1);
+  expect(membershipRequests, verifiedHomeDenial ? 1 : 0);
+  expect(resumeRefreshes, shouldPurge ? 0 : 1);
   expect(tester.takeException(), isNull);
 }
 

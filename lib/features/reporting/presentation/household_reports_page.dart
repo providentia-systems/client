@@ -373,56 +373,67 @@ final class _ReadyReport extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return CustomScrollView(
-      slivers: <Widget>[
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
-            child: Row(
-              children: <Widget>[
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Text(
-                        'Household reports',
-                        style: Theme.of(context).textTheme.headlineMedium,
+    return Scrollbar(
+      thumbVisibility: true,
+      child: Focus(
+        autofocus: true,
+        child: CustomScrollView(
+          primary: true,
+          key: const Key('household-report-scroll'),
+          slivers: <Widget>[
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+                child: Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            'Household reports',
+                            style: Theme.of(context).textTheme.headlineMedium,
+                          ),
+                          const Text(
+                            'Private to the selected home · evidence-aware',
+                          ),
+                        ],
                       ),
-                      const Text(
-                        'Private to the selected home · evidence-aware',
-                      ),
-                    ],
-                  ),
+                    ),
+                    IconButton(
+                      tooltip: 'Refresh reports',
+                      onPressed: () {
+                        unawaited(onRefresh());
+                      },
+                      icon: const Icon(Icons.refresh_rounded),
+                    ),
+                  ],
                 ),
-                IconButton(
-                  tooltip: 'Refresh reports',
-                  onPressed: () {
-                    unawaited(onRefresh());
-                  },
-                  icon: const Icon(Icons.refresh_rounded),
-                ),
-              ],
+              ),
             ),
-          ),
-        ),
-        SliverPadding(
-          padding: const EdgeInsets.all(16),
-          sliver: SliverLayoutBuilder(
-            builder: (context, constraints) {
-              final columns = constraints.crossAxisExtent >= 900 ? 2 : 1;
-              return SliverGrid(
-                delegate: SliverChildListDelegate(_sections()),
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: columns,
-                  crossAxisSpacing: 14,
-                  mainAxisSpacing: 14,
-                  mainAxisExtent: 260,
+            const SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                child: Text(
+                  'Scroll this page to see every report row. Sections expand to show all their records.',
                 ),
-              );
-            },
-          ),
+              ),
+            ),
+            SliverPadding(
+              padding: const EdgeInsets.all(16),
+              sliver: SliverList.list(
+                children: [
+                  for (final section in _sections())
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 14),
+                      child: section,
+                    ),
+                ],
+              ),
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 }
@@ -461,11 +472,13 @@ final class _ReportSection extends StatelessWidget {
               ],
             ),
             const Divider(),
-            Expanded(
-              child: children.isEmpty
-                  ? Center(child: Text(emptyText, textAlign: TextAlign.center))
-                  : ListView(children: children),
-            ),
+            if (children.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                child: Text(emptyText, textAlign: TextAlign.center),
+              )
+            else
+              ...children,
           ],
         ),
       ),
