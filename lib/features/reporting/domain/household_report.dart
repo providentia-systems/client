@@ -26,7 +26,7 @@ final class HouseholdReportMetadata implements HomeScopedReportLine {
   final DateTime? through;
 }
 
-/// Complete factual inventory row from the current HomeReport contract.
+/// Ledger quantity with explicit evidence state; null is not a recorded zero.
 final class InventoryReportFact implements HomeScopedReportLine {
   const InventoryReportFact({
     required this.homeId,
@@ -34,6 +34,12 @@ final class InventoryReportFact implements HomeScopedReportLine {
     required this.productName,
     required this.packText,
     required this.factualQuantity,
+    this.stockUnit = '',
+    this.quantityState = 'recorded',
+    this.uncertain = false,
+    this.pendingQuantity,
+    this.limitations = const <String>[],
+    this.checkpointId,
     this.balanceRevision,
     this.lastMovementId,
     this.balanceUpdatedAt,
@@ -47,7 +53,13 @@ final class InventoryReportFact implements HomeScopedReportLine {
   final String homeProductId;
   final String productName;
   final String packText;
-  final String factualQuantity;
+  final String? factualQuantity;
+  final String stockUnit;
+  final String quantityState;
+  final bool uncertain;
+  final String? pendingQuantity;
+  final List<String> limitations;
+  final String? checkpointId;
   final int? balanceRevision;
   final String? lastMovementId;
   final DateTime? balanceUpdatedAt;
@@ -64,6 +76,14 @@ final class PurchaseReportTotal implements HomeScopedReportLine {
     required this.currency,
     required this.receiptCount,
     required this.total,
+    this.knownSubtotal,
+    this.pricingComplete = true,
+    this.amountSource = 'derived',
+    this.completeReceiptCount = 0,
+    this.partialReceiptCount = 0,
+    this.unknownReceiptCount = 0,
+    this.declaredReceiptCount = 0,
+    this.derivedReceiptCount = 0,
     this.storeId,
     this.storeName,
   });
@@ -75,7 +95,15 @@ final class PurchaseReportTotal implements HomeScopedReportLine {
   final String? storeId;
   final String? storeName;
   final int receiptCount;
-  final String total;
+  final String? total;
+  final String? knownSubtotal;
+  final bool pricingComplete;
+  final String amountSource;
+  final int completeReceiptCount;
+  final int partialReceiptCount;
+  final int unknownReceiptCount;
+  final int declaredReceiptCount;
+  final int derivedReceiptCount;
 }
 
 final class ConsumptionReportEstimate implements HomeScopedReportLine {
