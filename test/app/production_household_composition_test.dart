@@ -16,6 +16,7 @@ import 'package:providentia/features/ai_integration/domain/ai_models.dart';
 import 'package:providentia/features/ai_integration/domain/server_ai_models.dart';
 import 'package:providentia/features/ai_integration/infrastructure/sanitizing_image_media_preparer.dart';
 import 'package:providentia/features/homes/infrastructure/home_data_revocation.dart';
+import 'package:providentia/features/inventory/domain/inventory_models.dart';
 import 'package:providentia/features/shopping/application/shopping_interaction_capabilities.dart';
 import 'package:providentia_api_client/providentia_api_client.dart';
 
@@ -50,109 +51,28 @@ void main() {
     },
   );
 
-  testWidgets(
-    'production receipt AI 404 purges protected data and routes once',
-    (tester) async {
-      final database = AppDatabase(NativeDatabase.memory());
-      addTearDown(database.close);
-      final now = DateTime.utc(2026, 8, 11, 16);
-      await database
-          .into(database.localRecords)
-          .insert(
-            LocalRecordsCompanion.insert(
-              homeId: _homeId,
-              entityType: ClientLocalRecordTypes.strictLocalAiConfiguration,
-              entityId: 'private-local-ai-config',
-              payload: jsonEncode(<String, Object?>{'private': true}),
-              updatedAt: now,
-            ),
-          );
-      var transportRequests = 0;
-      final api = ProvidentiaApiClient(
-        baseUri: Uri.parse('https://api.example.test'),
-        httpClient: MockClient((_) async {
-          transportRequests++;
-          return http.Response(
-            jsonEncode(<String, Object?>{
-              'type': 'about:blank',
-              'title': 'Not Found',
-              'status': 404,
-              'detail': 'The requested resource was not found.',
-              'requestId': 'request-ai-revoked-home',
-            }),
-            404,
-            headers: const <String, String>{
-              'content-type': 'application/problem+json',
-            },
-          );
-        }),
-      );
-      addTearDown(api.close);
-      final revocationGate = HomeSyncRevocationGate();
-      var purgeCalls = 0;
-      var routeCalls = 0;
-      var resumeRefreshes = 0;
-      final resumeGate = ProductionResumeSyncGate(
-        refresh: () async => resumeRefreshes++,
-      )..markReady();
-      addTearDown(resumeGate.dispose);
-      final boundary = ProductionHomeRevocationBoundary(
-        purge: (homeId) async {
-          purgeCalls++;
-          await revocationGate.revokeAndWait(homeId);
-          await RevokedHomeDataPurger(database).purge(homeId);
-          return true;
-        },
-      );
-      final revoked = Completer<void>();
-      var authorizationCallbacks = 0;
-
-      await tester.pumpWidget(
-        MaterialApp(
-          home: ProductionServerAiRoute(
-            api: api,
-            homeId: _homeId,
-            capabilities: AiHomeCapabilities.fromPermissions(
-              homeId: _homeId,
-              permissions: const <String>{
-                'ai.read',
-                'ai.use',
-                'ai.credentials.use',
-              },
-            ),
-            protectedRouteRegistry: ProductionProtectedRouteRegistry(),
-            onAuthorizationLost: () async {
-              authorizationCallbacks++;
-              await boundary.revokePurgeAndRoute(
-                homeId: _homeId,
-                resumeSyncGate: resumeGate,
-                routeAway: () async => routeCalls++,
-              );
-              if (!revoked.isCompleted) revoked.complete();
-            },
-          ),
+  for (final status in <int>[403, 404]) {
+    for (final receiptOnly in <bool>[true, false]) {
+      testWidgets(
+        'production ${receiptOnly ? 'receipt' : 'photo'} AI generic $status preserves home data and pending work',
+        (tester) => _verifyProductionAiDenialBoundary(
+          tester,
+          status: status,
+          verifiedHomeDenial: false,
+          receiptOnly: receiptOnly,
         ),
       );
-      await tester.pump();
-      await revoked.future;
-      await tester.pumpAndSettle();
-
-      expect(transportRequests, greaterThanOrEqualTo(1));
-      expect(authorizationCallbacks, 1);
-      expect(purgeCalls, 1);
-      expect(routeCalls, 1);
-      expect(
-        await (database.select(
-          database.localRecords,
-        )..where((row) => row.homeId.equals(_homeId))).get(),
-        isEmpty,
-      );
-      resumeGate.resume();
-      await resumeGate.settle();
-      expect(resumeRefreshes, 0);
-      expect(find.textContaining('Access to this household'), findsOneWidget);
-    },
-  );
+    }
+    testWidgets(
+      'production verified home denial $status purges protected data and routes once',
+      (tester) => _verifyProductionAiDenialBoundary(
+        tester,
+        status: status,
+        verifiedHomeDenial: true,
+        receiptOnly: true,
+      ),
+    );
+  }
 
   test('production AI routes share the single revocation boundary', () {
     final source = File(
@@ -299,6 +219,184 @@ void main() {
   );
 }
 
+Future<void> _verifyProductionAiDenialBoundary(
+  WidgetTester tester, {
+  required int status,
+  required bool verifiedHomeDenial,
+  required bool receiptOnly,
+}) async {
+  final database = AppDatabase(NativeDatabase.memory());
+  addTearDown(database.close);
+  final now = DateTime.utc(2026, 8, 11, 16);
+  var generated = 0;
+  final repository = createProductionHouseholdRepository(
+    database: database,
+    deviceId: _deviceId,
+    originatingAccountId: _accountId,
+    clock: () => now,
+    idGenerator: () => generated++ == 0 ? _productId : _operationId,
+    onMutationCommitted: () async {},
+  );
+  await repository.createPrivateHomeProduct(
+    PrivateHomeProductDraft(
+      homeId: _homeId,
+      privateName: 'Synthetic rice',
+      originalPackText: '1 kg',
+      unit: 'kg',
+    ),
+  );
+  await database
+      .into(database.localRecords)
+      .insert(
+        LocalRecordsCompanion.insert(
+          homeId: _homeId,
+          entityType: ClientLocalRecordTypes.strictLocalAiConfiguration,
+          entityId: 'synthetic-ai-configuration',
+          payload: jsonEncode(<String, Object?>{'synthetic': true}),
+          updatedAt: now,
+        ),
+      );
+  final recordsBefore = await database.select(database.localRecords).get();
+  final operationsBefore = await database
+      .select(database.clientOperations)
+      .get();
+  expect(operationsBefore, hasLength(1));
+  expect(operationsBefore.single.operationId, _operationId);
+  expect(operationsBefore.single.deviceId, _deviceId);
+  expect(operationsBefore.single.originatingAccountId, _accountId);
+  expect(operationsBefore.single.homeId, _homeId);
+
+  var transportRequests = 0;
+  final api = ProvidentiaApiClient(
+    baseUri: Uri.parse('https://api.example.test'),
+    httpClient: MockClient((_) async {
+      transportRequests++;
+      return http.Response(
+        jsonEncode(<String, Object?>{
+          'type': verifiedHomeDenial
+              ? 'https://providentia.invalid/problems/sync_home_access_denied'
+              : 'about:blank',
+          'title': status == 403 ? 'Forbidden' : 'Not Found',
+          'status': status,
+          'detail': verifiedHomeDenial
+              ? 'Household membership was denied.'
+              : 'The requested AI resource is unavailable.',
+          'requestId': _requestId,
+        }),
+        status,
+        headers: const <String, String>{
+          'content-type': 'application/problem+json',
+        },
+      );
+    }),
+  );
+  addTearDown(api.close);
+  final revocationGate = HomeSyncRevocationGate();
+  var purgeCalls = 0;
+  var routeCalls = 0;
+  var resumeRefreshes = 0;
+  final resumeGate = ProductionResumeSyncGate(
+    refresh: () async => resumeRefreshes++,
+  )..markReady();
+  addTearDown(resumeGate.dispose);
+  final boundary = ProductionHomeRevocationBoundary(
+    purge: (homeId) async {
+      expect(homeId, _homeId);
+      purgeCalls++;
+      await revocationGate.revokeAndWait(homeId);
+      await RevokedHomeDataPurger(database).purge(homeId);
+      return true;
+    },
+  );
+  final revoked = Completer<void>();
+  var authorizationCallbacks = 0;
+  await tester.pumpWidget(
+    MaterialApp(
+      home: ProductionServerAiRoute(
+        api: api,
+        homeId: _homeId,
+        receiptImportOnly: receiptOnly,
+        capabilities: AiHomeCapabilities.fromPermissions(
+          homeId: _homeId,
+          permissions: const <String>{
+            'ai.read',
+            'ai.use',
+            'ai.credentials.use',
+          },
+        ),
+        protectedRouteRegistry: ProductionProtectedRouteRegistry(),
+        onAuthorizationLost: () async {
+          authorizationCallbacks++;
+          await boundary.revokePurgeAndRoute(
+            homeId: _homeId,
+            resumeSyncGate: resumeGate,
+            routeAway: () async => routeCalls++,
+          );
+          if (!revoked.isCompleted) revoked.complete();
+        },
+      ),
+    ),
+  );
+  await tester.pumpAndSettle();
+
+  if (verifiedHomeDenial) {
+    // A bounded real-async wait lets Drift finish the purge without an
+    // unresolvable fake-async completer hanging this acceptance test.
+    await tester.runAsync(
+      () => revoked.future.timeout(const Duration(seconds: 5)),
+    );
+    await tester.pumpAndSettle();
+    expect(transportRequests, 1);
+    expect(authorizationCallbacks, 1);
+    expect(purgeCalls, 1);
+    expect(routeCalls, 1);
+    expect(await database.select(database.localRecords).get(), isEmpty);
+    expect(await database.select(database.clientOperations).get(), isEmpty);
+    expect(find.textContaining('Access to this household'), findsOneWidget);
+  } else {
+    expect(transportRequests, 1);
+    expect(authorizationCallbacks, 0);
+    expect(purgeCalls, 0);
+    expect(routeCalls, 0);
+    expect(revoked.isCompleted, isFalse);
+    expect(find.textContaining('Access to this household'), findsNothing);
+    expect(
+      find.text(
+        status == 403
+            ? 'Your current household role does not allow this AI action.'
+            : 'Household AI is temporarily unavailable.',
+      ),
+      findsOneWidget,
+    );
+    // Permission/resource failures leave the same authorized home usable for
+    // refresh, including subsequent failures, without creating another queue.
+    await tester.tap(find.byTooltip('Refresh AI settings'));
+    await tester.pumpAndSettle();
+    expect(transportRequests, 2);
+    expect(authorizationCallbacks, 0);
+    expect(await database.select(database.localRecords).get(), recordsBefore);
+    expect(
+      await database.select(database.clientOperations).get(),
+      operationsBefore,
+    );
+    final items = await tester.runAsync(
+      () => repository
+          .watchItems(homeId: _homeId)
+          .first
+          .timeout(const Duration(seconds: 5)),
+    );
+    final product = items!.single;
+    expect(product.id, _productId);
+    expect(product.canonicalName, 'Synthetic rice');
+    expect(product.unit, 'kg');
+  }
+
+  resumeGate.resume();
+  await resumeGate.settle();
+  expect(resumeRefreshes, verifiedHomeDenial ? 0 : 1);
+  expect(tester.takeException(), isNull);
+}
+
 final class _PreparedMediaDelegate implements AiMediaPreparationPort {
   @override
   Future<PreparedMediaBatch> prepare({
@@ -342,6 +440,9 @@ final class _FailingMediaDelegate implements AiMediaPreparationPort {
 }
 
 const _homeId = '0198a0b1-c2d3-7e4f-8123-456789abcdef';
+const _accountId = '0198a0b1-c2d3-7e4f-8345-6789abcdef12';
+const _productId = '0198a0b1-c2d3-7e4f-8456-789abcdef123';
+const _requestId = '0198a0b1-c2d3-7e4f-8678-9abcdef01234';
 const _deviceId = '0198a0b1-c2d3-7e4f-a345-6789abcdef01';
 const _listId = '0198a0b1-c2d3-7e4f-8567-89abcdef0123';
 const _operationId = '0198a0b1-c2d3-7e4f-9234-56789abcdef0';

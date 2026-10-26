@@ -37,53 +37,70 @@ void main() {
     },
   );
   for (final linked in [false, true]) {
-    testWidgets(
-      '${linked ? 'linked' : 'private'} product name, pack, stock unit and category remain editable',
-      (tester) async {
-        final repository = _Repository(localCategories: true, linked: linked);
-        await _workspace(tester, repository);
-        await tester.ensureVisible(find.byTooltip('Edit product'));
-        await tester.tap(find.byTooltip('Edit product'));
-        await tester.pumpAndSettle();
-        expect(
-          tester
-              .widget<TextField>(
-                find.byKey(const Key('inventory-product-name')),
-              )
-              .enabled,
-          isTrue,
-        );
-        await tester.enterText(
-          find.byKey(const Key('inventory-product-name')),
-          'My apple',
-        );
-        await tester.enterText(
-          find.byKey(const Key('inventory-product-pack')),
-          'Fruit crate',
-        );
-        await _choose(
-          tester,
-          find.byKey(const Key('inventory-product-unit')),
-          'kg',
-        );
-        await _choose(tester, _categoryField(), 'Pantry · Local');
-        await _choose(tester, _categoryField(), 'Produce · Global');
-        await tester.tap(find.text('Save locally'));
-        await tester.pumpAndSettle();
-        expect(repository.edits.single, {
-          'id': 'apple',
-          'name': 'My apple',
-          'pack': 'Fruit crate',
-          'unit': 'kg',
-          'global': 'global',
-          'local': null,
-          'revision': 5,
-          'archived': false,
-        });
-        expect(repository.adjustments, isEmpty);
-        expect(tester.takeException(), isNull);
-      },
-    );
+    for (final quantity in [0.0, 3.0]) {
+      testWidgets(
+        '${linked ? 'linked' : 'private'} metadata stays editable with ${quantity == 0 ? 'an unused' : 'a protected'} stock unit',
+        (tester) async {
+          final repository = _Repository(
+            localCategories: true,
+            linked: linked,
+            quantity: quantity,
+          );
+          await _workspace(tester, repository);
+          await tester.ensureVisible(find.byTooltip('Edit product'));
+          await tester.tap(find.byTooltip('Edit product'));
+          await tester.pumpAndSettle();
+          expect(
+            tester
+                .widget<TextField>(
+                  find.byKey(const Key('inventory-product-name')),
+                )
+                .enabled,
+            isTrue,
+          );
+          await tester.enterText(
+            find.byKey(const Key('inventory-product-name')),
+            'My apple',
+          );
+          await tester.enterText(
+            find.byKey(const Key('inventory-product-pack')),
+            'Fruit crate',
+          );
+          if (quantity == 0) {
+            await _choose(
+              tester,
+              find.byKey(const Key('inventory-product-unit')),
+              'kg',
+            );
+          } else {
+            expect(
+              tester
+                  .widget<DropdownButtonFormField<String>>(
+                    find.byKey(const Key('inventory-product-unit')),
+                  )
+                  .onChanged,
+              isNull,
+            );
+          }
+          await _choose(tester, _categoryField(), 'Pantry · Local');
+          await _choose(tester, _categoryField(), 'Produce · Global');
+          await tester.tap(find.text('Save locally'));
+          await tester.pumpAndSettle();
+          expect(repository.edits.single, {
+            'id': 'apple',
+            'name': 'My apple',
+            'pack': 'Fruit crate',
+            'unit': quantity == 0 ? 'kg' : 'units',
+            'global': 'global',
+            'local': null,
+            'revision': 5,
+            'archived': false,
+          });
+          expect(repository.adjustments, isEmpty);
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
   }
   for (final quantity in <double?>[null, 3]) {
     testWidgets(

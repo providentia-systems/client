@@ -1180,6 +1180,7 @@ void main() {
     final client = SessionHttpClient(
       inner: MockClient((request) async {
         expect(request.headers['X-CSRF-Token'], 'csrf-1');
+        expect(request.headers['X-Providentia-Application'], 'homeowner');
         sendStarted.complete();
         await releaseSend.future;
         return http.Response('{}', 200);

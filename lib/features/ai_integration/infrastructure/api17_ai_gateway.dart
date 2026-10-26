@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
+import 'package:providentia/core/networking/verified_home_denial.dart';
 import 'package:providentia/features/ai_integration/application/ai_ports.dart';
 import 'package:providentia/features/ai_integration/domain/ai_models.dart';
 import 'package:providentia/features/ai_integration/infrastructure/ephemeral_bytes.dart';
@@ -59,7 +60,7 @@ final class Api17AiGateway implements AiProviderGateway {
                   'The selected provider is not enabled by the server.',
             );
     } on ProvidentiaApiException catch (error) {
-      if (error.statusCode == 403 || error.statusCode == 404) {
+      if (isVerifiedHomeAccessDenial(error)) {
         throw const AiGatewayAuthorizationDeniedException();
       }
       return const AiGatewayReadiness(
@@ -96,7 +97,7 @@ final class Api17AiGateway implements AiProviderGateway {
         safeMessage: error.safeMessage,
       );
     } on ProvidentiaApiException catch (error) {
-      if (error.statusCode == 403 || error.statusCode == 404) {
+      if (isVerifiedHomeAccessDenial(error)) {
         throw const AiGatewayAuthorizationDeniedException();
       }
       return AiExtractionFailure<ReceiptProposal>(
@@ -133,7 +134,7 @@ final class Api17AiGateway implements AiProviderGateway {
         safeMessage: error.safeMessage,
       );
     } on ProvidentiaApiException catch (error) {
-      if (error.statusCode == 403 || error.statusCode == 404) {
+      if (isVerifiedHomeAccessDenial(error)) {
         throw const AiGatewayAuthorizationDeniedException();
       }
       return AiExtractionFailure<StockPhotoProposal>(

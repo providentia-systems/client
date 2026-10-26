@@ -113,6 +113,26 @@ final class InventoryController extends ChangeNotifier {
       : null;
   bool get canEditMetadata => _metadata?.supportsInventoryMetadata == true;
 
+  String? _metadataError;
+  String? get metadataError => _metadataError;
+
+  Future<InventoryUnitChangeEligibility> unitChangeEligibility(
+    InventoryItem item,
+  ) async {
+    if (item.homeId != homeId) {
+      throw StateError('Product belongs to another home.');
+    }
+    if (item.currentQuantity != null && item.currentQuantity != 0) {
+      return InventoryUnitChangeEligibility.inUse;
+    }
+    final repository = _repository;
+    if (repository is InventoryUnitChangeRepository) {
+      return (repository as InventoryUnitChangeRepository)
+          .unitChangeEligibility(homeId: homeId, productId: item.id);
+    }
+    return InventoryUnitChangeEligibility.serverConfirmationRequired;
+  }
+
   Future<bool> saveCategory({
     HomeInventoryCategory? category,
     required String name,
@@ -159,13 +179,17 @@ final class InventoryController extends ChangeNotifier {
 
   Future<bool> _metadataMutation(Future<void> Function() action) async {
     if (!canEditMetadata) return false;
+    _metadataError = null;
     try {
       await action();
       return true;
+    } on InventoryUnitChangeException catch (failure) {
+      _metadataError = failure.safeMessage;
+      _setProductCreationError(failure.safeMessage);
+      return false;
     } catch (_) {
-      _setProductCreationError(
-        'The change could not be saved. Refresh and try again.',
-      );
+      _metadataError = 'The change could not be saved. Refresh and try again.';
+      _setProductCreationError(_metadataError!);
       return false;
     }
   }

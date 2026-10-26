@@ -24,11 +24,13 @@ import 'package:providentia/core/security/platform_session_coordination.dart';
 import 'package:providentia/core/security/platform_session_credential_store.dart';
 import 'package:providentia/core/security/uuid_v4.dart';
 import 'package:providentia/core/synchronization/generated_sync_gateway.dart';
+import 'package:providentia/core/synchronization/generated_sync_recovery_gateway.dart';
 import 'package:providentia/core/synchronization/privacy_safe_sync_metrics.dart';
 import 'package:providentia/core/synchronization/session_bound_sync_gateway.dart';
 import 'package:providentia/core/synchronization/sync_coordinator.dart';
 import 'package:providentia/core/synchronization/sync_models.dart';
 import 'package:providentia/core/synchronization/sync_ports.dart';
+import 'package:providentia/core/synchronization/synchronization_recovery.dart';
 import 'package:providentia/features/ai_integration/application/ai_ports.dart';
 import 'package:providentia/features/ai_integration/application/ai_review_resume_store.dart';
 import 'package:providentia/features/ai_integration/application/receipt_ai_handoff_controller.dart';
@@ -86,6 +88,7 @@ import 'package:providentia/features/homes/infrastructure/drift_active_home_stor
 import 'package:providentia/features/homes/infrastructure/home_data_revocation.dart';
 import 'package:providentia/features/homes/presentation/home_selection_page.dart';
 import 'package:providentia/features/homes/presentation/homes_controller.dart';
+import 'package:providentia/features/household_sync/presentation/synchronization_recovery_dialog.dart';
 import 'package:providentia/features/identity/application/identity_session_manager.dart';
 import 'package:providentia/features/identity/domain/identity_models.dart';
 import 'package:providentia/features/identity/infrastructure/api11_identity_transport.dart';
@@ -700,6 +703,7 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
     with WidgetsBindingObserver {
   late final AppController _app;
   late final SessionBoundSyncGateway _syncGateway;
+  late final AppSyncRecovery _synchronizationRecovery;
   late final DriftHouseholdRepository _household;
   late final HouseholdFeatures _features;
   late final SyncConflictController _syncConflicts;
@@ -746,6 +750,13 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
     AppSynchronization synchronization = SyncCoordinator(
       local: localSync,
       remote: _syncGateway,
+      recoveryGateway: GeneratedSyncRecoveryGateway(
+        client: widget.api,
+        accountId: widget.userId,
+        deviceId: widget.deviceId,
+        homeId: widget.home.id,
+        isCurrent: () => _bindingIsCurrent && !_revocationRouted,
+      ),
       connectivity: GeneratedApiConnectivityProbe(widget.api),
       metrics: _syncMetrics,
     );
@@ -770,6 +781,7 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
       gate: widget.syncRevocationGate,
       homeId: widget.home.id,
     );
+    _synchronizationRecovery = synchronization as AppSyncRecovery;
     _catalogProductSource = DriftCatalogProductSourcePreparation(
       database: widget.database,
       synchronization: synchronization,
@@ -1079,6 +1091,18 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
                   catalogImportPageBuilder: _catalogImportPageBuilder,
                   householdReportsPageBuilder:
                       widget.householdReportsPageBuilder,
+                  onRecoverHome: () {
+                    if (!_bindingIsCurrent || _revocationRouted) return;
+                    unawaited(
+                      showDialog<void>(
+                        context: context,
+                        builder: (_) => SynchronizationRecoveryDialog(
+                          homeId: widget.home.id,
+                          recovery: _synchronizationRecovery,
+                        ),
+                      ),
+                    );
+                  },
                   householdAiPageBuilder: _connectedHouseholdAiPageBuilder,
                   dataGovernancePageBuilder: widget.dataGovernancePageBuilder,
                 ),
@@ -2301,13 +2325,7 @@ final class _ProductionServerAiRouteState
       _clearRegisteredSources();
     }
     if (_handlingAuthorizationLoss) return;
-    final lostAuthorization =
-        _controller.status == ServerAiWorkspaceStatus.accessDenied ||
-        (_controller.status == ServerAiWorkspaceStatus.failed &&
-            const <String>{
-              'Sign in again before using household AI.',
-              'Your current household role does not allow this AI action.',
-            }.contains(_controller.safeMessage));
+    final lostAuthorization = _controller.homeAccessRevoked;
     if (!lostAuthorization) return;
     _handlingAuthorizationLoss = true;
     unawaited(widget.onAuthorizationLost());

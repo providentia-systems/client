@@ -19,6 +19,7 @@ final class AccountAccessPage extends StatelessWidget {
     this.catalogStorePriceContributionPageBuilder,
     this.catalogImportPageBuilder,
     this.householdReportsPageBuilder,
+    this.onRecoverHome,
     this.householdAiPageBuilder,
     this.dataGovernancePageBuilder,
     super.key,
@@ -34,6 +35,7 @@ final class AccountAccessPage extends StatelessWidget {
   final WidgetBuilder? catalogStorePriceContributionPageBuilder;
   final WidgetBuilder? catalogImportPageBuilder;
   final WidgetBuilder? householdReportsPageBuilder;
+  final VoidCallback? onRecoverHome;
   final WidgetBuilder? householdAiPageBuilder;
   final WidgetBuilder? dataGovernancePageBuilder;
 
@@ -108,6 +110,17 @@ final class AccountAccessPage extends StatelessWidget {
                   ),
                 ),
               ),
+            ),
+          if (home != null && onRecoverHome != null)
+            ListTile(
+              key: const Key('recover-existing-home'),
+              leading: const Icon(Icons.restore_outlined),
+              title: const Text('Recover this home'),
+              subtitle: const Text(
+                'Refresh saved records while preserving pending work',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: onRecoverHome,
             ),
           if (home != null &&
               householdReportsPageBuilder != null &&

@@ -123,12 +123,14 @@ void main() {
         ),
         findsOneWidget,
       );
-      expect(find.textContaining('Stock evidence unavailable'), findsOneWidget);
-      expect(find.textContaining('Stock unit unavailable'), findsOneWidget);
       expect(
         find.textContaining('Ledger quantity is not a verified physical count'),
-        findsNWidgets(3),
+        findsWidgets,
       );
+      await tester.drag(find.byType(ListView).first, const Offset(0, -400));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Stock evidence unavailable'), findsOneWidget);
+      expect(find.textContaining('Stock unit unavailable'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );

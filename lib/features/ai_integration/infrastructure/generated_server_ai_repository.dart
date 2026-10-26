@@ -1,4 +1,5 @@
 import 'package:http/http.dart' as http;
+import 'package:providentia/core/networking/verified_home_denial.dart';
 import 'package:providentia/features/ai_integration/application/server_ai_repository.dart';
 import 'package:providentia/features/ai_integration/domain/ai_models.dart';
 import 'package:providentia/features/ai_integration/domain/ai_transmission_plan.dart';
@@ -412,9 +413,13 @@ final class GeneratedServerAiRepository
     } on AiServerException {
       rethrow;
     } on ProvidentiaApiException catch (error) {
+      if (isVerifiedHomeAccessDenial(error)) {
+        throw const AiServerException(AiServerFailureKind.authorizationDenied);
+      }
       throw AiServerException(switch (error.statusCode) {
         401 => AiServerFailureKind.authenticationRequired,
-        403 || 404 => AiServerFailureKind.authorizationDenied,
+        403 => AiServerFailureKind.forbidden,
+        404 => AiServerFailureKind.unavailable,
         409 => AiServerFailureKind.conflict,
         400 || 413 || 415 || 422 => AiServerFailureKind.validation,
         _ => AiServerFailureKind.unavailable,

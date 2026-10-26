@@ -161,7 +161,7 @@ _ParsedReport _report(
 }
 
 InventoryReportFact _inventoryFact(Map<String, Object?> object, String homeId) {
-  final quantity = _optionalDecimal(object['factualQuantity']);
+  final quantity = _optionalReportDecimal(object['factualQuantity']);
   final state = switch (object['quantityState']) {
     null => InventoryReportQuantityState.unavailable,
     'unknown' => InventoryReportQuantityState.unknown,
@@ -190,7 +190,7 @@ InventoryReportFact _inventoryFact(Map<String, Object?> object, String homeId) {
     quantityState: state,
     stockUnit: unit == null || unit.trim().isEmpty ? null : unit,
     uncertain: uncertain,
-    pendingQuantity: _optionalDecimal(object['pendingQuantity']),
+    pendingQuantity: _optionalReportDecimal(object['pendingQuantity']),
     limitations: object['limitations'] == null
         ? const <String>[]
         : List<String>.unmodifiable(_stringList(object, 'limitations')),
@@ -198,7 +198,7 @@ InventoryReportFact _inventoryFact(Map<String, Object?> object, String homeId) {
     balanceRevision: _optionalPositiveInteger(object['balanceRevision']),
     lastMovementId: _optionalUuid(object['lastMovementId']),
     balanceUpdatedAt: _optionalDateTime(object['balanceUpdatedAt']),
-    configuredMinimum: _optionalDecimal(object['configuredMinimum']),
+    configuredMinimum: _optionalReportDecimal(object['configuredMinimum']),
     alwaysKeep: _optionalBoolean(object['alwaysKeep']),
     neverSuggest: _optionalBoolean(object['neverSuggest']),
   );
@@ -210,7 +210,7 @@ PurchaseReportTotal _purchaseTotal(Map<String, Object?> object, String homeId) {
   if (!_monthPattern.hasMatch(month) || !_currencyPattern.hasMatch(currency)) {
     throw const FormatException('Invalid purchase report key.');
   }
-  final total = _optionalDecimal(object['total']);
+  final total = _optionalReportDecimal(object['total']);
   final complete = _optionalBoolean(object['pricingComplete']);
   if ((complete == true && total == null) ||
       (complete == false && total != null)) {
@@ -224,7 +224,7 @@ PurchaseReportTotal _purchaseTotal(Map<String, Object?> object, String homeId) {
     storeName: _optionalString(object['storeName']),
     receiptCount: _nonNegativeInteger(object, 'receiptCount'),
     total: total,
-    knownSubtotal: _optionalDecimal(object['knownSubtotal']),
+    knownSubtotal: _optionalReportDecimal(object['knownSubtotal']),
     pricingComplete: complete,
     amountSource: switch (object['amountSource']) {
       null => PurchaseReportAmountSource.unavailable,
@@ -440,7 +440,7 @@ String _decimal(Map<String, Object?> object, String key) {
   return normalized;
 }
 
-String? _optionalDecimal(Object? value) {
+String? _optionalReportDecimal(Object? value) {
   if (value == null) {
     return null;
   }
@@ -449,8 +449,8 @@ String? _optionalDecimal(Object? value) {
       : value is num
       ? '$value'
       : null;
-  if (normalized == null || !_decimalPattern.hasMatch(normalized)) {
-    throw const FormatException('Invalid optional fixed decimal.');
+  if (normalized == null || !_reportDecimalPattern.hasMatch(normalized)) {
+    throw const FormatException('Invalid optional report decimal.');
   }
   return normalized;
 }
@@ -609,7 +609,10 @@ DateTime? _optionalDate(Object? value) {
 final RegExp _uuidPattern = RegExp(
   r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
 );
-final RegExp _decimalPattern = RegExp(r'^-?(?:0|[1-9]\d*)(?:\.\d+)?$');
+final RegExp _decimalPattern = RegExp(r'^-?(?:0|[1-9]\d{0,8})(?:\.\d{1,8})?$');
+// Report projections and aggregates have their own unbounded exact-decimal
+// schema; individual command quantities retain the FixedDecimal contract.
+final RegExp _reportDecimalPattern = RegExp(r'^-?(?:0|[1-9]\d*)(?:\.\d+)?$');
 final RegExp _confidencePattern = RegExp(
   r'^(?:0(?:\.\d{1,4})?|1(?:\.0{1,4})?)$',
 );

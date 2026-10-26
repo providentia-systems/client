@@ -173,7 +173,7 @@ final class StockPhotoCountPanel extends StatelessWidget {
             ),
           const SizedBox(height: 8),
           const Text(
-            'Photo candidates do not close the count. Use “Finish and apply” '
+            'Photo candidates do not close the count. Use “Finish count” '
             'above only after reviewing the ordinary count lines.',
           ),
           TextButton(

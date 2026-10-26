@@ -241,7 +241,9 @@ class _InventoryWorkspaceState extends State<InventoryWorkspace> {
                       controller: widget.controller,
                       countSessionActive: state.activeSession != null,
                     ),
-                  if (!state.loading && widget.controller.visibleItems.isEmpty)
+                  if (!state.loading &&
+                      state.safeError == null &&
+                      widget.controller.visibleItems.isEmpty)
                     const Padding(
                       padding: EdgeInsets.all(24),
                       child: Text(
@@ -454,6 +456,10 @@ class _CountSessionBar extends StatelessWidget {
           spacing: 8,
           runSpacing: 8,
           children: <Widget>[
+            const Text(
+              'Observations await server chronology checks. '
+              'Finishing does not certify or replace the displayed stock.',
+            ),
             Text(
               '${active.confirmedLines.length} products counted',
               style: Theme.of(context).textTheme.titleSmall,
@@ -465,7 +471,7 @@ class _CountSessionBar extends StatelessWidget {
             FilledButton(
               key: const Key('finish-stock-count'),
               onPressed: active.lines.isEmpty ? null : controller.closeCount,
-              child: const Text('Finish and apply'),
+              child: const Text('Finish count'),
             ),
           ],
         ),
@@ -518,6 +524,22 @@ class _InventoryRow extends StatelessWidget {
               const SizedBox(height: 8),
               Text(_metadata),
               const SizedBox(height: 8),
+              if (belongsToHome && item.currentQuantity != null)
+                Text(
+                  item.currentQuantity! < 0
+                      ? 'Signed ledger balance; this is not a physical count.'
+                      : item.stockUncertain == true
+                      ? 'Stock estimate has unresolved evidence.'
+                      : item.stockUncertain == null
+                      ? 'Stock evidence has not been assessed by this response.'
+                      : 'Ledger balance; physical observation confidence is separate.',
+                ),
+              if (item.pendingStockQuantity != null)
+                Text(
+                  'Pending chronology: ${item.pendingStockQuantity} ${item.unit} (not added again).',
+                ),
+              if (item.stockLimitations.isNotEmpty)
+                Text('Limitations: ${item.stockLimitations.join(', ')}'),
               if (belongsToHome)
                 Wrap(
                   spacing: 12,

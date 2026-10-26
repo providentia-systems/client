@@ -344,64 +344,55 @@ void main() {
   );
 
   for (final statusCode in <int>[403, 404]) {
-    test('readiness HTTP $statusCode is terminal authorization denial', () {
-      const privateDetail = 'private household membership diagnostics';
-      final gateway = Api17AiGateway(
+    for (final verified in <bool>[false, true]) {
+      Api17AiGateway gateway() => Api17AiGateway(
         client: _client(
           (_) async => _json(<String, Object?>{
-            'type': 'about:blank',
-            'title': statusCode == 403 ? 'Forbidden' : 'Not Found',
+            'type': verified
+                ? 'https://providentia.invalid/problems/sync_home_access_denied'
+                : 'about:blank',
+            'title': 'Unavailable',
+            'requestId': 'synthetic-ai-denial',
             'status': statusCode,
-            'detail': privateDetail,
+            'detail': 'private policy diagnostics',
           }, statusCode: statusCode),
         ),
         mediaReader: _MediaReader(_bytes),
       );
-
-      expect(
-        gateway.readiness(_profile()),
-        throwsA(
-          isA<AiGatewayAuthorizationDeniedException>().having(
-            (error) => error.safeMessage,
-            'safeMessage',
-            isNot(contains(privateDetail)),
-          ),
-        ),
-      );
-    });
-
-    for (final kind in AiExtractionKind.values) {
       test(
-        '${kind.name} extraction HTTP $statusCode is terminal authorization denial',
-        () {
-          const privateDetail = 'private household extraction diagnostics';
-          final gateway = Api17AiGateway(
-            client: _client(
-              (_) async => _json(<String, Object?>{
-                'type': 'about:blank',
-                'title': statusCode == 403 ? 'Forbidden' : 'Not Found',
-                'status': statusCode,
-                'detail': privateDetail,
-              }, statusCode: statusCode),
-            ),
-            mediaReader: _MediaReader(_bytes),
-          );
-
-          final extraction = kind == AiExtractionKind.receipt
-              ? gateway.extractReceipt(_request(kind))
-              : gateway.extractStockPhoto(_request(kind));
-          expect(
-            extraction,
-            throwsA(
-              isA<AiGatewayAuthorizationDeniedException>().having(
-                (error) => error.safeMessage,
-                'safeMessage',
-                isNot(contains(privateDetail)),
-              ),
-            ),
-          );
+        'readiness $statusCode verified membership denial=$verified',
+        () async {
+          if (verified) {
+            await expectLater(
+              gateway().readiness(_profile()),
+              throwsA(isA<AiGatewayAuthorizationDeniedException>()),
+            );
+          } else {
+            final result = await gateway().readiness(_profile());
+            expect(result.state, AiGatewayReadinessState.unavailable);
+            expect(result.safeMessage, isNot(contains('private policy')));
+          }
         },
       );
+      for (final kind in AiExtractionKind.values) {
+        test(
+          '${kind.name} $statusCode verified membership denial=$verified',
+          () async {
+            final extraction = kind == AiExtractionKind.receipt
+                ? gateway().extractReceipt(_request(kind))
+                : gateway().extractStockPhoto(_request(kind));
+            if (verified) {
+              await expectLater(
+                extraction,
+                throwsA(isA<AiGatewayAuthorizationDeniedException>()),
+              );
+            } else {
+              final result = await extraction;
+              expect(result, isA<AiExtractionFailure<Object>>());
+            }
+          },
+        );
+      }
     }
   }
 

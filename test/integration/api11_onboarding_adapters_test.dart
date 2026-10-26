@@ -20,6 +20,54 @@ import 'package:providentia_api_client/providentia_api_client.dart';
 
 void main() {
   test(
+    'browser identity lifecycle consistently selects homeowner cookies',
+    () async {
+      final paths = <String>[];
+      final transport = Api11IdentityTransport(
+        _client((request) async {
+          paths.add(request.url.path);
+          expect(request.headers['X-Providentia-Application'], 'homeowner');
+          expect(request.headers, isNot(contains('Authorization')));
+          return switch (request.url.path) {
+            '/api/v1/auth/email-codes' => _json(<String, Object?>{
+              'bindingToken': _pollToken,
+              'challengeId': _requestId,
+              'expiresAt': '2026-08-09T12:15:00Z',
+              'resendAfterSeconds': 60,
+            }, 202),
+            '/api/v1/auth/email-codes/verify' ||
+            '/api/v1/auth/refresh' => _json(_webSessionJson(), 200),
+            '/api/v1/me' => _json(<String, Object?>{
+              ..._currentUserJson(),
+              'currentSession': <String, Object?>{
+                ...(_currentUserJson()['currentSession']!
+                    as Map<String, Object?>),
+                'transport': 'web',
+              },
+            }, 200),
+            '/api/v1/auth/logout' => _json(<String, Object?>{}, 204),
+            _ => throw StateError('Unexpected identity path'),
+          };
+        }),
+        sessionTransport: ClientSessionTransport.webCookie,
+      );
+      await transport.requestEmailCode(
+        email: 'person@example.test',
+        device: DeviceDescriptor(
+          id: _installationId,
+          name: 'Test web',
+          platform: 'web',
+        ),
+      );
+      await transport.verifyEmailCode(request: _pending(), code: '12345678');
+      await transport.refreshSession();
+      await transport.getCurrentUser(csrfToken: 'csrf-secret');
+      await transport.logout(csrfToken: 'csrf-secret');
+      expect(paths, hasLength(5));
+    },
+  );
+
+  test(
     'email code request binds the originating application and installation',
     () async {
       late Map<String, Object?> body;
@@ -411,6 +459,7 @@ void main() {
       final transport = Api11IdentityTransport(
         _client((request) async {
           expect(request.headers['Authorization'], 'Bearer access-secret');
+          expect(request.headers, isNot(contains('X-Providentia-Application')));
           return _json(<String, Object?>{
             ..._currentUserJson(),
             'displayName': 'Existing Person',
@@ -682,6 +731,7 @@ void main() {
     final client = SessionHttpClient(
       inner: MockClient((request) async {
         expect(request.headers['Authorization'], 'Bearer access-secret');
+        expect(request.headers, isNot(contains('X-Providentia-Application')));
         return http.Response('{}', 200);
       }),
       sessions: manager,
@@ -717,6 +767,7 @@ void main() {
       inner: MockClient((request) async {
         sends++;
         expect(request.headers['Authorization'], 'Bearer access-secret');
+        expect(request.headers, isNot(contains('X-Providentia-Application')));
         return http.Response('{}', sends == 1 ? 401 : 200);
       }),
       sessions: manager,

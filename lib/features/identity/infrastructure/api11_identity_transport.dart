@@ -338,7 +338,11 @@ final class Api11IdentityTransport
         .invokeOperation(
           operationId: operationId,
           pathParameters: pathParameters,
-          headers: headers,
+          headers: <String, String>{
+            ...headers,
+            if (sessionTransport == ClientSessionTransport.webCookie)
+              'X-Providentia-Application': 'homeowner',
+          },
           body: body,
           abortTrigger: abort.future,
         )
