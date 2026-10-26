@@ -336,7 +336,7 @@ void main() {
   );
 
   test(
-    'commit excludes removed rows and then rejects draft maintenance',
+    'commit excludes removed rows and cancellation retains receipt history',
     () async {
       var capture = await draftWithLine();
       final removedId = capture.lines.single.id;
@@ -371,14 +371,16 @@ void main() {
             .rawDescription,
         'Kept line',
       );
-      await expectLater(
-        repository.cancelReceiptDraft(
-          homeId: _home,
-          receiptId: capture.id,
-          expectedRevision: capture.revision,
-        ),
-        throwsA(isA<PurchaseCaptureException>()),
+      await repository.cancelReceiptDraft(
+        homeId: _home,
+        receiptId: capture.id,
+        expectedRevision: capture.revision,
       );
+      final retained =
+          (await repository.watchReceiptCaptures(homeId: _home).first).single;
+      expect(retained.status, PurchaseReceiptStatus.cancelled);
+      expect(retained.removedLines.single.id, removedId);
+      expect(retained.cancellationConfirmed, isFalse);
       await expectLater(
         repository.removeReceiptDraftLine(
           homeId: _home,

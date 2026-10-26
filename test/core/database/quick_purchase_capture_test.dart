@@ -391,9 +391,17 @@ void main() {
         expectedRevision: original.revision,
       );
       expect(await _stock(database), '2.2');
+      final retained = await repository
+          .watchReceiptCaptures(homeId: _home)
+          .first;
+      expect(retained, hasLength(2));
       expect(
-        (await repository.watchReceiptCaptures(homeId: _home).first).single.id,
-        second.entityId,
+        retained.firstWhere((row) => row.id == first.entityId).status,
+        PurchaseReceiptStatus.cancelled,
+      );
+      expect(
+        retained.firstWhere((row) => row.id == second.entityId).status,
+        PurchaseReceiptStatus.draft,
       );
       expect(
         (await repository.watchPurchaseLines(homeId: _home).first)
@@ -583,7 +591,7 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Products entered: NAD 100.00'), findsOneWidget);
-    expect(find.textContaining('Stock added: 5 kg'), findsOneWidget);
+    expect(find.textContaining('Stock effect: 5 kg'), findsOneWidget);
     await tester.ensureVisible(
       find.byKey(const Key('purchase-import-receipt')),
     );

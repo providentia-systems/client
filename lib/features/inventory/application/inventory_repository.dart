@@ -69,3 +69,22 @@ abstract interface class InventoryUnitChangeRepository {
     required String productId,
   });
 }
+
+/// The server AI target must be accepted before a cloud extraction uses its ID.
+abstract interface class InventoryCountAcknowledgementRepository {
+  Future<bool> ensureCountSessionAcknowledged({
+    required String homeId,
+    required String sessionId,
+  });
+}
+
+/// Review accepted evidence through the existing audited synchronization command.
+abstract interface class InventoryCountReviewRepository {
+  Stream<List<StockCountSession>> watchCountSessions({required String homeId});
+  Future<void> reviewCountSession({
+    required StockCountSession session,
+    required StockCountEvidence evidence,
+    required String reason,
+    required List<StockCountLineCorrection> corrections,
+  });
+}

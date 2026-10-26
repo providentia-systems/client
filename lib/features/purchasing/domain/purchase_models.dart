@@ -4,13 +4,14 @@ enum PurchaseSource { recentReceipt, historicalImport }
 
 enum PurchaseDatePrecision { exactDay, monthOnly }
 
-enum PurchaseReceiptStatus { draft, committed }
+enum PurchaseReceiptStatus { draft, committed, cancelled }
 
 enum PurchaseLineApprovalStatus {
   unreviewed,
   approved,
   approvedCatalog,
   unresolved,
+  removed,
 }
 
 /// `pending` is deliberately conservative: child commands may be acknowledged
@@ -271,14 +272,29 @@ final class PurchaseReceiptCapture {
     this.sourceReference,
     this.commitConfirmed = false,
     this.lineCorrectionState,
-  }) : lines = List<PurchaseReceiptLineCapture>.unmodifiable(lines) {
+    this.createdAt,
+    this.recordedAt,
+    this.hasHistoricalStock = false,
+    this.cancellationConfirmed = false,
+    List<PurchaseReceiptLineCapture> removedLines = const [],
+    List<PurchaseReceiptAuditEntry> auditEntries = const [],
+  }) : lines = List<PurchaseReceiptLineCapture>.unmodifiable(lines),
+       removedLines = List<PurchaseReceiptLineCapture>.unmodifiable(
+         removedLines,
+       ),
+       auditEntries = List<PurchaseReceiptAuditEntry>.unmodifiable(
+         auditEntries,
+       ) {
     _requireText(id, 'id');
     _requireText(homeId, 'homeId');
     _requireCurrency(currency);
     if (revision < 1) {
       throw ArgumentError.value(revision, 'revision', 'must be positive');
     }
-    if (lines.any((line) => line.homeId != homeId || line.receiptId != id)) {
+    if ([
+      ...lines,
+      ...removedLines,
+    ].any((line) => line.homeId != homeId || line.receiptId != id)) {
       throw StateError('A receipt capture cannot contain a foreign line.');
     }
   }
@@ -304,6 +320,19 @@ final class PurchaseReceiptCapture {
   final PurchaseReceiptStatus status;
   final PurchaseSynchronizationState synchronizationState;
   final List<PurchaseReceiptLineCapture> lines;
+  final List<PurchaseReceiptLineCapture> removedLines;
+  final List<PurchaseReceiptAuditEntry> auditEntries;
+  final DateTime? createdAt;
+  final DateTime? recordedAt;
+  final bool hasHistoricalStock;
+  final bool cancellationConfirmed;
+
+  bool get purchaseBasisFixed =>
+      status != PurchaseReceiptStatus.draft ||
+      hasHistoricalStock ||
+      lines.any((line) => line.stockApplied) ||
+      removedLines.any((line) => line.stockApplied);
+  bool get emptyAfterCorrection => lines.isEmpty && removedLines.isNotEmpty;
 
   bool get reviewComplete =>
       lines.isNotEmpty && lines.every((line) => line.reviewTerminal);
@@ -312,6 +341,33 @@ final class PurchaseReceiptCapture {
       synchronizationState == PurchaseSynchronizationState.pending;
   bool get commitAwaitingConfirmation =>
       commitAwaitingReadback && !commitConfirmed;
+}
+
+enum PurchaseReceiptAuditState { accepted, pending, failed }
+
+final class PurchaseReceiptAuditEntry {
+  const PurchaseReceiptAuditEntry({
+    required this.id,
+    required this.kind,
+    required this.reason,
+    required this.at,
+    required this.state,
+    this.originalPurchaseDay,
+    this.purchaseDay,
+    this.lineDescription,
+    this.safeFailure,
+    this.recordedLocally = false,
+  });
+  final String id;
+  final String kind;
+  final String reason;
+  final DateTime at;
+  final PurchaseReceiptAuditState state;
+  final String? originalPurchaseDay;
+  final String? purchaseDay;
+  final String? lineDescription;
+  final String? safeFailure;
+  final bool recordedLocally;
 }
 
 final class PurchaseReceiptDraftRequest {

@@ -38,8 +38,17 @@ final class PrivateHomeProductDraft {
     this.homeCategoryId,
     this.globalCategoryId,
     this.unit = 'units',
+    this.clientProductId,
+    this.openingQuantity,
+    this.openingObservedAt,
+    this.openingCountConfirmed = false,
   }) {
     _requireText(homeId, 'homeId');
+    _validateOpeningCount(
+      openingQuantity,
+      openingObservedAt,
+      openingCountConfirmed,
+    );
     if (!householdStockUnits.contains(unit)) {
       throw ArgumentError.value(unit, 'unit', 'Choose a supported stock unit.');
     }
@@ -77,6 +86,10 @@ final class PrivateHomeProductDraft {
   final String? homeCategoryId;
   final String? globalCategoryId;
   final String unit;
+  final String? clientProductId;
+  final double? openingQuantity;
+  final DateTime? openingObservedAt;
+  final bool openingCountConfirmed;
 }
 
 final class CatalogHomeProductDraft {
@@ -88,9 +101,18 @@ final class CatalogHomeProductDraft {
     required this.packSize,
     required this.category,
     this.brand = '',
+    this.clientProductId,
+    this.openingQuantity,
+    this.openingObservedAt,
+    this.openingCountConfirmed = false,
     List<String> aliases = const <String>[],
   }) : aliases = List<String>.unmodifiable(aliases) {
     _requireText(homeId, 'homeId');
+    _validateOpeningCount(
+      openingQuantity,
+      openingObservedAt,
+      openingCountConfirmed,
+    );
     _requireText(productId, 'productId');
     _requireText(packId, 'packId');
     _requireText(canonicalName, 'canonicalName');
@@ -98,7 +120,13 @@ final class CatalogHomeProductDraft {
     _requireText(category, 'category');
   }
 
-  factory CatalogHomeProductDraft.fromItem(InventoryItem item) {
+  factory CatalogHomeProductDraft.fromItem(
+    InventoryItem item, {
+    String? clientProductId,
+    double? openingQuantity,
+    DateTime? openingObservedAt,
+    bool openingCountConfirmed = false,
+  }) {
     final productId = item.productId;
     final packId = item.packId;
     if (item.isHomeProduct ||
@@ -117,6 +145,10 @@ final class CatalogHomeProductDraft {
       category: item.category,
       brand: item.brand,
       aliases: item.aliases,
+      clientProductId: clientProductId,
+      openingQuantity: openingQuantity,
+      openingObservedAt: openingObservedAt,
+      openingCountConfirmed: openingCountConfirmed,
     );
   }
 
@@ -128,6 +160,26 @@ final class CatalogHomeProductDraft {
   final String category;
   final String brand;
   final List<String> aliases;
+  final String? clientProductId;
+  final double? openingQuantity;
+  final DateTime? openingObservedAt;
+  final bool openingCountConfirmed;
+}
+
+void _validateOpeningCount(
+  double? quantity,
+  DateTime? observedAt,
+  bool confirmed,
+) {
+  if (quantity != null &&
+      (!quantity.isFinite ||
+          quantity < 0 ||
+          observedAt == null ||
+          !confirmed)) {
+    throw ArgumentError(
+      'Confirm a physical observation now, with a finite quantity of zero or more.',
+    );
+  }
 }
 
 final class InventoryProductCreationResult {
@@ -185,8 +237,11 @@ final class InventoryItem {
     this.unit = 'units',
     List<String> aliases = const <String>[],
     this.currentQuantity,
+    this.pendingOpeningQuantity,
     this.stockUncertain,
     this.pendingStockQuantity,
+    this.localPendingStockQuantity,
+    this.localStockPendingIsDeferred = false,
     List<String> stockLimitations = const <String>[],
     this.stockCheckpointId,
     this.isHomeProduct = false,
@@ -233,9 +288,14 @@ final class InventoryItem {
   final List<String> aliases;
   final double? currentQuantity;
 
+  /// User-entered partial opening observation awaiting assessed stock readback.
+  final String? pendingOpeningQuantity;
+
   /// Null means chronology evidence was unavailable in this source revision.
   final bool? stockUncertain;
   final String? pendingStockQuantity;
+  final String? localPendingStockQuantity;
+  final bool localStockPendingIsDeferred;
   final List<String> stockLimitations;
   final String? stockCheckpointId;
   final bool isHomeProduct;
@@ -276,8 +336,14 @@ final class InventoryItem {
       currentQuantity: clearQuantity
           ? null
           : (currentQuantity ?? this.currentQuantity),
+      pendingOpeningQuantity: pendingOpeningQuantity,
       stockUncertain: clearQuantity ? null : stockUncertain,
       pendingStockQuantity: clearQuantity ? null : pendingStockQuantity,
+      localPendingStockQuantity: clearQuantity
+          ? null
+          : localPendingStockQuantity,
+      localStockPendingIsDeferred:
+          !clearQuantity && localStockPendingIsDeferred,
       stockLimitations: clearQuantity ? const <String>[] : stockLimitations,
       stockCheckpointId: clearQuantity ? null : stockCheckpointId,
       isHomeProduct: isHomeProduct,
@@ -339,6 +405,7 @@ final class StockCountLine {
     required this.status,
     required this.source,
     this.observedQuantity,
+    this.revision = 0,
     this.unit,
     this.photoId,
     this.possibleDuplicate = false,
@@ -360,6 +427,7 @@ final class StockCountLine {
   final CountLineStatus status;
   final CountSource source;
   final double? observedQuantity;
+  final int revision;
 
   /// Unit captured with this observation; null means unavailable evidence.
   final String? unit;
@@ -379,12 +447,50 @@ final class StockCountLine {
       status: status ?? this.status,
       source: source,
       observedQuantity: observedQuantity ?? this.observedQuantity,
+      revision: revision,
       unit: unit,
       photoId: photoId,
       possibleDuplicate: possibleDuplicate ?? this.possibleDuplicate,
       duplicateReviewed: duplicateReviewed ?? this.duplicateReviewed,
     );
   }
+}
+
+/// Deliberate physical evidence, independent from entry and finishing times.
+final class StockCountEvidence {
+  StockCountEvidence({
+    required this.scopeComplete,
+    required this.reliability,
+    required this.observedAt,
+  }) {
+    if (!const {'reliable', 'partial', 'unassessed'}.contains(reliability) ||
+        (reliability == 'reliable' && !scopeComplete)) {
+      throw ArgumentError('Reliable counts require explicit complete scope.');
+    }
+  }
+  final bool scopeComplete;
+  final String reliability;
+  final DateTime observedAt;
+}
+
+/// An accepted line can be corrected without changing its product or identity.
+final class StockCountLineCorrection {
+  StockCountLineCorrection({
+    required this.id,
+    required this.expectedRevision,
+    required this.quantity,
+  }) {
+    if (id.trim().isEmpty ||
+        expectedRevision < 1 ||
+        !RegExp(r'^(?:0|[1-9]\d{0,8})(?:\.\d{1,8})?$').hasMatch(quantity)) {
+      throw ArgumentError(
+        'A count correction requires its current line revision and nonnegative exact quantity.',
+      );
+    }
+  }
+  final String id;
+  final int expectedRevision;
+  final String quantity;
 }
 
 final class StockCountSession {
@@ -395,6 +501,9 @@ final class StockCountSession {
     required this.startedAt,
     this.status = CountSessionStatus.open,
     this.closedAt,
+    this.revision = 0,
+    this.serverAccepted = false,
+    this.reviewPending = false,
     this.scopeComplete,
     this.reliability,
     this.observedAt,
@@ -417,6 +526,9 @@ final class StockCountSession {
   final DateTime startedAt;
   final CountSessionStatus status;
   final DateTime? closedAt;
+  final int revision;
+  final bool serverAccepted;
+  final bool reviewPending;
 
   /// Null evidence remains unassessed; entry/closing time is not observation time.
   final bool? scopeComplete;
@@ -431,6 +543,25 @@ final class StockCountSession {
 
   Iterable<StockCountLine> get confirmedLines =>
       lines.where((line) => line.status == CountLineStatus.confirmed);
+
+  StockCountSession withEvidence(StockCountEvidence evidence) =>
+      StockCountSession(
+        id: id,
+        homeId: homeId,
+        locationId: locationId,
+        startedAt: startedAt,
+        status: status,
+        closedAt: closedAt,
+        revision: revision,
+        serverAccepted: serverAccepted,
+        reviewPending: reviewPending,
+        scopeComplete: evidence.scopeComplete,
+        reliability: evidence.reliability,
+        observedAt: evidence.observedAt.toUtc(),
+        observedTimezone: observedTimezone,
+        photos: photos,
+        lines: lines,
+      );
 
   StockCountSession attachPhoto(StockPhotoReference photo) {
     _requireOpen();
@@ -520,6 +651,9 @@ final class StockCountSession {
       startedAt: startedAt,
       status: status ?? this.status,
       closedAt: closedAt ?? this.closedAt,
+      revision: revision,
+      serverAccepted: serverAccepted,
+      reviewPending: reviewPending,
       scopeComplete: scopeComplete,
       reliability: reliability,
       observedAt: observedAt,

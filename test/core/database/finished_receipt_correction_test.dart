@@ -231,7 +231,14 @@ void main() {
       expect(balance['quantity'], '-3');
       expect(balance['uncertain'], isTrue);
       expect(balance['pendingQuantity'], '1.5');
-      expect(balance['limitations'], ['No accepted physical checkpoint']);
+      expect(
+        balance['limitations'],
+        contains('No accepted physical checkpoint'),
+      );
+      expect(
+        balance['limitations'],
+        anyElement(contains('not a negative physical count')),
+      );
     },
   );
 

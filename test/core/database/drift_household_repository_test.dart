@@ -723,7 +723,11 @@ void main() {
       expect(result.homeProductId, _createdProductId);
       expect(result.revision, 1);
       expect(result.awaitsServerConfirmation, isTrue);
-      final record = await database.select(database.localRecords).getSingle();
+      final record =
+          await (database.select(database.localRecords)..where(
+                (row) => row.entityType.equals('inventory-home-product'),
+              ))
+              .getSingle();
       expect(record.homeId, _homeId);
       expect(record.entityType, 'inventory-home-product');
       expect(record.entityId, _createdProductId);
@@ -2173,6 +2177,43 @@ void main() {
         deviceId: _deviceId,
         idGenerator: () => operationIds[idIndex++],
       );
+      await repository.replaceCatalogItemMaster(
+        homeId: _homeId,
+        items: [
+          InventoryItem(
+            id: _selectedPackId,
+            homeId: _homeId,
+            productId: _otherProductId,
+            packId: _selectedPackId,
+            canonicalName: 'Flour',
+            packSize: '2 kg',
+            category: 'Baking',
+            unit: 'kg',
+            normalizedBaseAmount: '2000',
+            normalizedBaseUnit: 'g',
+            packStatus: 'published',
+          ),
+        ],
+      );
+      await database
+          .into(database.localRecords)
+          .insert(
+            LocalRecordsCompanion.insert(
+              homeId: _homeId,
+              entityType: 'inventory-home-product',
+              entityId: _productId,
+              payload: jsonEncode({
+                'homeId': _homeId,
+                'productId': _otherProductId,
+                'packId': _selectedPackId,
+                'unit': 'kg',
+                'status': 'active',
+              }),
+              revision: const Value(1),
+              synchronizedAt: Value(now),
+              updatedAt: now,
+            ),
+          );
       final empty = ShoppingList(
         id: _listId,
         homeId: _homeId,
