@@ -59,7 +59,9 @@ extension StockPhotoCountAcquisition on StockPhotoCountController {
   /// Runs camera, gallery, and file-upload acquisitions through the same
   /// preparation, consent, review, and ordinary-count command boundary.
   Future<void> selectAssets(StockPhotoAssetPicker picker) async {
-    if (_disposed || _state.status == StockPhotoCountStatus.accessDenied) {
+    if (_disposed ||
+        _state.status == StockPhotoCountStatus.accessDenied ||
+        _extractionInFlight) {
       return;
     }
     final session = _inventory.state.activeSession;
@@ -236,7 +238,9 @@ extension StockPhotoCountAcquisition on StockPhotoCountController {
   }
 
   Future<void> extract() async {
-    if (_disposed || _state.status == StockPhotoCountStatus.accessDenied) {
+    if (_disposed ||
+        _state.status == StockPhotoCountStatus.accessDenied ||
+        _extractionInFlight) {
       return;
     }
     final session = _inventory.state.activeSession;
@@ -261,6 +265,7 @@ extension StockPhotoCountAcquisition on StockPhotoCountController {
       return;
     }
     final epoch = _accessEpoch;
+    _extractionInFlight = true;
     _setState(
       StockPhotoCountState(
         status: StockPhotoCountStatus.processing,
@@ -268,6 +273,9 @@ extension StockPhotoCountAcquisition on StockPhotoCountController {
         provider: provider,
         privacyMode: route.privacyMode,
         consentConfirmed: true,
+        safeMessage: route.privacyMode == AiPrivacyMode.serverProxyCloud
+            ? 'Confirming this count on the server before analysis.'
+            : null,
       ),
     );
     try {
@@ -278,6 +286,52 @@ extension StockPhotoCountAcquisition on StockPhotoCountController {
         consent: consent,
       );
       route.validate();
+      if (route.privacyMode == AiPrivacyMode.serverProxyCloud) {
+        var acknowledged = false;
+        try {
+          acknowledged = await _inventory.ensureCountSessionAcknowledged(
+            session.id,
+          );
+        } on AiGatewayAuthorizationDeniedException {
+          rethrow;
+        } on AiServerException catch (error) {
+          if (error.kind == AiServerFailureKind.authorizationDenied) rethrow;
+        } catch (_) {
+          // Synchronization can be offline, interrupted or awaiting readback.
+          // None of those outcomes establishes loss of household membership.
+        }
+        if (!_current(epoch)) return;
+        if (activeCountId != session.id) {
+          await _discardPrepared();
+          _fail(
+            'The original count is no longer open. Select photos for the current count.',
+          );
+          return;
+        }
+        if (!acknowledged) {
+          _setState(
+            StockPhotoCountState(
+              status: StockPhotoCountStatus.waitingForCountSession,
+              prepared: prepared,
+              provider: provider,
+              privacyMode: route.privacyMode,
+              consentConfirmed: true,
+              safeMessage:
+                  'The count is not yet confirmed on the server. Reconnect or sign in, then retry. Selected photos stay temporarily in this review; retry uses the same count.',
+            ),
+          );
+          return;
+        }
+        _setState(
+          StockPhotoCountState(
+            status: StockPhotoCountStatus.processing,
+            prepared: prepared,
+            provider: provider,
+            privacyMode: route.privacyMode,
+            consentConfirmed: true,
+          ),
+        );
+      }
       final readiness = await route.gateway.readiness(provider);
       if (!readiness.isReady) {
         throw AiPolicyViolation(
@@ -373,6 +427,8 @@ extension StockPhotoCountAcquisition on StockPhotoCountController {
       if (_current(epoch)) {
         _fail('Stock-photo extraction could not be completed safely.');
       }
+    } finally {
+      _extractionInFlight = false;
     }
   }
 }

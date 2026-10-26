@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:providentia/core/presentation/place_management_dialog.dart';
+import 'package:providentia/core/security/uuid_v4.dart';
 import 'package:providentia/features/inventory/application/home_location_repository.dart';
 import 'package:providentia/features/inventory/application/stock_photo_count_controller.dart';
 import 'package:providentia/features/inventory/domain/inventory_models.dart';
+import 'package:providentia/features/inventory/presentation/count_evidence_dialog.dart';
 import 'package:providentia/features/inventory/presentation/inventory_category_field.dart';
 import 'package:providentia/features/inventory/presentation/inventory_controller.dart';
 import 'package:providentia/features/inventory/presentation/inventory_metadata_dialogs.dart';
@@ -260,21 +262,11 @@ class _InventoryWorkspaceState extends State<InventoryWorkspace> {
     );
   }
 
-  Future<void> _showAddPrivateProduct() async {
-    final draft = await showDialog<PrivateHomeProductDraft>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => _PrivateHomeProductDialog(controller: widget.controller),
-    );
-    if (draft == null || !mounted) return;
-    await widget.controller.createPrivateProduct(
-      privateName: draft.privateName,
-      originalPackText: draft.originalPackText,
-      homeCategoryId: draft.homeCategoryId,
-      globalCategoryId: draft.globalCategoryId,
-      unit: draft.unit,
-    );
-  }
+  Future<void> _showAddPrivateProduct() => showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => _PrivateHomeProductDialog(controller: widget.controller),
+  );
 }
 
 class _PrivateHomeProductDialog extends StatefulWidget {
@@ -288,6 +280,10 @@ class _PrivateHomeProductDialog extends StatefulWidget {
 class _PrivateHomeProductDialogState extends State<_PrivateHomeProductDialog> {
   final _name = TextEditingController();
   final _pack = TextEditingController();
+  final _quantity = TextEditingController();
+  final _clientProductId = UuidV4Generator().call();
+  DateTime? _observedAt;
+  bool _confirmedCount = false;
   String? _safeError;
   String? _categoryId;
   String? _globalCategoryId;
@@ -297,109 +293,318 @@ class _PrivateHomeProductDialogState extends State<_PrivateHomeProductDialog> {
   void dispose() {
     _name.dispose();
     _pack.dispose();
+    _quantity.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: widget.controller,
-    builder: (context, _) => AlertDialog(
-      title: const Text('Add private product'),
-      scrollable: true,
-      content: SizedBox(
-        width: 420,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            const Text(
-              'This product stays private to your home, even when you select a global category.',
-            ),
-            const SizedBox(height: 20),
-            TextField(
-              key: const Key('inventory-private-product-name'),
-              controller: _name,
-              maxLength: 191,
-              decoration: const InputDecoration(labelText: 'Private name'),
-            ),
-            const SizedBox(height: 20),
-            TextField(
-              key: const Key('inventory-private-product-pack'),
-              controller: _pack,
-              maxLength: 191,
-              decoration: const InputDecoration(
-                labelText: 'Original pack text (optional)',
-              ),
-            ),
-            const SizedBox(height: 20),
-            DropdownButtonFormField<String>(
-              key: const Key('inventory-private-product-unit'),
-              initialValue: _unit,
-              isExpanded: true,
-              decoration: const InputDecoration(labelText: 'Stock unit'),
-              items: [
-                for (final unit in householdStockUnits)
-                  DropdownMenuItem(value: unit, child: Text(unit)),
+    builder: (context, _) {
+      final busy = widget.controller.state.productCreationBusy;
+      return PopScope(
+        canPop: !busy,
+        child: AlertDialog(
+          title: const Text('Add private product'),
+          scrollable: true,
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'This product stays private to your home, even when you select a global category.',
+                ),
+                const SizedBox(height: 20),
+                TextField(
+                  key: const Key('inventory-private-product-name'),
+                  controller: _name,
+                  enabled: !busy,
+                  maxLength: 191,
+                  decoration: const InputDecoration(labelText: 'Private name'),
+                ),
+                const SizedBox(height: 20),
+                TextField(
+                  key: const Key('inventory-private-product-pack'),
+                  controller: _pack,
+                  enabled: !busy,
+                  maxLength: 191,
+                  decoration: const InputDecoration(
+                    labelText: 'Original pack text (optional)',
+                  ),
+                ),
+                const SizedBox(height: 20),
+                DropdownButtonFormField<String>(
+                  key: const Key('inventory-private-product-unit'),
+                  initialValue: _unit,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Stock unit'),
+                  items: [
+                    for (final unit in householdStockUnits)
+                      DropdownMenuItem(value: unit, child: Text(unit)),
+                  ],
+                  onChanged: busy
+                      ? null
+                      : (value) {
+                          if (value != null) setState(() => _unit = value);
+                        },
+                ),
+                const SizedBox(height: 20),
+                InventoryCategoryField(
+                  localCategories: widget.controller.homeCategories,
+                  globalCategories: widget.controller.publishedCategories,
+                  localId: _categoryId,
+                  globalId: _globalCategoryId,
+                  enabled: !busy,
+                  onChanged: (local, global) => setState(() {
+                    _categoryId = local;
+                    _globalCategoryId = global;
+                  }),
+                ),
+                const SizedBox(height: 20),
+                _OpeningCountFields(
+                  quantity: _quantity,
+                  unit: _unit,
+                  confirmed: _confirmedCount,
+                  enabled: !busy,
+                  onConfirmed: (value) =>
+                      setState(() => _confirmedCount = value),
+                ),
+                if (_safeError != null) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    _safeError!,
+                    key: const Key('inventory-private-product-validation'),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ],
               ],
-              onChanged: (value) {
-                if (value != null) setState(() => _unit = value);
-              },
             ),
-            const SizedBox(height: 20),
-            InventoryCategoryField(
-              localCategories: widget.controller.homeCategories,
-              globalCategories: widget.controller.publishedCategories,
-              localId: _categoryId,
-              globalId: _globalCategoryId,
-              onChanged: (local, global) => setState(() {
-                _categoryId = local;
-                _globalCategoryId = global;
-              }),
+          ),
+          actions: [
+            TextButton(
+              onPressed: busy ? null : () => Navigator.pop(context),
+              child: const Text('Cancel'),
             ),
-            if (_safeError != null) ...[
-              const SizedBox(height: 12),
-              Text(
-                _safeError!,
-                key: const Key('inventory-private-product-validation'),
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            ],
+            FilledButton(
+              key: const Key('inventory-save-private-product'),
+              onPressed: busy ? null : _save,
+              child: Text(busy ? 'Saving…' : 'Save locally'),
+            ),
           ],
         ),
-      ),
-      actions: <Widget>[
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          key: const Key('inventory-save-private-product'),
-          onPressed: _save,
-          child: const Text('Save locally'),
-        ),
-      ],
-    ),
+      );
+    },
   );
 
-  void _save() {
+  Future<void> _save() async {
     try {
-      final pack = _pack.text.trim();
-      final draft = PrivateHomeProductDraft(
-        homeId: widget.controller.homeId,
+      final quantity = _openingQuantity(_quantity.text, _confirmedCount);
+      if (quantity != null) _observedAt ??= DateTime.now().toUtc();
+      final saved = await widget.controller.createPrivateProduct(
         privateName: _name.text.trim(),
-        originalPackText: pack.isEmpty ? null : pack,
+        originalPackText: _pack.text.trim(),
         homeCategoryId: _categoryId,
         globalCategoryId: _globalCategoryId,
         unit: _unit,
+        clientProductId: _clientProductId,
+        openingQuantity: quantity,
+        openingObservedAt: _observedAt,
+        openingCountConfirmed: _confirmedCount,
       );
-      Navigator.pop(context, draft);
-    } on ArgumentError {
+      if (!mounted) return;
+      if (saved) {
+        Navigator.pop(context);
+      } else {
+        setState(
+          () => _safeError =
+              widget.controller.state.productCreationError ??
+              'The product and opening count could not be saved. Your entry is retained.',
+        );
+      }
+    } on ArgumentError catch (error) {
       setState(
-        () => _safeError =
-            'Enter a private product name of at most 191 characters.',
+        () => _safeError = error.message is String
+            ? error.message as String
+            : 'Check the product and opening quantity.',
       );
     }
   }
+}
+
+class _CatalogHomeProductDialog extends StatefulWidget {
+  const _CatalogHomeProductDialog({
+    required this.controller,
+    required this.item,
+  });
+  final InventoryController controller;
+  final InventoryItem item;
+  @override
+  State<_CatalogHomeProductDialog> createState() =>
+      _CatalogHomeProductDialogState();
+}
+
+class _CatalogHomeProductDialogState extends State<_CatalogHomeProductDialog> {
+  final _quantity = TextEditingController();
+  final _clientProductId = UuidV4Generator().call();
+  DateTime? _observedAt;
+  bool _confirmedCount = false;
+  String? _error;
+  @override
+  void dispose() {
+    _quantity.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: widget.controller,
+    builder: (context, _) {
+      final busy = widget.controller.state.productCreationBusy;
+      return PopScope(
+        canPop: !busy,
+        child: AlertDialog(
+          title: Text('Add ${widget.item.canonicalName}'),
+          scrollable: true,
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text('${widget.item.packSize} · Stock unit: units'),
+                const SizedBox(height: 20),
+                _OpeningCountFields(
+                  quantity: _quantity,
+                  unit: 'units',
+                  confirmed: _confirmedCount,
+                  enabled: !busy,
+                  onConfirmed: (value) =>
+                      setState(() => _confirmedCount = value),
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    _error!,
+                    key: const Key('inventory-catalog-product-validation'),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: busy ? null : () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              key: const Key('inventory-save-catalog-product'),
+              onPressed: busy ? null : _save,
+              child: Text(busy ? 'Saving…' : 'Save locally'),
+            ),
+          ],
+        ),
+      );
+    },
+  );
+
+  Future<void> _save() async {
+    try {
+      final quantity = _openingQuantity(_quantity.text, _confirmedCount);
+      if (quantity != null) _observedAt ??= DateTime.now().toUtc();
+      final saved = await widget.controller.addCatalogProduct(
+        widget.item,
+        clientProductId: _clientProductId,
+        openingQuantity: quantity,
+        openingObservedAt: _observedAt,
+        openingCountConfirmed: _confirmedCount,
+      );
+      if (!mounted) return;
+      if (saved) {
+        Navigator.pop(context);
+      } else {
+        setState(
+          () => _error =
+              widget.controller.state.productCreationError ??
+              'The product and opening count could not be saved. Your entry is retained.',
+        );
+      }
+    } on ArgumentError catch (error) {
+      setState(
+        () => _error = error.message is String
+            ? error.message as String
+            : 'Check the opening quantity.',
+      );
+    }
+  }
+}
+
+class _OpeningCountFields extends StatelessWidget {
+  const _OpeningCountFields({
+    required this.quantity,
+    required this.unit,
+    required this.confirmed,
+    required this.enabled,
+    required this.onConfirmed,
+  });
+  final TextEditingController quantity;
+  final String unit;
+  final bool confirmed;
+  final bool enabled;
+  final ValueChanged<bool> onConfirmed;
+  @override
+  Widget build(BuildContext context) => Column(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      TextField(
+        key: const Key('inventory-opening-quantity'),
+        controller: quantity,
+        enabled: enabled,
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        decoration: InputDecoration(
+          labelText: 'Opening quantity observed now (optional)',
+          suffixText: unit,
+          helperText:
+              'Leave blank to add without a count. Explicit zero records an observed empty stock.',
+          helperMaxLines: 4,
+        ),
+      ),
+      const SizedBox(height: 8),
+      CheckboxListTile(
+        key: const Key('inventory-opening-count-confirmed'),
+        contentPadding: EdgeInsets.zero,
+        value: confirmed,
+        onChanged: enabled ? (value) => onConfirmed(value ?? false) : null,
+        title: const Text('I observed this product’s quantity now.'),
+        subtitle: const Text(
+          'This records one product as partial count evidence. Other products are omitted; this observation does not certify complete home stock.',
+        ),
+      ),
+    ],
+  );
+}
+
+double? _openingQuantity(String text, bool confirmed) {
+  if (text.trim().isEmpty) return null;
+  final quantity = double.tryParse(text.trim());
+  if (quantity == null || !quantity.isFinite || quantity < 0) {
+    throw ArgumentError(
+      'Enter a finite opening quantity of zero or more, or leave it blank.',
+    );
+  }
+  if (!confirmed) {
+    throw ArgumentError(
+      'Confirm that you observed this product’s quantity now, or leave the opening quantity blank.',
+    );
+  }
+  return quantity;
 }
 
 class _CountSessionBar extends StatelessWidget {
@@ -438,44 +643,121 @@ class _CountSessionBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final active = controller.state.activeSession;
-    if (active == null) {
-      return FilledButton.icon(
-        key: const Key('start-stock-count'),
-        onPressed: () => _startCount(context),
-        icon: const Icon(Icons.fact_check_outlined),
-        label: const Text('Start manual stock count'),
-      );
-    }
-    return Card(
-      color: Theme.of(context).colorScheme.primaryContainer,
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Wrap(
-          alignment: WrapAlignment.spaceBetween,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          spacing: 8,
-          runSpacing: 8,
-          children: <Widget>[
-            const Text(
-              'Observations await server chronology checks. '
-              'Finishing does not certify or replace the displayed stock.',
+    final history = controller.countHistory.where(
+      (session) => session.status != CountSessionStatus.open,
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (active == null)
+          FilledButton.icon(
+            key: const Key('start-stock-count'),
+            onPressed: () => _startCount(context),
+            icon: const Icon(Icons.fact_check_outlined),
+            label: const Text('Start manual stock count'),
+          )
+        else
+          Card(
+            color: Theme.of(context).colorScheme.primaryContainer,
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('${active.confirmedLines.length} products counted'),
+                  Text(
+                    active.serverAccepted
+                        ? 'Server accepted'
+                        : 'Pending server acceptance',
+                  ),
+                  Text(
+                    active.locationId == 'primary'
+                        ? 'Whole-home scope'
+                        : 'Selected-location scope',
+                  ),
+                  Text(
+                    'Evidence: ${active.reliability ?? 'unassessed'} · '
+                    '${active.scopeComplete == true ? 'Complete scope declared' : 'Scope completeness not confirmed'}',
+                  ),
+                  const Text(
+                    'Review the actual observation time and evidence when finishing. '
+                    'Unlisted products stay unchanged; observations do not overwrite stock locally.',
+                  ),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      OutlinedButton(
+                        onPressed: controller.cancelCount,
+                        child: const Text('Cancel'),
+                      ),
+                      FilledButton(
+                        key: const Key('finish-stock-count'),
+                        onPressed: active.lines.isEmpty
+                            ? null
+                            : () => showCountEvidenceDialog(
+                                context: context,
+                                controller: controller,
+                                session: active,
+                              ),
+                        child: const Text('Review and finish count'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
-            Text(
-              '${active.confirmedLines.length} products counted',
-              style: Theme.of(context).textTheme.titleSmall,
+          ),
+        if (controller.countNotice != null)
+          Padding(
+            padding: const EdgeInsets.all(8),
+            child: Text(controller.countNotice!),
+          ),
+        if (controller.countError != null)
+          Padding(
+            padding: const EdgeInsets.all(8),
+            child: Text(controller.countError!),
+          ),
+        if (history.isNotEmpty) ...[
+          const Padding(
+            padding: EdgeInsets.only(top: 8),
+            child: Text('Count history and evidence'),
+          ),
+          for (final session in history)
+            Card(
+              child: ListTile(
+                title: Text(
+                  '${session.status == CountSessionStatus.closed ? 'Finished count' : 'Cancelled count'} · '
+                  '${session.confirmedLines.length} products',
+                ),
+                subtitle: Text(
+                  '${session.serverAccepted ? 'Server accepted revision ${session.revision}' : 'Pending server acceptance'}'
+                  '${session.reviewPending ? ' · Audited review pending' : ''} · '
+                  '${session.reliability ?? 'unassessed'} · '
+                  '${session.scopeComplete == true ? 'Complete scope' : 'Partial or unassessed scope'}\n'
+                  '${session.observedAt == null ? 'Observation time unavailable; evidence remains unassessed' : 'Observed ${session.observedAt!.toUtc().toIso8601String()}'}'
+                  '${session.observedTimezone == null ? '' : ' · ${session.observedTimezone}'}',
+                ),
+                trailing:
+                    controller.canReviewCounts &&
+                        session.serverAccepted &&
+                        !session.reviewPending &&
+                        session.status == CountSessionStatus.closed
+                    ? TextButton(
+                        onPressed: controller.countBusy
+                            ? null
+                            : () => showCountEvidenceDialog(
+                                context: context,
+                                controller: controller,
+                                session: session,
+                                acceptedReview: true,
+                              ),
+                        child: const Text('Review evidence'),
+                      )
+                    : null,
+              ),
             ),
-            OutlinedButton(
-              onPressed: controller.cancelCount,
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              key: const Key('finish-stock-count'),
-              onPressed: active.lines.isEmpty ? null : controller.closeCount,
-              child: const Text('Finish count'),
-            ),
-          ],
-        ),
-      ),
+        ],
+      ],
     );
   }
 }
@@ -534,9 +816,18 @@ class _InventoryRow extends StatelessWidget {
                       ? 'Stock evidence has not been assessed by this response.'
                       : 'Ledger balance; physical observation confidence is separate.',
                 ),
+              if (item.pendingOpeningQuantity != null)
+                Text(
+                  'Opening observation: ${item.pendingOpeningQuantity} ${item.unit} (partial); awaiting stock review/server readback.',
+                ),
               if (item.pendingStockQuantity != null)
                 Text(
                   'Pending chronology: ${item.pendingStockQuantity} ${item.unit} (not added again).',
+                ),
+              if (item.localPendingStockQuantity != null)
+                Text(
+                  'Unsynchronized purchase effect: ${item.localPendingStockQuantity} ${item.unit}. '
+                  '${item.localStockPendingIsDeferred ? 'Current stock awaits authoritative count chronology; this effect is not added locally.' : 'Displayed stock includes a local estimate until server readback.'}',
                 ),
               if (item.stockLimitations.isNotEmpty)
                 Text('Limitations: ${item.stockLimitations.join(', ')}'),
@@ -548,7 +839,9 @@ class _InventoryRow extends StatelessWidget {
                   children: [
                     Text(
                       item.currentQuantity == null
-                          ? 'Not counted'
+                          ? item.pendingOpeningQuantity == null
+                                ? 'Not counted'
+                                : 'Stock balance awaiting review'
                           : '${item.currentQuantity!.toStringAsFixed(_decimals(item.currentQuantity!))} ${item.unit}',
                     ),
                     if (countSessionActive &&
@@ -570,7 +863,14 @@ class _InventoryRow extends StatelessWidget {
                     onPressed:
                         controller.canAddCatalogProduct &&
                             !controller.state.productCreationBusy
-                        ? () => controller.addCatalogProduct(item)
+                        ? () => showDialog<void>(
+                            context: context,
+                            barrierDismissible: false,
+                            builder: (_) => _CatalogHomeProductDialog(
+                              controller: controller,
+                              item: item,
+                            ),
+                          )
                         : null,
                     child: const Text('Add to home'),
                   ),
@@ -613,27 +913,29 @@ class _InventoryRow extends StatelessWidget {
     if (confirmed == true) await controller.removeCountForItem(item);
   }
 
-  Future<void> _editQuantity(BuildContext context) async {
-    final result = await showDialog<double>(
-      context: context,
-      builder: (_) => _InventoryQuantityDialog(
-        item: item,
-        countSessionActive: countSessionActive,
-      ),
-    );
-    if (result == null) return;
-    if (countSessionActive) {
-      await controller.recordManualCount(item: item, observedQuantity: result);
-    } else {
-      await controller.adjustQuantity(
-        item: item,
-        locationId: 'primary',
-        observedQuantity: result,
-        // The user is recording observed stock, not classifying a movement.
-        reason: 'Stock count correction',
-      );
-    }
-  }
+  Future<void> _editQuantity(BuildContext context) => showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => _InventoryQuantityDialog(
+      item: item,
+      countSessionActive: countSessionActive,
+      save: (quantity) async {
+        if (countSessionActive) {
+          await controller.recordManualCount(
+            item: item,
+            observedQuantity: quantity,
+          );
+        } else {
+          await controller.adjustQuantity(
+            item: item,
+            locationId: 'primary',
+            observedQuantity: quantity,
+            reason: 'Stock count correction',
+          );
+        }
+      },
+    ),
+  );
 
   int _decimals(double value) => value == value.roundToDouble() ? 0 : 2;
 }
@@ -642,9 +944,11 @@ class _InventoryQuantityDialog extends StatefulWidget {
   const _InventoryQuantityDialog({
     required this.item,
     required this.countSessionActive,
+    required this.save,
   });
   final InventoryItem item;
   final bool countSessionActive;
+  final Future<void> Function(double) save;
   @override
   State<_InventoryQuantityDialog> createState() =>
       _InventoryQuantityDialogState();
@@ -652,6 +956,8 @@ class _InventoryQuantityDialog extends StatefulWidget {
 
 class _InventoryQuantityDialogState extends State<_InventoryQuantityDialog> {
   late final TextEditingController _quantity;
+  final _focus = FocusNode();
+  bool _busy = false;
   String? _error;
 
   @override
@@ -660,63 +966,103 @@ class _InventoryQuantityDialogState extends State<_InventoryQuantityDialog> {
     _quantity = TextEditingController(
       text: widget.item.currentQuantity?.toString() ?? '',
     );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _focus.requestFocus();
+      _quantity.selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: _quantity.text.length,
+      );
+    });
   }
 
   @override
   void dispose() {
+    _focus.dispose();
     _quantity.dispose();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: Text(
-      widget.countSessionActive
-          ? 'Record count'
-          : 'Adjust ${widget.item.canonicalName}',
-    ),
-    scrollable: true,
-    content: SizedBox(
-      width: 420,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          TextField(
-            key: const Key('inventory-quantity-input'),
-            controller: _quantity,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: InputDecoration(
-              labelText: 'Observed quantity',
-              suffixText: widget.item.unit,
-            ),
-          ),
-          if (_error != null) ...[
+  Widget build(BuildContext context) => PopScope(
+    canPop: !_busy,
+    child: AlertDialog(
+      title: Text(
+        widget.countSessionActive
+            ? 'Record count: ${widget.item.canonicalName}'
+            : 'Adjust ${widget.item.canonicalName}',
+      ),
+      scrollable: true,
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Text('${widget.item.packSize} · Stock unit: ${widget.item.unit}'),
             const SizedBox(height: 12),
-            Text(
-              _error!,
-              key: const Key('inventory-adjustment-validation'),
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            TextField(
+              key: const Key('inventory-quantity-input'),
+              controller: _quantity,
+              focusNode: _focus,
+              autofocus: true,
+              enabled: !_busy,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              decoration: InputDecoration(
+                labelText: 'Observed quantity',
+                suffixText: widget.item.unit,
+              ),
             ),
+            if (_error != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                _error!,
+                key: const Key('inventory-adjustment-validation'),
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ],
           ],
-        ],
+        ),
       ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: _busy ? null : () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _busy ? null : _save,
+          child: Text(_busy ? 'Saving…' : 'Save'),
+        ),
+      ],
     ),
-    actions: <Widget>[
-      TextButton(
-        onPressed: () => Navigator.pop(context),
-        child: const Text('Cancel'),
-      ),
-      FilledButton(onPressed: _save, child: const Text('Save')),
-    ],
   );
 
-  void _save() {
+  Future<void> _save() async {
     final parsed = double.tryParse(_quantity.text.trim());
     if (parsed == null || !parsed.isFinite || parsed < 0) {
       setState(() => _error = 'Enter a finite quantity of zero or more.');
       return;
     }
-    Navigator.pop(context, parsed);
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await widget.save(parsed);
+      if (mounted) Navigator.pop(context);
+    } on InventoryUnitChangeException catch (failure) {
+      if (mounted) setState(() => _error = failure.safeMessage);
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => _error =
+              'The quantity could not be saved. Your entry is retained. Refresh this home and retry.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 }

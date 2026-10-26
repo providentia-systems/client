@@ -122,6 +122,113 @@ void main() {
     },
   );
 
+  for (final catalog in [false, true]) {
+    testWidgets(
+      '${catalog ? 'catalog' : 'private'} optional zero retains input and creation identity on failed save',
+      (tester) async {
+        final repository = _CreationInventoryRepository()
+          ..failuresRemaining = 1;
+        final controller = InventoryController(
+          repository: repository,
+          homeId: 'home-a',
+        );
+        await tester.pumpWidget(
+          _TestApp(child: InventoryWorkspace(controller: controller)),
+        );
+        repository.items.add(
+          catalog
+              ? [
+                  InventoryItem(
+                    id: 'pack-a',
+                    homeId: 'home-a',
+                    canonicalName: 'Rice',
+                    packSize: '1 kg',
+                    category: 'Food',
+                    productId: 'product-a',
+                    packId: 'pack-a',
+                  ),
+                ]
+              : [],
+        );
+        repository.session.add(null);
+        await tester.pumpAndSettle();
+        if (catalog) {
+          await tester.tap(find.text('Item master'));
+          await tester.pumpAndSettle();
+          await tester.tap(
+            find.byKey(const Key('inventory-add-catalog-pack-a')),
+          );
+        } else {
+          await tester.tap(
+            find.byKey(const Key('inventory-add-private-product')),
+          );
+        }
+        await tester.pumpAndSettle();
+        if (!catalog) {
+          await tester.enterText(
+            find.byKey(const Key('inventory-private-product-name')),
+            'Rice',
+          );
+        }
+        final opening = find.byKey(const Key('inventory-opening-quantity'));
+        await tester.ensureVisible(opening);
+        await tester.enterText(opening, '0');
+        final save = find.byKey(
+          Key(
+            catalog
+                ? 'inventory-save-catalog-product'
+                : 'inventory-save-private-product',
+          ),
+        );
+        await tester.tap(save);
+        await tester.pumpAndSettle();
+        expect(
+          find.textContaining('Confirm that you observed this product'),
+          findsOneWidget,
+        );
+        expect(repository.creationRequestIds, isEmpty);
+        await tester.ensureVisible(
+          find.byKey(const Key('inventory-opening-count-confirmed')),
+        );
+        await tester.tap(
+          find.byKey(const Key('inventory-opening-count-confirmed')),
+        );
+        await tester.tap(save);
+        await tester.pumpAndSettle();
+        expect(
+          find.descendant(
+            of: find.byType(AlertDialog),
+            matching: find.text(
+              'The product and dependent count could not be queued.',
+            ),
+          ),
+          findsOneWidget,
+        );
+        expect(tester.widget<TextField>(opening).controller!.text, '0');
+        await tester.tap(save);
+        await tester.pumpAndSettle();
+        expect(repository.creationRequestIds, hasLength(2));
+        expect(repository.creationRequestIds.toSet(), hasLength(1));
+        if (catalog) {
+          expect(repository.catalogDrafts.single.openingQuantity, 0);
+          expect(repository.catalogDrafts.single.openingCountConfirmed, isTrue);
+        } else {
+          expect(repository.drafts.single.privateName, 'Rice');
+          expect(repository.drafts.single.openingQuantity, 0);
+          expect(repository.drafts.single.openingCountConfirmed, isTrue);
+        }
+        expect(
+          find.textContaining(
+            'product creation and stock confirmation are pending synchronization.',
+          ),
+          findsOneWidget,
+        );
+        controller.dispose();
+        await repository.close();
+      },
+    );
+  }
+
   test(
     'controller fails closed when creation capability is unavailable',
     () async {
@@ -180,7 +287,10 @@ void main() {
     );
 
     await tester.tap(find.byKey(const Key('inventory-add-catalog-pack-a')));
-    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(repository.catalogDrafts, isEmpty);
+    await tester.tap(find.byKey(const Key('inventory-save-catalog-product')));
+    await tester.pumpAndSettle();
 
     expect(repository.catalogDrafts, hasLength(1));
     expect(repository.catalogDrafts.single.homeId, 'home-a');
@@ -290,6 +400,19 @@ final class _CreationInventoryRepository extends _InventoryRepository
   final List<CatalogHomeProductDraft> catalogDrafts =
       <CatalogHomeProductDraft>[];
 
+  int failuresRemaining = 0;
+  final creationRequestIds = <String?>[];
+
+  void _attempt(String? requestId) {
+    creationRequestIds.add(requestId);
+    if (failuresRemaining > 0) {
+      failuresRemaining--;
+      throw const InventoryProductCreationException(
+        'The product and dependent count could not be queued.',
+      );
+    }
+  }
+
   @override
   bool get supportsPrivateHomeProductCreation => true;
 
@@ -300,6 +423,7 @@ final class _CreationInventoryRepository extends _InventoryRepository
   Future<InventoryProductCreationResult> createPrivateHomeProduct(
     PrivateHomeProductDraft draft,
   ) async {
+    _attempt(draft.clientProductId);
     drafts.add(draft);
     return const InventoryProductCreationResult(
       homeProductId: 'private-product-a',
@@ -312,6 +436,7 @@ final class _CreationInventoryRepository extends _InventoryRepository
   Future<InventoryProductCreationResult> createCatalogHomeProduct(
     CatalogHomeProductDraft draft,
   ) async {
+    _attempt(draft.clientProductId);
     catalogDrafts.add(draft);
     return const InventoryProductCreationResult(
       homeProductId: 'catalog-product-a',

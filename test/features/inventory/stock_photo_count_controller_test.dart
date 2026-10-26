@@ -58,6 +58,191 @@ void main() {
     },
   );
 
+  test(
+    'server extraction waits for acknowledgement and suppresses overlapping analysis',
+    () async {
+      final harness = _Harness();
+      await harness.openCount();
+      await harness.stock.selectPhotos();
+      harness.stock.confirmTransmission();
+      final acknowledgement = Completer<bool>();
+      harness.repository.acknowledgement = () => acknowledgement.future;
+
+      final extraction = harness.stock.extract();
+      await Future<void>.delayed(Duration.zero);
+      expect(harness.stock.state.status, StockPhotoCountStatus.processing);
+      expect(harness.repository.acknowledgedSessionIds, <String>[
+        harness.sessionId,
+      ]);
+      expect(harness.gateway.readinessCalls, 0);
+      expect(harness.gateway.extractionCalls, 0);
+      await harness.stock.extract();
+      expect(harness.repository.acknowledgedSessionIds, hasLength(1));
+
+      acknowledgement.complete(true);
+      await extraction;
+      expect(harness.stock.state.status, StockPhotoCountStatus.review);
+      expect(harness.gateway.readinessCalls, 1);
+      expect(harness.gateway.extractionCalls, 1);
+      expect(harness.gateway.lastRequest!.targetId, harness.sessionId);
+      expect(harness.repository.saved, hasLength(1));
+      expect(harness.authorizationDenials, 0);
+      harness.dispose();
+    },
+  );
+
+  test(
+    'offline acknowledgement retries preserve photos, consent and the original count',
+    () async {
+      final harness = _Harness();
+      await harness.openCount();
+      await harness.stock.selectPhotos();
+      harness.stock.confirmTransmission();
+      final prepared = harness.stock.state.prepared;
+      final consent = harness.stock.confirmedConsent;
+      harness.repository.acknowledged = false;
+
+      await harness.stock.extract();
+      await harness.stock.extract();
+      expect(
+        harness.stock.state.status,
+        StockPhotoCountStatus.waitingForCountSession,
+      );
+      expect(harness.stock.state.prepared, same(prepared));
+      expect(harness.stock.confirmedConsent, same(consent));
+      expect(harness.stock.state.consentConfirmed, isTrue);
+      expect(harness.preparer.hasPreparedBytes, isTrue);
+      expect(harness.preparer.discarded, isEmpty);
+      expect(harness.gateway.readinessCalls, 0);
+      expect(harness.gateway.extractionCalls, 0);
+      expect(harness.repository.acknowledgedSessionIds, <String>[
+        harness.sessionId,
+        harness.sessionId,
+      ]);
+      expect(harness.repository.saved, hasLength(1));
+      expect(harness.authorizationDenials, 0);
+
+      harness.repository.acknowledged = true;
+      await harness.stock.extract();
+      expect(harness.stock.state.status, StockPhotoCountStatus.review);
+      expect(harness.gateway.extractionCalls, 1);
+      expect(harness.gateway.lastRequest!.targetId, harness.sessionId);
+      expect(harness.repository.saved, hasLength(1));
+      expect(harness.authorizationDenials, 0);
+      harness.dispose();
+    },
+  );
+
+  test(
+    'an interrupted count upload remains retryable without losing photos or access',
+    () async {
+      final harness = _Harness();
+      await harness.openCount();
+      await harness.stock.selectPhotos();
+      harness.stock.confirmTransmission();
+      harness.repository.acknowledgement = () =>
+          Future<bool>.error(StateError('synthetic offline upload'));
+
+      await harness.stock.extract();
+      expect(
+        harness.stock.state.status,
+        StockPhotoCountStatus.waitingForCountSession,
+      );
+      expect(harness.stock.state.safeMessage, contains('Reconnect or sign in'));
+      expect(
+        harness.stock.state.safeMessage,
+        isNot(contains('synthetic offline upload')),
+      );
+      expect(harness.preparer.hasPreparedBytes, isTrue);
+      expect(harness.authorizationDenials, 0);
+      expect(harness.gateway.lastRequest, isNull);
+
+      harness.repository.acknowledgement = null;
+      await harness.stock.extract();
+      expect(harness.stock.state.status, StockPhotoCountStatus.review);
+      expect(harness.gateway.extractionCalls, 1);
+      expect(harness.repository.saved, hasLength(1));
+      harness.dispose();
+    },
+  );
+
+  test(
+    'cancelling during acknowledgement prevents transmission to the abandoned count',
+    () async {
+      final harness = _Harness();
+      await harness.openCount();
+      await harness.stock.selectPhotos();
+      harness.stock.confirmTransmission();
+      final acknowledgement = Completer<bool>();
+      harness.repository.acknowledgement = () => acknowledgement.future;
+      final extraction = harness.stock.extract();
+      await Future<void>.delayed(Duration.zero);
+
+      await harness.inventory.cancelCount();
+      await Future<void>.delayed(Duration.zero);
+      acknowledgement.complete(true);
+      await extraction;
+      expect(harness.gateway.readinessCalls, 0);
+      expect(harness.gateway.extractionCalls, 0);
+      expect(harness.preparer.hasPreparedBytes, isFalse);
+      expect(harness.stock.state.status, StockPhotoCountStatus.idle);
+      expect(harness.authorizationDenials, 0);
+      expect(
+        harness.repository.saved.where(
+          (session) => session.status == CountSessionStatus.open,
+        ),
+        hasLength(1),
+      );
+      harness.dispose();
+    },
+  );
+
+  testWidgets('waiting photo review exposes a retry using the same count', (
+    tester,
+  ) async {
+    final harness = _Harness();
+    harness.preparer.previewBytes = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII=',
+    );
+    await harness.openCount();
+    await harness.stock.selectPhotos();
+    harness.stock.confirmTransmission();
+    harness.repository.acknowledged = false;
+    await harness.stock.extract();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: StockPhotoCountPanel(controller: harness.stock),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('not yet confirmed on the server'),
+      findsOneWidget,
+    );
+    expect(
+      find.text('Retry count synchronization and analysis'),
+      findsOneWidget,
+    );
+    expect(find.text('Discard photos'), findsOneWidget);
+    expect(harness.gateway.extractionCalls, 0);
+
+    harness.repository.acknowledged = true;
+    await tester.ensureVisible(find.byKey(const Key('stock-photo-extract')));
+    await tester.tap(find.byKey(const Key('stock-photo-extract')));
+    await tester.pumpAndSettle();
+    expect(harness.stock.state.status, StockPhotoCountStatus.review);
+    expect(harness.gateway.extractionCalls, 1);
+    expect(harness.gateway.lastRequest!.targetId, harness.sessionId);
+    expect(harness.repository.saved, hasLength(1));
+    expect(tester.takeException(), isNull);
+    harness.dispose();
+  });
+
   test('explicit acquisition sources share the stock-photo workflow', () async {
     final harness = _Harness();
     await harness.openCount();
@@ -439,6 +624,7 @@ void main() {
         base64Encode(List<int>.filled(16, 2)),
       ]);
       expect(repository.movements, isEmpty);
+      expect(repository.acknowledgedSessionIds, isEmpty);
       stock.dispose();
       inventory.dispose();
       repository.dispose();
@@ -746,7 +932,33 @@ final class _ServerReviewer {
   }
 }
 
-final class _InventoryRepository implements InventoryProductCreationRepository {
+final class _InventoryRepository
+    implements
+        InventoryProductCreationRepository,
+        InventoryCountAcknowledgementRepository {
+  bool acknowledged = true;
+  Future<bool> Function()? acknowledgement;
+  final List<String> acknowledgedSessionIds = <String>[];
+
+  @override
+  Future<bool> ensureCountSessionAcknowledged({
+    required String homeId,
+    required String sessionId,
+  }) async {
+    expect(homeId, 'home-1');
+    expect(
+      saved.any(
+        (session) =>
+            session.homeId == homeId &&
+            session.id == sessionId &&
+            session.status == CountSessionStatus.open,
+      ),
+      isTrue,
+    );
+    acknowledgedSessionIds.add(sessionId);
+    return acknowledgement == null ? acknowledged : await acknowledgement!();
+  }
+
   final _items = StreamController<List<InventoryItem>>.broadcast();
   final _sessions = StreamController<StockCountSession?>.broadcast();
   final List<StockCountSession> saved = <StockCountSession>[];
@@ -903,6 +1115,7 @@ final class _MediaPreparer
   List<AiMediaAsset> lastAssets = const <AiMediaAsset>[];
   final List<PreparedMediaBatch> discarded = <PreparedMediaBatch>[];
   bool hasPreparedBytes = false;
+  Uint8List? previewBytes;
 
   @override
   Future<PreparedMediaBatch> prepare({
@@ -929,12 +1142,14 @@ final class _MediaPreparer
   }
 
   @override
-  Future<Uint8List> read(PreparedAiMedia media) async => Uint8List.fromList(
-    List<int>.filled(
-      media.byteLength,
-      media.sourceMediaId == 'source-a' ? 1 : 2,
-    ),
-  );
+  Future<Uint8List> read(PreparedAiMedia media) async =>
+      previewBytes ??
+      Uint8List.fromList(
+        List<int>.filled(
+          media.byteLength,
+          media.sourceMediaId == 'source-a' ? 1 : 2,
+        ),
+      );
 }
 
 final class _Gateway implements AiProviderGateway {
@@ -953,9 +1168,12 @@ final class _Gateway implements AiProviderGateway {
   @override
   final AiGatewayRoute route;
   AiExtractionRequest? lastRequest;
+  int readinessCalls = 0;
+  int extractionCalls = 0;
 
   @override
   Future<AiGatewayReadiness> readiness(AiProviderProfile profile) async {
+    readinessCalls++;
     if (readinessError case final error?) throw error;
     return const AiGatewayReadiness.ready();
   }
@@ -969,6 +1187,7 @@ final class _Gateway implements AiProviderGateway {
   Future<AiExtractionResult<StockPhotoProposal>> extractStockPhoto(
     AiExtractionRequest request,
   ) async {
+    extractionCalls++;
     lastRequest = request;
     if (extractionError case final error?) throw error;
     return AiExtractionSuccess<StockPhotoProposal>(

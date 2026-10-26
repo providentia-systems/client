@@ -36,9 +36,10 @@ final class StockPhotoCountPanel extends StatelessWidget {
                 const SizedBox(height: 6),
                 const Text(
                   'Choose 1–8 images. They are sanitized and kept only for '
-                  'this review. Nothing changes inventory until you match a '
-                  'home product, confirm a quantity, and explicitly finish '
-                  'the ordinary count.',
+                  'this review. Photo proposals do not certify stock. Match a '
+                  'home product and confirm the observed quantity, then review '
+                  'the ordinary count before finishing it. Server acceptance '
+                  'and the count evidence determine its stock effect.',
                 ),
                 if (state.safeMessage != null) ...<Widget>[
                   const SizedBox(height: 8),
@@ -103,6 +104,7 @@ final class StockPhotoCountPanel extends StatelessWidget {
       case StockPhotoCountStatus.processing:
         return const <Widget>[Center(child: CircularProgressIndicator())];
       case StockPhotoCountStatus.awaitingConsent:
+      case StockPhotoCountStatus.waitingForCountSession:
         final provider = state.provider;
         return <Widget>[
           _PreviewStrip(controller: controller, media: state.prepared!.media),
@@ -146,7 +148,11 @@ final class StockPhotoCountPanel extends StatelessWidget {
               key: const Key('stock-photo-extract'),
               onPressed: controller.extract,
               icon: const Icon(Icons.auto_awesome_outlined),
-              label: const Text('Analyze selected photos'),
+              label: Text(
+                state.status == StockPhotoCountStatus.waitingForCountSession
+                    ? 'Retry count synchronization and analysis'
+                    : 'Analyze selected photos',
+              ),
             ),
           TextButton(
             onPressed: controller.abandonPhotos,

@@ -115,6 +115,24 @@ void main() {
         await tester.ensureVisible(find.text('Apple'));
         await tester.tap(find.text('Apple'));
         await tester.pumpAndSettle();
+        final quantityInput = tester.widget<TextField>(
+          find.byKey(const Key('inventory-quantity-input')),
+        );
+        expect(quantityInput.focusNode!.hasFocus, isTrue);
+        expect(
+          quantityInput.controller!.selection,
+          TextSelection(
+            baseOffset: 0,
+            extentOffset: quantityInput.controller!.text.length,
+          ),
+        );
+        // The initial select-all runs once; later cursor movement is retained.
+        quantityInput.controller!.selection = const TextSelection.collapsed(
+          offset: 0,
+        );
+        await tester.pump();
+        expect(quantityInput.controller!.selection.isCollapsed, isTrue);
+        expect(find.text('1 kg · Stock unit: units'), findsOneWidget);
         expect(find.text('Reason for adjustment'), findsNothing);
         expect(find.text('Stock count correction'), findsNothing);
         expect(
@@ -145,6 +163,35 @@ void main() {
       },
     );
   }
+  testWidgets('quantity save failure retains typed amount for a safe retry', (
+    tester,
+  ) async {
+    final repository = _Repository()..failNextAdjustment = true;
+    await _workspace(tester, repository);
+    await tester.ensureVisible(find.text('Apple'));
+    await tester.tap(find.text('Apple'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('inventory-quantity-input')),
+      '8.25',
+    );
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Your entry is retained.'), findsOneWidget);
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('inventory-quantity-input')))
+          .controller!
+          .text,
+      '8.25',
+    );
+    expect(repository.adjustments, isEmpty);
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(repository.adjustments.single.observedQuantity, 8.25);
+    expect(find.byType(AlertDialog), findsNothing);
+  });
+
   testWidgets(
     'quantity validation and cancellation do not write stock; zero is accepted',
     (tester) async {
@@ -326,6 +373,7 @@ class _Repository
   final created = <PrivateHomeProductDraft>[];
   final edits = <Map<String, Object?>>[];
   final adjustments = <ManualAdjustmentIntent>[];
+  bool failNextAdjustment = false;
   @override
   bool get supportsInventoryMetadata => true;
   @override
@@ -358,6 +406,10 @@ class _Repository
     required ManualAdjustmentIntent intent,
     required StockMovement? movement,
   }) async {
+    if (failNextAdjustment) {
+      failNextAdjustment = false;
+      throw StateError('Synthetic validation failure');
+    }
     adjustments.add(intent);
   }
 

@@ -427,6 +427,13 @@ void main() {
         find.byKey(const ValueKey<String>('finish-stock-count')),
       );
       await tester.pumpAndSettle();
+      expect(find.text('Finish and review count'), findsOneWidget);
+      await tester.enterText(
+        find.byKey(const Key('count-observed-at')),
+        '2026-07-31T09:00:00+02:00',
+      );
+      await tester.tap(find.byKey(const Key('save-count-evidence')));
+      await tester.pumpAndSettle();
 
       expect(
         repository.savedSessions.map(
