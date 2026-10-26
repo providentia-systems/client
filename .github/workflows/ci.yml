@@ -198,6 +198,10 @@ jobs:
       - name: Resolve pinned dependencies
         run: flutter pub get --enforce-lockfile
 
+      - name: Embed installed web source and contract identity
+        if: matrix.target == 'web'
+        run: node tool/write_web_build_provenance.mjs
+
       - name: Build target
         run: ${{ matrix.command }}
 

@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 
 import {randomUUID} from 'node:crypto';
-import {writeFile} from 'node:fs/promises';
+import {readFile, writeFile} from 'node:fs/promises';
 import process from 'node:process';
 import {chromium, firefox, webkit} from 'playwright';
+import {browserRequestHeaders, HOMEOWNER_SESSION_COOKIES} from './browser_session_contract.mjs';
+import {validateInstalledPair} from './installed_pair_contract.mjs';
 
 import {
   extractEmailCode,
@@ -15,11 +17,7 @@ const API_TIMEOUT_MS = 15_000;
 const WEB_IDLE_SECONDS = 30 * 24 * 60 * 60;
 const EMAIL_CODE_TTL_MS = 10 * 60 * 1000;
 const EMAIL_CODE_TTL_TOLERANCE_MS = 30_000;
-const SESSION_COOKIE_NAMES = [
-  'providentia_access',
-  'providentia_refresh',
-  'providentia_csrf',
-];
+const SESSION_COOKIE_NAMES = HOMEOWNER_SESSION_COOKIES;
 
 const [targetUrl, browserName, evidenceFile] = process.argv.slice(2);
 if (!targetUrl || !browserName || !evidenceFile) {
@@ -59,6 +57,11 @@ try {
   const response = await page.goto(target.href, {waitUntil: 'networkidle'});
   assert(response?.ok(), `Initial page returned HTTP ${response?.status() ?? 'unknown'}.`);
   evidence.checks.initialLoad = true;
+  const provenanceResponse = await context.request.get(new URL('build-provenance.json', target).href);
+  assert(provenanceResponse.ok(), 'The installed Client build-provenance.json is unavailable; deploy a build that records its exact source.');
+  evidence.installedClient = await provenanceResponse.json();
+  assert(/^[0-9a-f]{40}$/u.test(evidence.installedClient?.clientRevision ?? ''), 'The installed Client source revision is incomplete.');
+  evidence.checks.clientBuildIdentity = true;
 
   const manifestHref = await page.locator('link[rel="manifest"]').getAttribute('href');
   assert(manifestHref, 'PWA manifest link is missing.');
@@ -185,6 +188,16 @@ async function verifyEmailCodeAuthentication({
     'E2E_MAILBOX_TIMEOUT_SECONDS',
   ) * 1000;
   const proof = {installationId: randomUUID()};
+  const legacyCookies = ['access', 'refresh', 'csrf'].map((credential) => ({
+    name: `providentia_${credential}`,
+    value: `synthetic-legacy-${randomUUID()}`,
+    url: apiBase.origin,
+    httpOnly: credential !== 'csrf',
+    secure: apiBase.protocol === 'https:',
+    sameSite: 'Strict',
+  }));
+  await context.addCookies(legacyCookies);
+  record.checks.legacySessionTransitionPrepared = true;
   const requestStartedAt = new Date();
   const start = await browserJson(page, new URL('/api/v1/auth/email-codes', apiBase), {
     method: 'POST',
@@ -264,6 +277,13 @@ async function verifyEmailCodeAuthentication({
   );
   record.checks.authenticatedBootstrap = true;
   record.checks.homeMembership = true;
+  assert(isUuid(exchange.body.activeHomeId), 'Installed acceptance requires the synthetic account to have an active authorized home.');
+  const diagnostics = await browserJson(page,
+    new URL(`/api/v1/homes/${exchange.body.activeHomeId}/sync/diagnostics`, apiBase), {method: 'GET'});
+  assert(diagnostics.status === 200 && diagnostics.json, 'Authenticated deployment diagnostics are unavailable.');
+  const supported = JSON.parse(await readFile(new URL('../../contracts/supported-backend.json', import.meta.url), 'utf8'));
+  record.supportedPairing = validateInstalledPair(record.installedClient, diagnostics.body, supported);
+  record.checks.backendBuildContractAndMigrations = true;
 
   const secondTab = await context.newPage();
   try {
@@ -279,6 +299,20 @@ async function verifyEmailCodeAuthentication({
     await secondTab.close();
   }
   record.checks.cookieSessionSharedAcrossTabs = true;
+  const otherApplicationRead = await browserJson(page, new URL('/api/v1/me', apiBase), {
+    method: 'GET', application: 'admin',
+  });
+  assert([401, 403].includes(otherApplicationRead.status),
+    'A separate application context consumed homeowner credentials.');
+  const otherApplicationLogout = await browserJson(page, new URL('/api/v1/auth/logout', apiBase), {
+    method: 'POST', application: 'admin',
+    headers: {'X-CSRF-Token': exchange.body.csrfToken}, body: {},
+  });
+  assert([204, 401, 403].includes(otherApplicationLogout.status),
+    'The separate-context logout probe returned an unexpected result.');
+  await authenticatedBootstrap(page, apiBase);
+  record.checks.applicationCookieIsolation = true;
+
 
   const refresh = await browserJson(page, new URL('/api/v1/auth/refresh', apiBase), {
     method: 'POST',
@@ -300,8 +334,8 @@ async function verifyEmailCodeAuthentication({
   const refreshedCookies = await sessionCookies(context, apiBase);
   validateSessionCookies(refreshedCookies, apiBase.protocol === 'https:');
   assert(
-    exchangeCookies.get('providentia_refresh')?.value
-      !== refreshedCookies.get('providentia_refresh')?.value,
+    exchangeCookies.get('providentia_homeowner_refresh')?.value
+      !== refreshedCookies.get('providentia_homeowner_refresh')?.value,
     'Refresh did not rotate the persistent session cookie.',
   );
   await authenticatedBootstrap(page, apiBase);
@@ -325,6 +359,12 @@ async function verifyEmailCodeAuthentication({
     homesAfterLogout.status === 401 || homesAfterLogout.status === 403,
     `Post-logout home read returned HTTP ${homesAfterLogout.status}.`,
   );
+  const allAfterLogout = new Map((await context.cookies(apiBase.href)).map((cookie) => [cookie.name, cookie.value]));
+  for (const legacy of legacyCookies) {
+    assert(allAfterLogout.get(legacy.name) === legacy.value,
+      'Homeowner logout altered a separate legacy session namespace.');
+  }
+  record.checks.legacySessionTransitionPreservesOtherNamespaces = true;
   record.checks.logoutRevocation = true;
   record.checks.authentication = true;
 }
@@ -454,12 +494,12 @@ function validateSessionCookies(cookies, requireSecure) {
     assert(cookie.sameSite === 'Strict', `The ${name} session cookie is not SameSite=Strict.`);
     if (requireSecure) assert(cookie.secure, `The ${name} session cookie is not Secure.`);
   }
-  assert(cookies.get('providentia_access').httpOnly, 'The access cookie is not HttpOnly.');
-  assert(cookies.get('providentia_refresh').httpOnly, 'The refresh cookie is not HttpOnly.');
-  assert(!cookies.get('providentia_csrf').httpOnly, 'The CSRF cookie must remain readable by the client.');
+  assert(cookies.get('providentia_homeowner_access').httpOnly, 'The access cookie is not HttpOnly.');
+  assert(cookies.get('providentia_homeowner_refresh').httpOnly, 'The refresh cookie is not HttpOnly.');
+  assert(!cookies.get('providentia_homeowner_csrf').httpOnly, 'The CSRF cookie must remain readable by the client.');
 }
 
-async function browserJson(page, url, {method, headers = {}, body}) {
+async function browserJson(page, url, {method, headers = {}, body, application = 'homeowner'}) {
   return page.evaluate(async ({requestUrl, requestMethod, requestHeaders, requestBody, timeoutMs}) => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -467,11 +507,7 @@ async function browserJson(page, url, {method, headers = {}, body}) {
       const response = await fetch(requestUrl, {
         method: requestMethod,
         credentials: 'include',
-        headers: {
-          Accept: 'application/json',
-          ...(requestBody === undefined ? {} : {'Content-Type': 'application/json'}),
-          ...requestHeaders,
-        },
+        headers: requestHeaders,
         body: requestBody === undefined ? undefined : JSON.stringify(requestBody),
         signal: controller.signal,
       });
@@ -497,7 +533,7 @@ async function browserJson(page, url, {method, headers = {}, body}) {
   }, {
     requestUrl: url.href,
     requestMethod: method,
-    requestHeaders: headers,
+    requestHeaders: browserRequestHeaders({application, body, headers}),
     requestBody: body,
     timeoutMs: API_TIMEOUT_MS,
   });
