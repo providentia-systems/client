@@ -13,21 +13,23 @@ local `providentia_api_client` Dart package.
 
 ## Current pin
 
-- Client OpenAPI version: `2.2.0`
-- Contract SHA-256:
-  `ef5714a6298326d6fb449b966117e8b61c74de67d1bfc274ad8ec431aecd802d`
-- Canonical backend operations: 235
-- Generated homeowner operations: 167
+- Client OpenAPI version: `2.4.0`
+- Contract SHA-256: `2b7b38490dc42ad967cfff7e32dd56db41d30842a7d39845b9beecb7f7d4e254`
+- Canonical backend operations: 244
+- Generated homeowner operations: 176
 
-API 2.2.0 adds household product overrides, stock-unit labels, global-category
-selection and independent canonical metadata to the existing inventory
-operations. It retains numeric email-code authentication, country onboarding,
-account aliases and media, scoped access groups, operator approval and
-per-member permission overrides. The generator rejects retired password and
-login-link routes. Existing installations must use a compatible backend;
-deploy backend #25 and its migration before the matching Client #21 and
-Admin #13 builds. See [Household workflows](household-workflows.md) for
-migration, unit-label semantics and production acceptance requirements.
+The exact artifact is paired with backend PR #39. The production report adapter
+preserves nullable stock evidence, uncertainty, pending quantities and limitations.
+Monthly purchase totals remain nullable when pricing is incomplete; available
+amounts appear as an explicitly incomplete known subtotal. An explicit declared
+receipt total retains discounts and takes precedence over product line subtotals.
+
+Deploy the matching backend before this Client. Backend CI pins this Client commit
+and exercises real HTTP, handwritten report parsing and durable Drift/outbox
+recovery. These checks do not establish that an installed browser/native build has
+been upgraded or that a particular user's pending queue has recovered. Finished
+receipt correction controls and other requirements in linked issues remain
+separate work; generated endpoint availability alone does not implement a workflow.
 
 Application-owned adapters compose:
 

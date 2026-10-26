@@ -13,7 +13,7 @@ architecture tests, and a full CI build matrix.
 Phases 5–8 add household inventory, count sessions, purchase history, shopping
 lists, AI review policies, private catalog data, explainable suggestions, price
 intelligence, reporting, and evaluation. The client pins the backend's API
-`2.2.0` contract. The exact operation set is pinned in the contract lock;
+`2.4.0` contract. The exact operation set is pinned in the contract lock;
 the default-deny homeowner generator exposes only authorized household operations. Admin,
 operator, billing-operator, catalog-moderation, and platform-administrator
 operations are excluded from the generated homeowner package and runtime. The
