@@ -131,7 +131,7 @@ function validateContract(document) {
   }
   if (
     document.info?.title !== 'Providentia API' ||
-    document.info?.version !== '2.2.0'
+    document.info?.version !== '2.4.0'
   ) {
     throw new Error('Unexpected API identity or version.');
   }
@@ -191,8 +191,8 @@ function validateContract(document) {
       operationIds.add(operation.operationId);
     }
   }
-  if (operationIds.size !== 236) {
-    throw new Error(`Expected the API 2.2 surface, found ${operationIds.size} operations.`);
+  if (operationIds.size !== 244) {
+    throw new Error(`Expected the API 2.4.0 surface, found ${operationIds.size} operations.`);
   }
 
   // Human authentication uses bound email codes. Password and approval-link

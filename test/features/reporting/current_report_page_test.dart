@@ -26,7 +26,7 @@ void main() {
       expect(requested, hasLength(4));
       expect(controller.status, ReportingStatus.ready);
       expect(find.text('Rice'), findsOneWidget);
-      expect(find.textContaining('Quantity 5.25'), findsOneWidget);
+      expect(find.textContaining('Ledger quantity 5.25'), findsOneWidget);
       expect(find.text('2026-10 · NAD 25'), findsOneWidget);
       expect(find.text('2026-10 · USD 10'), findsOneWidget);
       expect(find.textContaining('1 receipt · Market'), findsOneWidget);
@@ -49,6 +49,46 @@ void main() {
       expect(find.text('Rice'), findsNothing);
       expect(find.text('2026-10 · NAD 25'), findsNothing);
       expect(find.text('Load reports'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'unknown stock and partial spend stay visible without invented zero',
+    (tester) async {
+      final controller = _controller((request) async {
+        final body = _body(request.url.path);
+        final rows = body['data']! as List<Object?>;
+        if (request.url.path.endsWith('/inventory')) {
+          (rows.single! as Map<String, Object?>).addAll({
+            'factualQuantity': null,
+            'stockUnit': 'kg',
+            'quantityState': 'unknown',
+            'uncertain': false,
+            'pendingQuantity': null,
+            'limitations': ['No stock evidence'],
+          });
+        }
+        if (request.url.path.endsWith('/purchases')) {
+          (rows.first! as Map<String, Object?>).addAll({
+            'total': null,
+            'knownSubtotal': '12.50',
+            'pricingComplete': false,
+            'amountSource': 'partial',
+          });
+        }
+        return _json(body);
+      });
+      addTearDown(controller.dispose);
+      await controller.load();
+      await _show(tester, controller);
+      expect(controller.status, ReportingStatus.ready);
+      expect(find.textContaining('Quantity unknown'), findsOneWidget);
+      expect(find.textContaining('No stock evidence'), findsOneWidget);
+      expect(find.text('2026-10 · Total unknown'), findsOneWidget);
+      expect(find.textContaining('Known subtotal NAD 12.50'), findsOneWidget);
+      expect(find.textContaining('Incomplete pricing'), findsOneWidget);
+      expect(find.textContaining('NAD null'), findsNothing);
+      expect(tester.takeException(), isNull);
     },
   );
 

@@ -92,6 +92,112 @@ void main() {
     },
   );
 
+  for (final state in ['unknown', 'recorded', 'uncertain']) {
+    test(
+      'preserves $state inventory evidence and signed ledger values',
+      () async {
+        final repository = GeneratedHouseholdReportRepository(
+          _client((request) async {
+            final body = _reportForPath(request.url.path);
+            if (request.url.path.endsWith('/inventory')) {
+              final row =
+                  (body['data']! as List).single as Map<String, Object?>;
+              row.addAll({
+                'factualQuantity': state == 'unknown'
+                    ? null
+                    : state == 'recorded'
+                    ? '0'
+                    : '-1.25',
+                'stockUnit': 'kg',
+                'quantityState': state,
+                'uncertain': state == 'uncertain',
+                'pendingQuantity': state == 'unknown' ? null : '0.25',
+                'limitations': ['Synthetic chronology limitation'],
+                'checkpointId': _movementId,
+              });
+            }
+            return _json(body);
+          }),
+        );
+        final fact = (await repository.load(
+          homeId: _homeId,
+        )).inventoryFacts.single;
+        expect(fact.quantityState, state);
+        expect(
+          fact.factualQuantity,
+          state == 'unknown'
+              ? null
+              : state == 'recorded'
+              ? '0'
+              : '-1.25',
+        );
+        expect(fact.stockUnit, 'kg');
+        expect(fact.uncertain, state == 'uncertain');
+        expect(fact.pendingQuantity, state == 'unknown' ? null : '0.25');
+        expect(fact.limitations, ['Synthetic chronology limitation']);
+        expect(fact.checkpointId, _movementId);
+      },
+    );
+  }
+
+  for (final source in ['declared', 'derived', 'mixed', 'partial', 'unknown']) {
+    test(
+      'preserves $source prices without inventing a complete zero',
+      () async {
+        final complete = !['partial', 'unknown'].contains(source);
+        final repository = GeneratedHouseholdReportRepository(
+          _client((request) async {
+            final body = _reportForPath(request.url.path);
+            if (request.url.path.endsWith('/purchases')) {
+              final row =
+                  (body['data']! as List).single as Map<String, Object?>;
+              row.addAll({
+                'total': complete ? '0' : null,
+                'knownSubtotal': source == 'unknown' ? null : '0',
+                'pricingComplete': complete,
+                'amountSource': source,
+                'completeReceiptCount': complete ? 2 : 0,
+                'partialReceiptCount': source == 'partial' ? 2 : 0,
+                'unknownReceiptCount': source == 'unknown' ? 2 : 0,
+                'declaredReceiptCount': source == 'declared' ? 2 : 0,
+                'derivedReceiptCount': source == 'derived' ? 2 : 0,
+              });
+            }
+            return _json(body);
+          }),
+        );
+        final total = (await repository.load(
+          homeId: _homeId,
+        )).purchaseTotals.single;
+        expect(total.total, complete ? '0' : null);
+        expect(total.knownSubtotal, source == 'unknown' ? null : '0');
+        expect(total.pricingComplete, complete);
+        expect(total.amountSource, source);
+      },
+    );
+  }
+
+  test(
+    'incompatible evidence discriminator is rejected at adapter boundary',
+    () async {
+      final repository = GeneratedHouseholdReportRepository(
+        _client((request) async {
+          final body = _reportForPath(request.url.path);
+          if (request.url.path.endsWith('/inventory')) {
+            ((body['data']! as List).single
+                    as Map<String, Object?>)['quantityState'] =
+                'verified';
+          }
+          return _json(body);
+        }),
+      );
+      await expectLater(
+        repository.load(homeId: _homeId),
+        throwsA(isA<ReportRepositoryException>()),
+      );
+    },
+  );
+
   for (final instant in <String, String>{
     '2026-08-01 00:00:00': '2026-08-01T00:00:00Z',
     '2026-03-08 01:59:59': '2026-03-08T01:59:59Z',

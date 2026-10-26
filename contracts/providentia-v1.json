@@ -2,9 +2,9 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Providentia API",
-    "version": "2.2.0",
+    "version": "2.4.0",
     "summary": "Authoritative Providentia backend contract through the production-readiness programme",
-    "description": "Providentia pre-release API: email-code authentication, account/home/administrator groups, household stock, operator access, profiles and country onboarding. Billing collection remains a future capability."
+    "description": "Providentia pre-release API: email-code authentication, account/home/administrator groups, household stock, operator access, profiles and country onboarding. Billing collection remains a future capability. API 2.3 adds audited calendar-day and physical-count corrections, chronological stock uncertainty, pack linking and original-binding synchronization recovery diagnostics. API 2.4 adds atomic audited finished-receipt line corrections, complete/partial/unknown purchase totals, evidence-aware inventory reports and resolved operator stock metadata. Report amount nullability requires matching Client adapters."
   },
   "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
   "servers": [
@@ -18,6 +18,12 @@
     },
     {
       "cookieAuth": []
+    },
+    {
+      "homeownerCookieAuth": []
+    },
+    {
+      "adminCookieAuth": []
     }
   ],
   "paths": {
@@ -84,7 +90,12 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       }
     },
     "/metrics": {
@@ -151,7 +162,12 @@
           "401": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       }
     },
     "/api/v1/auth/logout": {
@@ -183,7 +199,12 @@
           "403": {
             "description": "Web CSRF proof rejected; cookies cleared"
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       }
     },
     "/api/v1/auth/sessions": {
@@ -214,7 +235,12 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       }
     },
     "/api/v1/auth/sessions/{sessionId}": {
@@ -226,6 +252,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/SessionId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -260,7 +289,12 @@
           "401": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       }
     },
     "/api/v1/homes": {
@@ -291,7 +325,12 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       },
       "post": {
         "operationId": "createHome",
@@ -322,7 +361,12 @@
           "422": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       }
     },
     "/api/v1/homes/{homeId}": {
@@ -334,6 +378,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -362,6 +409,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -409,6 +459,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -437,6 +490,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -484,6 +540,9 @@
             "schema": {
               "$ref": "#/components/schemas/HomeRole"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -540,6 +599,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -579,6 +641,9 @@
           },
           {
             "$ref": "#/components/parameters/UserId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -637,6 +702,9 @@
               "minimum": 0
             },
             "description": "The membership revision the caller last read; the removal fails with a conflict when it changed."
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -667,6 +735,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -688,6 +759,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -739,6 +813,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -776,6 +853,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -817,6 +897,9 @@
           },
           {
             "$ref": "#/components/parameters/OwnershipTransferId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -851,6 +934,9 @@
           },
           {
             "$ref": "#/components/parameters/OwnershipTransferId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -885,6 +971,9 @@
           },
           {
             "$ref": "#/components/parameters/OwnershipTransferId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -916,6 +1005,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -953,6 +1045,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -1020,6 +1115,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -1076,7 +1174,12 @@
           "401": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       }
     },
     "/api/v1/me/home-invitations/{invitationId}/accept": {
@@ -1089,6 +1192,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeInvitationId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -1161,6 +1267,9 @@
               "minimum": 0,
               "default": 0
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -1186,6 +1295,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -1212,6 +1324,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -1259,6 +1374,9 @@
           },
           {
             "$ref": "#/components/parameters/Offset"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -1293,6 +1411,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -1346,6 +1467,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -1484,6 +1608,9 @@
           },
           {
             "$ref": "#/components/parameters/Offset"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -1560,6 +1687,9 @@
           },
           {
             "$ref": "#/components/parameters/Offset"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -1605,6 +1735,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -1650,6 +1783,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -1714,6 +1850,9 @@
               "type": "integer",
               "minimum": 1
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -1811,6 +1950,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -1874,6 +2016,9 @@
               "minLength": 8,
               "maxLength": 128
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -1934,6 +2079,9 @@
           },
           {
             "$ref": "#/components/parameters/CatalogImportId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -1965,6 +2113,9 @@
           },
           {
             "$ref": "#/components/parameters/CatalogImportId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -2020,7 +2171,12 @@
           "409": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       }
     },
     "/api/v1/account/erasure-requests": {
@@ -2043,7 +2199,12 @@
           "409": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       }
     },
     "/api/v1/account/data-governance-requests": {
@@ -2058,6 +2219,9 @@
           },
           {
             "$ref": "#/components/parameters/Offset"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -2094,6 +2258,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -2125,6 +2292,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -2162,6 +2332,9 @@
           },
           {
             "$ref": "#/components/parameters/Offset"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -2204,6 +2377,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -2244,6 +2420,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -2291,6 +2470,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -2345,7 +2527,12 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       }
     },
     "/api/v1/operator/billing/plans": {
@@ -2368,7 +2555,12 @@
           "404": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       },
       "post": {
         "operationId": "createBillingPlan",
@@ -2402,7 +2594,12 @@
           "422": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       }
     },
     "/api/v1/operator/billing/plans/{planId}": {
@@ -2414,6 +2611,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/PlanId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -2455,6 +2655,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/PlanId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -2496,6 +2699,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/PriceId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -2545,6 +2751,9 @@
                 "hosted_card"
               ]
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -2585,6 +2794,9 @@
               "type": "string",
               "pattern": "^[a-z][a-z0-9_.-]{1,63}$"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -2653,7 +2865,12 @@
           "422": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       }
     },
     "/api/v1/operator/billing/homes/{homeId}/overrides": {
@@ -2665,6 +2882,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -2722,6 +2942,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -2743,6 +2966,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -2774,6 +3000,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -2827,6 +3056,9 @@
                 "hosted_card"
               ]
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -2879,6 +3111,9 @@
           },
           {
             "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -2937,6 +3172,9 @@
               "maximum": 250,
               "default": 250
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -2986,6 +3224,9 @@
               "maximum": 250,
               "default": 250
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -3017,6 +3258,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -3061,6 +3305,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -3104,6 +3351,9 @@
               "type": "boolean",
               "default": false
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -3147,6 +3397,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -3244,6 +3497,9 @@
               "minimum": 0,
               "default": 0
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -3282,6 +3538,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -3374,6 +3633,9 @@
               "minimum": 0,
               "default": 0
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -3424,6 +3686,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -3495,6 +3760,9 @@
               "minimum": 0,
               "default": 0
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -3540,6 +3808,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -3593,6 +3864,9 @@
               "minimum": 0,
               "default": 0
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -3636,6 +3910,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -3689,6 +3966,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -3742,6 +4022,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -3798,6 +4081,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -3805,14 +4091,14 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ExpectedRevisionRequest"
+                "$ref": "#/components/schemas/CloseStockCountRequest"
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "Count committed as ledger corrections",
+            "description": "Physical count closed with explicit evidence assessment and a refreshed chronological absolute balance; no purchase or consumption is invented.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3828,6 +4114,9 @@
             "$ref": "#/components/responses/Problem"
           },
           "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
             "$ref": "#/components/responses/Problem"
           }
         }
@@ -3851,6 +4140,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -3960,6 +4252,9 @@
               "minimum": 0,
               "default": 0
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -4003,6 +4298,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -4056,6 +4354,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -4085,7 +4386,7 @@
         "tags": [
           "Purchasing"
         ],
-        "description": "Update draft metadata, or correct store, notes and total after purchases have affected stock. Purchase date and currency are fixed once stock is applied; store corrections do not create stock movements.",
+        "description": "Update draft metadata or store, notes and total after stock application/completion. Preserve the calendar purchase day during unchanged saves. Use correctReceiptPurchaseDate for an audited date correction after stock application; currency remains fixed. Notes-only edits do not change stock.",
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
@@ -4098,6 +4399,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -4146,7 +4450,7 @@
         "tags": [
           "Purchasing"
         ],
-        "description": "Cancel a draft receipt and reverse any immediately applied purchase lines atomically. Parent receipt revision increments once.",
+        "description": "Cancel a draft or committed receipt atomically using the expected receipt revision, preserving original evidence and recording effective-date purchase reversals without duplicate stock effects.",
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
@@ -4159,6 +4463,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -4212,6 +4519,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -4273,6 +4583,9 @@
               "type": "boolean",
               "default": false
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -4332,6 +4645,9 @@
               "maximum": 3650,
               "default": 90
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -4340,7 +4656,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/PurchaseSummary"
                 }
               }
             }
@@ -4375,6 +4691,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -4437,6 +4756,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -4493,6 +4815,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -4552,6 +4877,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -4596,6 +4924,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -4643,6 +4974,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -4699,6 +5033,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -4745,6 +5082,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -4810,6 +5150,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -4850,6 +5193,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -4887,6 +5233,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -4922,6 +5271,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -4977,6 +5329,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -5030,6 +5385,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -5060,6 +5418,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -5100,6 +5461,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -5156,6 +5520,9 @@
               "type": "string",
               "maxLength": 36
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -5210,6 +5577,9 @@
               "type": "string",
               "maxLength": 36
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -5257,6 +5627,9 @@
               "type": "string",
               "maxLength": 36
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -5304,6 +5677,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -5333,6 +5709,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -5380,6 +5759,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -5520,6 +5902,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -5579,6 +5964,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -5634,6 +6022,9 @@
               "type": "integer",
               "minimum": 0
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -5695,6 +6086,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -5753,6 +6147,9 @@
               "type": "integer",
               "minimum": 0
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -5810,6 +6207,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -5839,6 +6239,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -5916,6 +6319,9 @@
               "minimum": 1,
               "maximum": 1000
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -5970,6 +6376,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -6009,6 +6418,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -6042,6 +6454,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -6085,6 +6500,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -6122,6 +6540,9 @@
               "type": "string",
               "pattern": "^[a-f0-9]{64}$"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -6206,6 +6627,9 @@
           },
           {
             "$ref": "#/components/parameters/Offset"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -6261,7 +6685,12 @@
           "422": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       }
     },
     "/api/v1/catalog-admin/workbench": {
@@ -6305,6 +6734,9 @@
               "minimum": 0,
               "default": 0
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -6348,6 +6780,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -6401,6 +6836,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -6459,6 +6897,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -6536,7 +6977,12 @@
           "422": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       }
     },
     "/api/v1/catalog-admin/merges": {
@@ -6578,7 +7024,12 @@
           "422": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       }
     },
     "/api/v1/catalog-admin/merges/{mergeId}/reverse": {
@@ -6596,6 +7047,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -6651,6 +7105,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -6691,6 +7148,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -6728,6 +7188,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -6795,6 +7258,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -6841,6 +7307,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -6926,6 +7395,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -6970,6 +7442,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -7074,6 +7549,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -7111,6 +7589,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -7189,6 +7670,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -7226,6 +7710,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -7234,7 +7721,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HomeReport"
+                  "$ref": "#/components/schemas/InventoryReport"
                 }
               }
             }
@@ -7278,6 +7765,9 @@
               "type": "string",
               "format": "date"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -7286,7 +7776,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HomeReport"
+                  "$ref": "#/components/schemas/PurchaseReport"
                 }
               }
             }
@@ -7312,6 +7802,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -7346,6 +7839,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -7390,6 +7886,9 @@
               "type": "boolean",
               "default": false
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -7420,6 +7919,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -7478,6 +7980,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -7536,6 +8041,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -7603,6 +8111,9 @@
           },
           {
             "$ref": "#/components/parameters/Offset"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -7635,6 +8146,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/UserId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -7668,6 +8182,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/UserId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -7753,7 +8270,12 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       }
     },
     "/api/v1/auth/email-codes/verify": {
@@ -7803,7 +8325,12 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       }
     },
     "/api/v1/me/profile": {
@@ -7842,7 +8369,12 @@
           "429": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       },
       "patch": {
         "operationId": "updateAccountProfile",
@@ -7889,7 +8421,12 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       }
     },
     "/api/v1/me/onboarding": {
@@ -7938,7 +8475,12 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       }
     },
     "/api/v1/me/emails/codes": {
@@ -7987,7 +8529,12 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       }
     },
     "/api/v1/me/emails/verify": {
@@ -8036,7 +8583,12 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       }
     },
     "/api/v1/me/emails/{emailId}/primary": {
@@ -8084,6 +8636,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -8143,6 +8698,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -8203,7 +8761,12 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       }
     },
     "/api/v1/me/security-codes/verify": {
@@ -8252,7 +8815,12 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       }
     },
     "/api/v1/admin/access/catalog": {
@@ -8291,7 +8859,12 @@
           "429": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       }
     },
     "/api/v1/admin/access/groups": {
@@ -8339,6 +8912,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ]
       },
@@ -8387,7 +8963,12 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       }
     },
     "/api/v1/admin/access/groups/{groupId}": {
@@ -8435,6 +9016,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -8467,6 +9051,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -8571,6 +9158,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -8636,6 +9226,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ]
       }
@@ -8677,7 +9270,12 @@
             "$ref": "#/components/responses/Problem"
           }
         },
-        "security": []
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       }
     },
     "/api/v1/countries/{countryCode}/policy": {
@@ -8726,6 +9324,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "security": []
@@ -8800,6 +9401,9 @@
             "schema": {
               "type": "integer"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "security": []
@@ -8874,6 +9478,9 @@
             "schema": {
               "type": "integer"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "security": []
@@ -8915,7 +9522,12 @@
           "429": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       }
     },
     "/api/v1/admin/countries/{countryCode}": {
@@ -8964,6 +9576,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ]
       },
@@ -9011,6 +9626,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -9070,6 +9688,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ]
       },
@@ -9119,7 +9740,12 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       }
     },
     "/api/v1/admin/privacy-policies/{policyId}": {
@@ -9168,6 +9794,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -9200,6 +9829,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -9287,7 +9919,12 @@
           "429": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       },
       "post": {
         "operationId": "requestReferenceUpdate",
@@ -9325,7 +9962,12 @@
           "429": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       }
     },
     "/api/v1/me/home-invitations/{invitationId}/decline": {
@@ -9366,6 +10008,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -9433,6 +10078,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ]
       },
@@ -9488,6 +10136,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -9555,6 +10206,9 @@
             "schema": {
               "type": "integer"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ]
       }
@@ -9605,6 +10259,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ]
       }
@@ -9670,8 +10327,12 @@
             "schema": {
               "type": "integer"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
-        ]
+        ],
+        "description": "Returns original record fields. For collection=stock each row additionally follows OperatorStockRecord. Balance rows are preserved even when product or pack references are missing; this read never repairs or edits stock."
       }
     },
     "/api/v1/admin/administrators": {
@@ -9710,7 +10371,12 @@
           "429": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       }
     },
     "/api/v1/admin/administrators/{userId}/review": {
@@ -9758,6 +10424,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -9817,6 +10486,9 @@
             "schema": {
               "type": "integer"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ]
       }
@@ -9866,6 +10538,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ]
       },
@@ -9913,6 +10588,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -9976,6 +10654,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ]
       },
@@ -10016,6 +10697,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -10066,6 +10750,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -10120,7 +10807,12 @@
           "429": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       },
       "put": {
         "operationId": "putOwnAvatar",
@@ -10160,7 +10852,12 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       },
       "delete": {
         "operationId": "deleteOwnAvatar",
@@ -10200,7 +10897,12 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       }
     },
     "/api/v1/users/{userId}/avatar": {
@@ -10252,6 +10954,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ]
       }
@@ -10305,6 +11010,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ]
       }
@@ -10358,6 +11066,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ]
       }
@@ -10401,7 +11112,12 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ]
       }
     },
     "/api/v1/catalog-admin/entities/{entityType}": {
@@ -10464,6 +11180,9 @@
               "maxLength": 191,
               "default": ""
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -10544,6 +11263,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -10593,6 +11315,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -10654,6 +11379,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -10706,6 +11434,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -10767,6 +11498,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -10828,6 +11562,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -10886,6 +11623,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -10942,6 +11682,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -10993,6 +11736,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "responses": {
@@ -11112,6 +11858,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -11173,6 +11922,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -11225,6 +11977,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -11286,6 +12041,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -11338,6 +12096,9 @@
         "parameters": [
           {
             "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -11399,6 +12160,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -11460,6 +12224,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -11530,6 +12297,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -11600,6 +12370,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -11670,6 +12443,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -11736,6 +12512,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -11806,6 +12585,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -11868,6 +12650,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
           }
         ],
         "requestBody": {
@@ -11909,6 +12694,472 @@
         },
         "description": "Select and confirm an existing home product in one operation. Quantity is purchased packs for a packId, otherwise household stock units. Stock changes immediately; the receipt remains draft and later completion never repeats the addition."
       }
+    },
+    "/api/v1/homes/{homeId}/shopping-lists/{listId}/lines/{lineId}/product": {
+      "put": {
+        "operationId": "relinkShoppingListLine",
+        "tags": [
+          "Shopping"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "name": "listId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "lineId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RelinkShoppingListLineRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Shopping line relinked without recording any purchase or stock event.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShoppingListLine"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "summary": "Explicitly link, change or unlink a shopping product and pack with revision checking and retained audit history."
+      }
+    },
+    "/api/v1/homes/{homeId}/receipts/{receiptId}/date-corrections": {
+      "get": {
+        "operationId": "listReceiptDateCorrections",
+        "tags": [
+          "Purchasing"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "name": "receiptId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Immutable purchase-day correction history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiptDateCorrectionList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "post": {
+        "operationId": "correctReceiptPurchaseDate",
+        "tags": [
+          "Purchasing"
+        ],
+        "description": "Deliberate audited purchase-day correction for draft or committed receipts. Retains receipt/line identities, original timestamps and price evidence, supersedes current price observations and reconciles the chronological stock projection. Does not create a second purchase. Currency remains fixed after stock application. Use immutable synchronization operations for retry/restart recovery.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "name": "receiptId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrectReceiptDateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Audited date correction and authoritative receipt revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiptDateCorrectionResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/homes/{homeId}/stock-count-sessions/{sessionId}/review": {
+      "post": {
+        "operationId": "reviewStockCountSession",
+        "tags": [
+          "Inventory"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewStockCountRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Reviewed count and corrected lines with refreshed chronological balances",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockCountSession"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "summary": "Review or correct accepted physical count evidence",
+        "description": "Revision-checked, explicit audited correction of a closed count. Previous and next snapshots, actor, reason and correction time are retained. Reconfirmation does not automatically certify other old counts. The resulting balance may change when the accepted checkpoint changes."
+      }
+    },
+    "/api/v1/homes/{homeId}/sync/revalidate": {
+      "post": {
+        "operationId": "revalidateSynchronizationOperations",
+        "tags": [
+          "Synchronization"
+        ],
+        "description": "Read-only recovery evidence under the original account, home and device binding. Never executes or rewrites operations. Accepted immutable receipts require authoritative readback; only the first eligible unknown device-binding block can retry the exact same operation. Later unresolved operations wait for that predecessor. Other blocks and ambiguous/mismatched evidence require review. A successful response is not proof that any upload has completed.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SyncRecoveryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Original-binding recovery classifications in preserved queue order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncRecoveryResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/homes/{homeId}/sync/diagnostics": {
+      "get": {
+        "operationId": "getSynchronizationDiagnostics",
+        "tags": [
+          "Synchronization"
+        ],
+        "description": "Authenticated member-only safe binding and deployed runtime evidence. Includes actual contract file hash, lock agreement, build revision if available, and applied/pending/unknown migration names. Does not inspect or repair a device's private saved queue or claim that uploads completed.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Safe deployed backend and authenticated binding metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncDiagnosticsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/homes/{homeId}/receipts/{receiptId}/line-corrections": {
+      "get": {
+        "operationId": "listReceiptLineCorrections",
+        "tags": [
+          "Purchasing"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "name": "receiptId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Immutable finished receipt line correction history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiptLineCorrectionList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "post": {
+        "operationId": "correctFinishedReceiptLine",
+        "tags": [
+          "Purchasing"
+        ],
+        "description": "Atomically add and apply one omitted purchase or resolve one nonapplied line on a committed receipt. Null expectedLineRevision means a new line; otherwise compare both current receipt and line revisions. Reuse correctionId and identical normalized payload after a lost response. Existing applied or removed lines cannot use this command. The receipt stays committed and unrelated movements and prices are never replayed.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HomeId"
+          },
+          {
+            "name": "receiptId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WebApplicationContext"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrectReceiptLineRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Corrected line with correction identity and authoritative receipt revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiptLineCorrectionResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -11928,6 +13179,18 @@
         "type": "apiKey",
         "in": "cookie",
         "name": "providentia_access"
+      },
+      "homeownerCookieAuth": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "providentia_homeowner_access",
+        "description": "Requires X-Providentia-Application: homeowner; mutating requests use this namespace's CSRF proof."
+      },
+      "adminCookieAuth": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "providentia_admin_access",
+        "description": "Requires X-Providentia-Application: admin; mutating requests use this namespace's CSRF proof."
       }
     },
     "parameters": {
@@ -12049,6 +13312,19 @@
           "type": "string",
           "format": "uuid"
         }
+      },
+      "WebApplicationContext": {
+        "name": "X-Providentia-Application",
+        "in": "header",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "enum": [
+            "homeowner",
+            "admin"
+          ]
+        },
+        "description": "Selects isolated browser cookies for this application. Scoped requests never fall back to legacy or another application cookie. Send consistently on login, verification, authenticated requests, refresh and logout; cookie writes and scoped refresh require the matching X-CSRF-Token. Omission preserves legacy cookies. This header grants no permissions."
       }
     },
     "responses": {
@@ -12385,6 +13661,14 @@
               "null"
             ],
             "format": "date-time"
+          },
+          "installationId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Original persistent installation identifier. Null for legacy sessions without known installation provenance. It is distinct from the account-scoped deviceId."
           }
         }
       },
@@ -14669,7 +15953,11 @@
               "purchasing.receipt.cancel",
               "purchasing.receipt-line.update",
               "purchasing.receipt-line.remove",
-              "purchasing.receipt-line.purchase"
+              "purchasing.receipt-line.purchase",
+              "shopping.list-line.relink",
+              "purchasing.receipt.correct-date",
+              "inventory.count-session.review",
+              "purchasing.receipt-line.correct"
             ]
           },
           "entityId": {
@@ -14873,7 +16161,11 @@
               ],
               "properties": {
                 "payload": {
-                  "$ref": "#/components/schemas/SyncEmptyPayload"
+                  "$ref": "#/components/schemas/SyncCountSessionClosePayload"
+                },
+                "baseRevision": {
+                  "type": "integer",
+                  "minimum": 1
                 }
               }
             }
@@ -15381,6 +16673,110 @@
                 }
               }
             }
+          },
+          {
+            "if": {
+              "properties": {
+                "commandType": {
+                  "const": "shopping.list-line.relink"
+                }
+              },
+              "required": [
+                "commandType"
+              ]
+            },
+            "then": {
+              "required": [
+                "baseRevision"
+              ],
+              "properties": {
+                "baseRevision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "payload": {
+                  "$ref": "#/components/schemas/SyncShoppingListLineRelinkPayload"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "commandType": {
+                  "const": "purchasing.receipt.correct-date"
+                }
+              },
+              "required": [
+                "commandType"
+              ]
+            },
+            "then": {
+              "required": [
+                "baseRevision"
+              ],
+              "properties": {
+                "baseRevision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "payload": {
+                  "$ref": "#/components/schemas/SyncReceiptDateCorrectionPayload"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "commandType": {
+                  "const": "inventory.count-session.review"
+                }
+              },
+              "required": [
+                "commandType"
+              ]
+            },
+            "then": {
+              "required": [
+                "baseRevision"
+              ],
+              "properties": {
+                "baseRevision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "payload": {
+                  "$ref": "#/components/schemas/SyncCountSessionReviewPayload"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "commandType": {
+                  "const": "purchasing.receipt-line.correct"
+                }
+              },
+              "required": [
+                "commandType"
+              ]
+            },
+            "then": {
+              "required": [
+                "baseRevision"
+              ],
+              "properties": {
+                "baseRevision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "payload": {
+                  "$ref": "#/components/schemas/SyncReceiptLineCorrectionPayload"
+                }
+              }
+            }
           }
         ]
       },
@@ -15547,10 +16943,22 @@
             "type": "string"
           },
           "scopeComplete": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "The household explicitly confirms this count scope is complete. Omitted products do not become zero."
           },
           "reliability": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "reliable",
+              "partial",
+              "unassessed"
+            ],
+            "description": "Reliable evidence requires scopeComplete=true. Location counts never replace a whole-home balance."
+          },
+          "observedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Actual physical observation timestamp with timezone, independent of entry and closing timestamps. Future or invalid calendar values are rejected."
           }
         }
       },
@@ -15633,7 +17041,9 @@
           },
           "purchaseDate": {
             "type": "string",
-            "format": "date"
+            "format": "date",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Calendar purchase day in YYYY-MM-DD. Preserve these characters without timezone conversion; this does not establish a precise purchase instant or before/after ordering relative to a same-day stocktake. Accepted purchase days must not be later than today in the household defaultTimezone. Extracted proposals remain reviewable evidence until confirmation."
           },
           "currency": {
             "type": "string",
@@ -15821,6 +17231,14 @@
             ],
             "format": "uuid",
             "description": "Optional current recommendation for this home product. The server derives provenance and records acceptance in the same transaction as a successful addition."
+          },
+          "selectedPackId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Selected purchasing pack. For manual lines with a selected pack, quantityToBuy (sync: quantity) is a pack count. Suggested lines retain stock-unit demand; inspect quantityBasis in readback."
           }
         }
       },
@@ -16658,6 +18076,28 @@
           "revision": {
             "type": "integer",
             "minimum": 1
+          },
+          "uncertain": {
+            "type": "boolean",
+            "description": "The chronological stock projection has unresolved evidence. Do not display this as a definitive measured quantity."
+          },
+          "pendingQuantity": {
+            "$ref": "#/components/schemas/FixedDecimal",
+            "description": "Signed stock quantity whose chronological position remains unresolved; it is not applied again to the best-known quantity."
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "checkpointId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Physical count-line checkpoint behind the projection; null when no accepted compatible checkpoint exists."
           }
         }
       },
@@ -16734,6 +18174,10 @@
           "occurredAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "description": "Original UTC recording timestamp, retained independently of the effective occurrence or corrected purchase day."
           }
         }
       },
@@ -16793,6 +18237,21 @@
           "revision": {
             "type": "integer",
             "minimum": 1
+          },
+          "unit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "units",
+              "g",
+              "kg",
+              "ml",
+              "l",
+              null
+            ],
+            "description": "Unit snapshot of the physical observation; null means historical unit evidence is unassessed."
           }
         }
       },
@@ -16844,6 +18303,46 @@
             "items": {
               "$ref": "#/components/schemas/StockCountLine"
             }
+          },
+          "scopeComplete": {
+            "type": "boolean",
+            "description": "The household explicitly confirms this count scope is complete. Omitted products do not become zero."
+          },
+          "reliability": {
+            "type": "string",
+            "enum": [
+              "reliable",
+              "partial",
+              "unassessed"
+            ],
+            "description": "Reliable evidence requires scopeComplete=true. Location counts never replace a whole-home balance."
+          },
+          "observedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "description": "Actual physical observation timestamp with timezone, independent of entry and closing timestamps. Future or invalid calendar values are rejected."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null for legacy counts without an established observation timestamp; review explicitly before relying on this checkpoint."
+          },
+          "reviews": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StockCountReview"
+            },
+            "description": "Immutable audited reviews, available on session detail readback."
+          },
+          "observedTimezone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Verified IANA household timezone captured with the physical observation. Retained independently of later household timezone changes; null for legacy unassessed observations."
           }
         }
       },
@@ -16988,6 +18487,11 @@
               null
             ],
             "description": "Snapshotted stock unit at purchase/review. Reviewed imports conflict if the home unit changes before commit."
+          },
+          "correctionId": {
+            "type": "string",
+            "format": "uuid",
+            "readOnly": true
           }
         }
       },
@@ -17046,7 +18550,9 @@
           },
           "purchaseDate": {
             "type": "string",
-            "format": "date"
+            "format": "date",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Calendar purchase day in YYYY-MM-DD. Preserve these characters without timezone conversion; this does not establish a precise purchase instant or before/after ordering relative to a same-day stocktake. Accepted purchase days must not be later than today in the household defaultTimezone. Extracted proposals remain reviewable evidence until confirmation."
           },
           "currency": {
             "type": "string",
@@ -17081,6 +18587,16 @@
             "items": {
               "$ref": "#/components/schemas/ReceiptLine"
             }
+          },
+          "lineCorrectionState": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "available",
+              "immutable"
+            ],
+            "readOnly": true,
+            "description": "Draft uses ordinary entry commands. Available permits the audited atomic finished-line correction command for an omitted or nonapplied line. Immutable receipts reject new corrections. Already-applied lines retain their existing correction path."
           }
         }
       },
@@ -17145,6 +18661,35 @@
             ],
             "format": "uuid",
             "description": "Server-verified recommendation provenance retained across devices."
+          },
+          "productId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "stockUnit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "units",
+              "g",
+              "kg",
+              "ml",
+              "l",
+              null
+            ]
+          },
+          "quantityBasis": {
+            "type": "string",
+            "enum": [
+              "pack-count",
+              "stock-unit"
+            ],
+            "description": "Manual selected packs use pack counts; free text and recommendation quantities use the existing household stock quantity convention."
           }
         }
       },
@@ -17465,7 +19010,9 @@
           },
           "purchaseDate": {
             "type": "string",
-            "format": "date"
+            "format": "date",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Calendar purchase day in YYYY-MM-DD. Preserve these characters without timezone conversion; this does not establish a precise purchase instant or before/after ordering relative to a same-day stocktake. Accepted purchase days must not be later than today in the household defaultTimezone. Extracted proposals remain reviewable evidence until confirmation."
           },
           "currency": {
             "type": "string",
@@ -17662,6 +19209,21 @@
           "expectedListRevision": {
             "type": "integer",
             "minimum": 1
+          },
+          "selectedPackId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Selected purchasing pack. For manual lines with a selected pack, quantityToBuy (sync: quantity) is a pack count. Suggested lines retain stock-unit demand; inspect quantityBasis in readback."
+          },
+          "suggestionId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
           }
         }
       },
@@ -20216,6 +21778,21 @@
           "inputWatermark": {
             "type": "string",
             "pattern": "^[a-f0-9]{64}$"
+          },
+          "evidence": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ConsumptionEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Retained count-interval calculation. Residual depletion includes unexplained outflow and is not exact food consumption; unknown or inconsistent intervals require review."
+          },
+          "freshness": {
+            "type": "string",
+            "const": "current"
           }
         }
       },
@@ -20330,6 +21907,10 @@
           "inputWatermark": {
             "type": "string",
             "pattern": "^[a-f0-9]{64}$"
+          },
+          "freshness": {
+            "type": "string",
+            "const": "current"
           }
         }
       },
@@ -20389,6 +21970,28 @@
           "suggestionCount": {
             "type": "integer",
             "minimum": 0
+          },
+          "status": {
+            "type": "string",
+            "const": "completed"
+          },
+          "reasonCounts": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "diagnostics": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecommendationDiagnostic"
+            }
+          },
+          "inputScope": {
+            "type": "string",
+            "const": "accepted_server_evidence",
+            "description": "Only accepted server facts were used; the server cannot infer changes still queued on a client."
           }
         }
       },
@@ -20452,6 +22055,24 @@
           },
           "inputWatermark": {
             "type": "string"
+          },
+          "runId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "freshness": {
+            "type": "string",
+            "enum": [
+              "current",
+              "superseded"
+            ]
+          },
+          "latestRunId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
           }
         }
       },
@@ -20898,7 +22519,8 @@
             "maxLength": 2000
           },
           "scopeComplete": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "The household explicitly confirms this count scope is complete. Omitted products do not become zero."
           },
           "reliability": {
             "type": "string",
@@ -20906,7 +22528,13 @@
               "reliable",
               "partial",
               "unassessed"
-            ]
+            ],
+            "description": "Reliable evidence requires scopeComplete=true. Location counts never replace a whole-home balance."
+          },
+          "observedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Actual physical observation timestamp with timezone, independent of entry and closing timestamps. Future or invalid calendar values are rejected."
           }
         },
         "required": [
@@ -21358,6 +22986,28 @@
             ],
             "default": "units",
             "description": "Household stock-unit label. Changing this metadata does not convert balances, stock movements, count quantities or historical receipts. Use a separate stock count or adjustment to correct quantities."
+          },
+          "uncertain": {
+            "type": "boolean",
+            "description": "The chronological stock projection has unresolved evidence. Do not display this as a definitive measured quantity."
+          },
+          "pendingQuantity": {
+            "$ref": "#/components/schemas/FixedDecimal",
+            "description": "Signed stock quantity whose chronological position remains unresolved; it is not applied again to the best-known quantity."
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "checkpointId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Physical count-line checkpoint behind the projection; null when no accepted compatible checkpoint exists."
           }
         }
       },
@@ -24331,7 +25981,9 @@
           },
           "purchaseDate": {
             "type": "string",
-            "format": "date"
+            "format": "date",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Calendar purchase day in YYYY-MM-DD. Preserve these characters without timezone conversion; this does not establish a precise purchase instant or before/after ordering relative to a same-day stocktake. Accepted purchase days must not be later than today in the household defaultTimezone. Extracted proposals remain reviewable evidence until confirmation."
           },
           "currency": {
             "type": "string",
@@ -24469,7 +26121,9 @@
           },
           "purchaseDate": {
             "type": "string",
-            "format": "date"
+            "format": "date",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Calendar purchase day in YYYY-MM-DD. Preserve these characters without timezone conversion; this does not establish a precise purchase instant or before/after ordering relative to a same-day stocktake. Accepted purchase days must not be later than today in the household defaultTimezone. Extracted proposals remain reviewable evidence until confirmation."
           },
           "currency": {
             "type": "string",
@@ -24775,6 +26429,1899 @@
             "description": "Expected exact conversion from cached catalog facts. Server recomputes and rejects changed pack measures instead of silently reinterpreting offline purchases."
           }
         }
+      },
+      "RelinkShoppingListLineRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "homeProductId",
+          "selectedPackId",
+          "expectedRevision",
+          "reason"
+        ],
+        "properties": {
+          "homeProductId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "selectedPackId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      },
+      "SyncShoppingListLineRelinkPayload": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "homeProductId",
+          "selectedPackId",
+          "reason",
+          "listId"
+        ],
+        "properties": {
+          "homeProductId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "selectedPackId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "listId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "CorrectReceiptDateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "purchaseDate",
+          "reason",
+          "expectedRevision"
+        ],
+        "properties": {
+          "purchaseDate": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Calendar purchase day in YYYY-MM-DD. Preserve these characters without timezone conversion; this does not establish a precise purchase instant or before/after ordering relative to a same-day stocktake. Accepted purchase days must not be later than today in the household defaultTimezone. Extracted proposals remain reviewable evidence until confirmation."
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "ReceiptDateCorrectionResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "revision",
+          "correctionId"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "correctionId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "ReceiptDateCorrection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "receiptId",
+          "originalPurchaseDate",
+          "purchaseDate",
+          "reason",
+          "receiptRevision",
+          "actorUserId",
+          "correctedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "receiptId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "originalPurchaseDate": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Calendar purchase day in YYYY-MM-DD. Preserve these characters without timezone conversion; this does not establish a precise purchase instant or before/after ordering relative to a same-day stocktake."
+          },
+          "purchaseDate": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Calendar purchase day in YYYY-MM-DD. Preserve these characters without timezone conversion; this does not establish a precise purchase instant or before/after ordering relative to a same-day stocktake."
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "receiptRevision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "actorUserId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "correctedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ReceiptDateCorrectionList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReceiptDateCorrection"
+            }
+          }
+        }
+      },
+      "SyncReceiptDateCorrectionPayload": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "purchaseDate",
+          "reason"
+        ],
+        "properties": {
+          "purchaseDate": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Calendar purchase day in YYYY-MM-DD. Preserve these characters without timezone conversion; this does not establish a precise purchase instant or before/after ordering relative to a same-day stocktake. Accepted purchase days must not be later than today in the household defaultTimezone. Extracted proposals remain reviewable evidence until confirmation."
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      },
+      "CountLineCorrection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "quantity",
+          "expectedRevision"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quantity": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,8})?$"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "CloseStockCountRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedRevision"
+        ],
+        "properties": {
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "scopeComplete": {
+            "type": "boolean",
+            "description": "The household explicitly confirms this count scope is complete. Omitted products do not become zero."
+          },
+          "reliability": {
+            "type": "string",
+            "enum": [
+              "reliable",
+              "partial",
+              "unassessed"
+            ],
+            "description": "Reliable evidence requires scopeComplete=true. Location counts never replace a whole-home balance."
+          },
+          "observedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Actual physical observation timestamp with timezone, independent of entry and closing timestamps. Future or invalid calendar values are rejected."
+          }
+        }
+      },
+      "SyncCountSessionClosePayload": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scopeComplete": {
+            "type": "boolean",
+            "description": "The household explicitly confirms this count scope is complete. Omitted products do not become zero."
+          },
+          "reliability": {
+            "type": "string",
+            "enum": [
+              "reliable",
+              "partial",
+              "unassessed"
+            ],
+            "description": "Reliable evidence requires scopeComplete=true. Location counts never replace a whole-home balance."
+          },
+          "observedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Actual physical observation timestamp with timezone, independent of entry and closing timestamps. Future or invalid calendar values are rejected."
+          }
+        }
+      },
+      "ReviewStockCountRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedRevision",
+          "reason",
+          "scopeComplete",
+          "reliability",
+          "observedAt"
+        ],
+        "properties": {
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 191
+          },
+          "scopeComplete": {
+            "type": "boolean",
+            "description": "The household explicitly confirms this count scope is complete. Omitted products do not become zero."
+          },
+          "reliability": {
+            "type": "string",
+            "enum": [
+              "reliable",
+              "partial",
+              "unassessed"
+            ],
+            "description": "Reliable evidence requires scopeComplete=true. Location counts never replace a whole-home balance."
+          },
+          "observedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Actual physical observation timestamp with timezone, independent of entry and closing timestamps. Future or invalid calendar values are rejected."
+          },
+          "lineCorrections": {
+            "type": "array",
+            "maxItems": 1000,
+            "items": {
+              "$ref": "#/components/schemas/CountLineCorrection"
+            },
+            "description": "Correct existing confirmed lines only; identifiers, product links and original audit snapshots are preserved. A line may occur once per review."
+          }
+        }
+      },
+      "SyncCountSessionReviewPayload": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "reason",
+          "scopeComplete",
+          "reliability",
+          "observedAt"
+        ],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 191
+          },
+          "scopeComplete": {
+            "type": "boolean",
+            "description": "The household explicitly confirms this count scope is complete. Omitted products do not become zero."
+          },
+          "reliability": {
+            "type": "string",
+            "enum": [
+              "reliable",
+              "partial",
+              "unassessed"
+            ],
+            "description": "Reliable evidence requires scopeComplete=true. Location counts never replace a whole-home balance."
+          },
+          "observedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Actual physical observation timestamp with timezone, independent of entry and closing timestamps. Future or invalid calendar values are rejected."
+          },
+          "lineCorrections": {
+            "type": "array",
+            "maxItems": 1000,
+            "items": {
+              "$ref": "#/components/schemas/CountLineCorrection"
+            },
+            "description": "Correct existing confirmed lines only; identifiers, product links and original audit snapshots are preserved. A line may occur once per review."
+          }
+        }
+      },
+      "StockCountReview": {
+        "type": "object",
+        "required": [
+          "id",
+          "revision",
+          "actorUserId",
+          "reason",
+          "reviewedAt",
+          "previousSnapshot",
+          "nextSnapshot"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "actorUserId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "reviewedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "previousSnapshot": {
+            "type": "object"
+          },
+          "nextSnapshot": {
+            "type": "object"
+          }
+        }
+      },
+      "SyncRecoveryOperation": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "blockedCode",
+          "command"
+        ],
+        "properties": {
+          "blockedCode": {
+            "type": "string",
+            "description": "Preserved original blocking classification. Only device_binding_mismatch is eligible to retry after revalidation."
+          },
+          "command": {
+            "$ref": "#/components/schemas/SyncPantryCommand"
+          }
+        }
+      },
+      "SyncRecoveryRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "accountId",
+          "deviceId",
+          "operations"
+        ],
+        "properties": {
+          "accountId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deviceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "operations": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/SyncRecoveryOperation"
+            }
+          }
+        }
+      },
+      "SyncRecoveryResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operationId",
+          "action",
+          "code"
+        ],
+        "properties": {
+          "operationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "readback",
+              "retry_same_operation",
+              "await_predecessor",
+              "review_required"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "execution_receipt_found",
+              "immutable_request_mismatch",
+              "dependency_pending",
+              "block_not_eligible",
+              "permission_denied",
+              "unknown_under_original_binding"
+            ]
+          },
+          "predecessorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "result": {
+            "$ref": "#/components/schemas/SyncOperationResult"
+          }
+        }
+      },
+      "SyncRecoveryResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "protocolVersion",
+          "accountId",
+          "deviceId",
+          "homeId",
+          "operations"
+        ],
+        "properties": {
+          "protocolVersion": {
+            "type": "integer",
+            "const": 2
+          },
+          "accountId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deviceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "homeId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "operations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SyncRecoveryResult"
+            }
+          }
+        }
+      },
+      "SyncDeploymentInformation": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "applicationVersion",
+          "buildRevision",
+          "contractHash",
+          "contractMatchesLock",
+          "migrationStatus",
+          "availableMigrations",
+          "appliedMigrations",
+          "pendingMigrations",
+          "unknownMigrations"
+        ],
+        "properties": {
+          "applicationVersion": {
+            "type": "string"
+          },
+          "buildRevision": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
+          },
+          "contractHash": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "contractMatchesLock": {
+            "type": "boolean"
+          },
+          "migrationStatus": {
+            "type": "string",
+            "enum": [
+              "current",
+              "pending",
+              "divergent",
+              "uninitialized"
+            ]
+          },
+          "availableMigrations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "appliedMigrations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pendingMigrations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "unknownMigrations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "SyncDiagnosticsResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "accountId",
+          "deviceId",
+          "homeId",
+          "serverTime",
+          "deployment"
+        ],
+        "properties": {
+          "accountId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deviceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "homeId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "serverTime": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deployment": {
+            "$ref": "#/components/schemas/SyncDeploymentInformation"
+          }
+        }
+      },
+      "ConsumptionIntervalEvidence": {
+        "type": "object",
+        "required": [
+          "from",
+          "to",
+          "unit",
+          "scope",
+          "openingQuantity",
+          "incomingQuantity",
+          "knownConsumption",
+          "otherRecordedOutflow",
+          "closingQuantity",
+          "residualDepletion",
+          "estimatedUsage",
+          "status",
+          "reviewReason"
+        ],
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "to": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "unit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scope": {
+            "type": "string"
+          },
+          "openingQuantity": {
+            "$ref": "#/components/schemas/FixedDecimal"
+          },
+          "incomingQuantity": {
+            "$ref": "#/components/schemas/FixedDecimal"
+          },
+          "knownConsumption": {
+            "$ref": "#/components/schemas/FixedDecimal"
+          },
+          "otherRecordedOutflow": {
+            "$ref": "#/components/schemas/FixedDecimal"
+          },
+          "closingQuantity": {
+            "$ref": "#/components/schemas/FixedDecimal"
+          },
+          "residualDepletion": {
+            "$ref": "#/components/schemas/FixedDecimal"
+          },
+          "estimatedUsage": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixedDecimal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "review_required"
+            ]
+          },
+          "reviewReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "ConsumptionEvidence": {
+        "type": "object",
+        "required": [
+          "intervals",
+          "totalEstimatedUsage",
+          "residualDepletion"
+        ],
+        "properties": {
+          "intervals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConsumptionIntervalEvidence"
+            }
+          },
+          "totalEstimatedUsage": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixedDecimal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "residualDepletion": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixedDecimal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "RecommendationDiagnostic": {
+        "type": "object",
+        "required": [
+          "homeProductId",
+          "productName",
+          "reasonCode",
+          "usageEvidenceAvailable",
+          "minimumQuantity",
+          "alwaysKeep",
+          "factualStock",
+          "stockUncertain",
+          "requiredQuantity",
+          "limitations"
+        ],
+        "properties": {
+          "homeProductId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "productName": {
+            "type": "string"
+          },
+          "reasonCode": {
+            "type": "string",
+            "description": "Distinguishes excluded, paused, stock_chronology_uncertain, usage_shortfall, minimum_reserve_shortfall, no_minimum_or_usage_evidence and sufficient_stock."
+          },
+          "usageEvidenceAvailable": {
+            "type": "boolean"
+          },
+          "minimumQuantity": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixedDecimal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "alwaysKeep": {
+            "type": "boolean"
+          },
+          "factualStock": {
+            "$ref": "#/components/schemas/FixedDecimal"
+          },
+          "stockUncertain": {
+            "type": "boolean"
+          },
+          "requiredQuantity": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixedDecimal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "CorrectReceiptLineRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedReceiptRevision",
+          "homeProductId",
+          "packId",
+          "rawDescription",
+          "quantity",
+          "originalPackText",
+          "unitPrice",
+          "lineTotal",
+          "unit",
+          "stockQuantityPerPack",
+          "correctionId",
+          "lineId",
+          "expectedLineRevision",
+          "reason"
+        ],
+        "properties": {
+          "expectedReceiptRevision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "homeProductId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "packId": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rawDescription": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "quantity": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,8})?$"
+          },
+          "originalPackText": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 191
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unitPrice": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^(?:0|[1-9][0-9]{0,11})(?:\\.[0-9]{1,2})?$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lineTotal": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^(?:0|[1-9][0-9]{0,11})(?:\\.[0-9]{1,2})?$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "units",
+              "g",
+              "kg",
+              "ml",
+              "l"
+            ],
+            "description": "Expected household stock unit when the purchase was entered; a changed unit conflicts."
+          },
+          "stockQuantityPerPack": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,8})?$",
+            "description": "Expected exact conversion from cached catalog facts. Server recomputes and rejects changed pack measures instead of silently reinterpreting offline purchases."
+          },
+          "correctionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lineId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expectedLineRevision": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        },
+        "description": "Atomically add and apply one omitted purchase or resolve one nonapplied line on a committed receipt. Null expectedLineRevision means a new line; otherwise compare both current receipt and line revisions. Reuse correctionId and identical normalized payload after a lost response. Existing applied or removed lines cannot use this command. The receipt stays committed and unrelated movements and prices are never replayed."
+      },
+      "ReceiptLineCorrectionResult": {
+        "type": "object",
+        "required": [
+          "id",
+          "receiptId",
+          "lineNumber",
+          "rawDescription",
+          "quantity",
+          "approvalStatus",
+          "revision",
+          "receiptRevision",
+          "correctionId"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "receiptId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lineNumber": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "rawDescription": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "string",
+            "pattern": "^-?(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,8})?$",
+            "description": "Purchased pack count when an explicit packId was selected; otherwise quantity in the household stock unit. Historical reviewed imports retain their entered numeric quantity."
+          },
+          "originalPackText": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unitPrice": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lineTotal": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "homeProductId": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "approvalStatus": {
+            "type": "string",
+            "enum": [
+              "unreviewed",
+              "approved",
+              "unresolved",
+              "approved-catalog",
+              "removed"
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "stockQuantity": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,8})?$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Applied inbound stock in the household unit. Null means not yet applied. Zero on removed purchases records a fully reversed effect."
+          },
+          "stockQuantityPerPack": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,8})?$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Exact snapshotted stock conversion per purchased pack; retained through later canonical pack changes."
+          },
+          "packId": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "receiptRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Current receipt revision returned after immediate purchase creation."
+          },
+          "stockUnit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "units",
+              "g",
+              "kg",
+              "ml",
+              "l",
+              null
+            ],
+            "description": "Snapshotted stock unit at purchase/review. Reviewed imports conflict if the home unit changes before commit."
+          },
+          "correctionId": {
+            "type": "string",
+            "format": "uuid",
+            "readOnly": true
+          }
+        },
+        "description": "Authoritative corrected line plus immutable correction identity and new receipt revision."
+      },
+      "ReceiptLineCorrection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "receiptId",
+          "lineId",
+          "reason",
+          "receiptRevision",
+          "originalLine",
+          "nextLine",
+          "actorUserId",
+          "correctedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "receiptId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lineId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "receiptRevision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "originalLine": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ReceiptLine"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "nextLine": {
+            "$ref": "#/components/schemas/ReceiptLine"
+          },
+          "actorUserId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "correctedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ReceiptLineCorrectionList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReceiptLineCorrection"
+            }
+          }
+        }
+      },
+      "SyncReceiptLineCorrectionPayload": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "homeProductId",
+          "packId",
+          "rawDescription",
+          "quantity",
+          "originalPackText",
+          "unitPrice",
+          "lineTotal",
+          "unit",
+          "stockQuantityPerPack",
+          "correctionId",
+          "expectedLineRevision",
+          "reason",
+          "receiptId"
+        ],
+        "properties": {
+          "homeProductId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "packId": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rawDescription": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "quantity": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,8})?$"
+          },
+          "originalPackText": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 191
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unitPrice": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^(?:0|[1-9][0-9]{0,11})(?:\\.[0-9]{1,2})?$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lineTotal": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^(?:0|[1-9][0-9]{0,11})(?:\\.[0-9]{1,2})?$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "units",
+              "g",
+              "kg",
+              "ml",
+              "l"
+            ],
+            "description": "Expected household stock unit when the purchase was entered; a changed unit conflicts."
+          },
+          "stockQuantityPerPack": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,8})?$",
+            "description": "Expected exact conversion from cached catalog facts. Server recomputes and rejects changed pack measures instead of silently reinterpreting offline purchases."
+          },
+          "correctionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expectedLineRevision": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "receiptId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "description": "Immutable finished-line correction. entityId is lineId, baseRevision is expectedReceiptRevision; payload correctionId is retained across HTTP and synchronization retries."
+      },
+      "PurchaseReportRow": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "month",
+          "currency",
+          "storeId",
+          "storeName",
+          "total",
+          "knownSubtotal",
+          "pricingComplete",
+          "amountSource",
+          "receiptCount",
+          "completeReceiptCount",
+          "partialReceiptCount",
+          "unknownReceiptCount",
+          "declaredReceiptCount",
+          "derivedReceiptCount"
+        ],
+        "properties": {
+          "month": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}$"
+          },
+          "currency": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 3
+          },
+          "storeId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "storeName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "total": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+            "description": "Complete receipt spend only; null if any included receipt has incomplete pricing. Explicit header and line discounts are preserved. Derived lines round quantity times unit price to two decimals HALF_UP."
+          },
+          "knownSubtotal": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+            "description": "Known effective receipt amounts; explicitly partial when pricingComplete is false. Null when no amount is known."
+          },
+          "pricingComplete": {
+            "type": "boolean"
+          },
+          "amountSource": {
+            "type": "string",
+            "enum": [
+              "declared",
+              "derived",
+              "mixed",
+              "partial",
+              "unknown"
+            ]
+          },
+          "receiptCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "completeReceiptCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "partialReceiptCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "unknownReceiptCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "declaredReceiptCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "derivedReceiptCount": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "PurchaseCurrencyTotal": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "currency",
+          "lineCount",
+          "spend",
+          "knownSubtotal",
+          "pricingComplete",
+          "amountSource",
+          "receiptCount",
+          "completeReceiptCount",
+          "partialReceiptCount",
+          "unknownReceiptCount",
+          "declaredReceiptCount",
+          "derivedReceiptCount"
+        ],
+        "properties": {
+          "currency": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 3
+          },
+          "lineCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "spend": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$"
+          },
+          "knownSubtotal": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+            "description": "Known effective receipt amounts; explicitly partial when pricingComplete is false. Null when no amount is known."
+          },
+          "pricingComplete": {
+            "type": "boolean"
+          },
+          "amountSource": {
+            "type": "string",
+            "enum": [
+              "declared",
+              "derived",
+              "mixed",
+              "partial",
+              "unknown"
+            ]
+          },
+          "receiptCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "completeReceiptCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "partialReceiptCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "unknownReceiptCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "declaredReceiptCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "derivedReceiptCount": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "PurchaseSummary": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "receiptCount",
+          "lineCount",
+          "spend",
+          "currency",
+          "pricingComplete",
+          "currencyTotals"
+        ],
+        "properties": {
+          "receiptCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "lineCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "spend": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+            "description": "Complete spend for exactly one currency, null for incomplete pricing or multiple currencies. Empty summaries return zero."
+          },
+          "currency": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pricingComplete": {
+            "type": "boolean"
+          },
+          "currencyTotals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PurchaseCurrencyTotal"
+            }
+          }
+        }
+      },
+      "InventoryReportRow": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "homeProductId",
+          "productName",
+          "packText",
+          "stockUnit",
+          "factualQuantity",
+          "quantityState",
+          "uncertain",
+          "pendingQuantity",
+          "limitations",
+          "checkpointId",
+          "balanceRevision",
+          "lastMovementId",
+          "balanceUpdatedAt",
+          "configuredMinimum",
+          "alwaysKeep",
+          "neverSuggest"
+        ],
+        "properties": {
+          "homeProductId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "productName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "packText": {
+            "type": "string"
+          },
+          "stockUnit": {
+            "type": "string",
+            "enum": [
+              "units",
+              "g",
+              "kg",
+              "ml",
+              "l"
+            ]
+          },
+          "factualQuantity": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+            "description": "Signed ledger projection, not a verified physical count. Null means no balance evidence; zero is a recorded balance. Never clamped."
+          },
+          "quantityState": {
+            "type": "string",
+            "enum": [
+              "unknown",
+              "recorded",
+              "uncertain"
+            ]
+          },
+          "uncertain": {
+            "type": "boolean"
+          },
+          "pendingQuantity": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$"
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "checkpointId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "balanceRevision": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1
+          },
+          "lastMovementId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "balanceUpdatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "configuredMinimum": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$"
+          },
+          "alwaysKeep": {
+            "type": "boolean"
+          },
+          "neverSuggest": {
+            "type": "boolean"
+          }
+        }
+      },
+      "InventoryReport": {
+        "type": "object",
+        "required": [
+          "type",
+          "asOf",
+          "data",
+          "quantitySemantics"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "inventory"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "quantitySemantics": {
+            "type": "string"
+          },
+          "currencyPolicy": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string",
+            "format": "date"
+          },
+          "through": {
+            "type": "string",
+            "format": "date"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InventoryReportRow"
+            }
+          },
+          "priceComparisons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PriceComparison"
+            }
+          }
+        }
+      },
+      "PurchaseReport": {
+        "type": "object",
+        "required": [
+          "type",
+          "asOf",
+          "data",
+          "from",
+          "through",
+          "currencyPolicy"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "purchases"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "quantitySemantics": {
+            "type": "string"
+          },
+          "currencyPolicy": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string",
+            "format": "date"
+          },
+          "through": {
+            "type": "string",
+            "format": "date"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PurchaseReportRow"
+            }
+          },
+          "priceComparisons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PriceComparison"
+            }
+          }
+        }
+      },
+      "OperatorStockRecord": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "home_id",
+          "home_product_id",
+          "quantity",
+          "revision",
+          "name",
+          "brand",
+          "pack_text",
+          "category_name",
+          "category_scope",
+          "catalog_reference",
+          "product_id",
+          "pack_id",
+          "home_category_id",
+          "global_category_id",
+          "unit",
+          "home_product_status",
+          "catalog_product_status",
+          "catalog_pack_status",
+          "last_movement_id",
+          "updated_at",
+          "uncertain",
+          "pending_quantity",
+          "limitations_json",
+          "checkpoint_id"
+        ],
+        "properties": {
+          "home_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "home_product_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quantity": {
+            "type": "string",
+            "pattern": "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "name": {
+            "type": "string"
+          },
+          "brand": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pack_text": {
+            "type": "string"
+          },
+          "category_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "category_scope": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "catalog_reference": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "product_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "pack_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "home_category_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "global_category_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "unit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "home_product_status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "catalog_product_status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "catalog_pack_status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_movement_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "updated_at": {
+            "type": "string",
+            "description": "Original database UTC timestamp, retained unchanged."
+          },
+          "uncertain": {
+            "oneOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "integer",
+                "enum": [
+                  0,
+                  1
+                ]
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "0",
+                  "1"
+                ]
+              }
+            ]
+          },
+          "pending_quantity": {
+            "type": "string",
+            "pattern": "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$"
+          },
+          "limitations_json": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "checkpoint_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        },
+        "description": "Read-only stock collection enrichment retains every raw inventory balance field, exact decimal strings, revision and chronology metadata. Missing/archived/mismatched product references remain rows with explicit fallback/status. Local categories are constrained to the selected home. Page size and stable ID ordering remain unchanged."
       }
     }
   },

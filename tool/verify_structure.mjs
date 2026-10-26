@@ -435,11 +435,11 @@ const generatedManifest = JSON.parse(
 );
 assert(
   generatedManifest.clientProfile === 'homeowner' &&
-    generatedManifest.contractVersion === '2.2.0' &&
+    generatedManifest.contractVersion === '2.4.0' &&
     generatedManifest.contractSha256 ===
-      '75701b9ef65edc964f50762ba428ca425bfad40f574cb1abc0ce03086ca19cc1' &&
-    generatedManifest.canonicalOperationCount === 236 &&
-    generatedManifest.generatedOperationCount === 168,
+      '2b7b38490dc42ad967cfff7e32dd56db41d30842a7d39845b9beecb7f7d4e254' &&
+    generatedManifest.canonicalOperationCount === 244 &&
+    generatedManifest.generatedOperationCount === 176,
   'Generated client manifest must distinguish the canonical and homeowner surfaces.',
 );
 try {

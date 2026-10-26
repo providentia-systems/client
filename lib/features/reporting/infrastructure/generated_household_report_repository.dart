@@ -161,12 +161,34 @@ _ParsedReport _report(
 }
 
 InventoryReportFact _inventoryFact(Map<String, Object?> object, String homeId) {
+  final quantity = _optionalDecimal(object['factualQuantity']);
+  final state = object.containsKey('quantityState')
+      ? _enumValue(object, 'quantityState', {
+          'unknown',
+          'recorded',
+          'uncertain',
+        })
+      : 'recorded';
+  final uncertain = _optionalBoolean(object['uncertain']) ?? false;
+  if ((quantity == null) != (state == 'unknown') ||
+      (state == 'uncertain' && !uncertain) ||
+      (state == 'recorded' && uncertain)) {
+    throw const FormatException('Inconsistent inventory evidence state.');
+  }
   return InventoryReportFact(
     homeId: homeId,
     homeProductId: _uuid(object, 'homeProductId'),
     productName: _string(object, 'productName'),
     packText: _string(object, 'packText', allowEmpty: true),
-    factualQuantity: _decimal(object, 'factualQuantity'),
+    factualQuantity: quantity,
+    stockUnit: _optionalString(object['stockUnit'], allowEmpty: true) ?? '',
+    quantityState: state,
+    uncertain: uncertain,
+    pendingQuantity: _optionalDecimal(object['pendingQuantity']),
+    limitations: object.containsKey('limitations')
+        ? _stringList(object, 'limitations')
+        : const <String>[],
+    checkpointId: _optionalUuid(object['checkpointId']),
     balanceRevision: _optionalPositiveInteger(object['balanceRevision']),
     lastMovementId: _optionalUuid(object['lastMovementId']),
     balanceUpdatedAt: _optionalDateTime(object['balanceUpdatedAt']),
@@ -182,6 +204,23 @@ PurchaseReportTotal _purchaseTotal(Map<String, Object?> object, String homeId) {
   if (!_monthPattern.hasMatch(month) || !_currencyPattern.hasMatch(currency)) {
     throw const FormatException('Invalid purchase report key.');
   }
+  final total = _optionalDecimal(object['total']);
+  final complete = object.containsKey('pricingComplete')
+      ? _boolean(object, 'pricingComplete')
+      : total != null;
+  final source = object.containsKey('amountSource')
+      ? _enumValue(object, 'amountSource', {
+          'declared',
+          'derived',
+          'mixed',
+          'partial',
+          'unknown',
+        })
+      : 'derived';
+  if ((total != null) != complete ||
+      (complete && (source == 'partial' || source == 'unknown'))) {
+    throw const FormatException('Inconsistent purchase pricing state.');
+  }
   return PurchaseReportTotal(
     homeId: homeId,
     month: month,
@@ -189,7 +228,22 @@ PurchaseReportTotal _purchaseTotal(Map<String, Object?> object, String homeId) {
     storeId: _optionalUuid(object['storeId']),
     storeName: _optionalString(object['storeName']),
     receiptCount: _nonNegativeInteger(object, 'receiptCount'),
-    total: _decimal(object, 'total'),
+    total: total,
+    knownSubtotal: object.containsKey('knownSubtotal')
+        ? _optionalDecimal(object['knownSubtotal'])
+        : total,
+    pricingComplete: complete,
+    amountSource: source,
+    completeReceiptCount:
+        _optionalNonNegativeInteger(object['completeReceiptCount']) ?? 0,
+    partialReceiptCount:
+        _optionalNonNegativeInteger(object['partialReceiptCount']) ?? 0,
+    unknownReceiptCount:
+        _optionalNonNegativeInteger(object['unknownReceiptCount']) ?? 0,
+    declaredReceiptCount:
+        _optionalNonNegativeInteger(object['declaredReceiptCount']) ?? 0,
+    derivedReceiptCount:
+        _optionalNonNegativeInteger(object['derivedReceiptCount']) ?? 0,
   );
 }
 
@@ -344,6 +398,14 @@ String? _optionalString(Object? value, {bool allowEmpty = false}) {
   }
   if (value is! String || (!allowEmpty && value.trim().isEmpty)) {
     throw const FormatException('Invalid optional string.');
+  }
+  return value;
+}
+
+String _enumValue(Map<String, Object?> object, String key, Set<String> values) {
+  final value = _string(object, key);
+  if (!values.contains(value)) {
+    throw FormatException('Invalid $key value.');
   }
   return value;
 }

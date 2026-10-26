@@ -85,10 +85,21 @@ final class _ReadyReport extends StatelessWidget {
               .map(
                 (line) => _ReportRow(
                   title: line.productName,
-                  detail:
-                      'Quantity ${line.factualQuantity}'
-                      '${line.packText.isEmpty ? '' : ' · ${line.packText}'}'
-                      '${line.configuredMinimum == null ? '' : ' · Minimum ${line.configuredMinimum}'}',
+                  detail: <String>[
+                    line.factualQuantity == null
+                        ? 'Quantity unknown · no recorded balance'
+                        : 'Ledger quantity ${line.factualQuantity} ${line.stockUnit}'
+                              .trim(),
+                    if (line.quantityState == 'uncertain')
+                      'Uncertain history · not a verified physical count',
+                    if (line.pendingQuantity != null &&
+                        line.pendingQuantity != '0')
+                      'Pending quantity ${line.pendingQuantity} ${line.stockUnit}',
+                    if (line.packText.isNotEmpty) line.packText,
+                    if (line.configuredMinimum != null)
+                      'Minimum ${line.configuredMinimum}',
+                    ...line.limitations,
+                  ].join(' · '),
                 ),
               )
               .toList(growable: false),
@@ -100,11 +111,18 @@ final class _ReadyReport extends StatelessWidget {
           children: report.purchaseTotals
               .map(
                 (line) => _ReportRow(
-                  title: '${line.month} · ${line.currency} ${line.total}',
+                  title: line.pricingComplete
+                      ? '${line.month} · ${line.currency} ${line.total}'
+                      : '${line.month} · Total unknown',
                   detail:
                       '${line.receiptCount} receipt'
                       '${line.receiptCount == 1 ? '' : 's'}'
-                      '${line.storeName == null ? '' : ' · ${line.storeName}'}',
+                      '${line.storeName == null ? '' : ' · ${line.storeName}'}'
+                      '${line.pricingComplete
+                          ? ''
+                          : line.knownSubtotal == null
+                          ? ' · Prices unknown'
+                          : ' · Known subtotal ${line.currency} ${line.knownSubtotal} · Incomplete pricing'}',
                 ),
               )
               .toList(growable: false),

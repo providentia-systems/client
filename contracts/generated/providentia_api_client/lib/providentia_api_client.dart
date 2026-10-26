@@ -1,6 +1,6 @@
 // GENERATED FILE - DO NOT EDIT.
 // Source: contracts/providentia-v1.json
-// Contract SHA-256: 75701b9ef65edc964f50762ba428ca425bfad40f574cb1abc0ce03086ca19cc1
+// Contract SHA-256: 2b7b38490dc42ad967cfff7e32dd56db41d30842a7d39845b9beecb7f7d4e254
 // ignore_for_file: use_null_aware_elements
 
 library;
@@ -552,6 +552,20 @@ final class ProvidentiaApiClient {
       pathTemplate: "/api/v1/homes/{homeId}/catalog-imports/{importId}/confirm",
       multipart: false,
     ),
+    "correctFinishedReceiptLine": ApiOperation(
+      operationId: "correctFinishedReceiptLine",
+      method: "POST",
+      pathTemplate:
+          "/api/v1/homes/{homeId}/receipts/{receiptId}/line-corrections",
+      multipart: false,
+    ),
+    "correctReceiptPurchaseDate": ApiOperation(
+      operationId: "correctReceiptPurchaseDate",
+      method: "POST",
+      pathTemplate:
+          "/api/v1/homes/{homeId}/receipts/{receiptId}/date-corrections",
+      multipart: false,
+    ),
     "createAiExtraction": ApiOperation(
       operationId: "createAiExtraction",
       method: "POST",
@@ -908,6 +922,12 @@ final class ProvidentiaApiClient {
       pathTemplate: "/api/v1/homes/{homeId}/reports/suggestions",
       multipart: false,
     ),
+    "getSynchronizationDiagnostics": ApiOperation(
+      operationId: "getSynchronizationDiagnostics",
+      method: "GET",
+      pathTemplate: "/api/v1/homes/{homeId}/sync/diagnostics",
+      multipart: false,
+    ),
     "getSynchronizationOperationStatuses": ApiOperation(
       operationId: "getSynchronizationOperationStatuses",
       method: "POST",
@@ -1089,6 +1109,20 @@ final class ProvidentiaApiClient {
       pathTemplate: "/api/v1/catalog-contributions",
       multipart: false,
     ),
+    "listReceiptDateCorrections": ApiOperation(
+      operationId: "listReceiptDateCorrections",
+      method: "GET",
+      pathTemplate:
+          "/api/v1/homes/{homeId}/receipts/{receiptId}/date-corrections",
+      multipart: false,
+    ),
+    "listReceiptLineCorrections": ApiOperation(
+      operationId: "listReceiptLineCorrections",
+      method: "GET",
+      pathTemplate:
+          "/api/v1/homes/{homeId}/receipts/{receiptId}/line-corrections",
+      multipart: false,
+    ),
     "listReceipts": ApiOperation(
       operationId: "listReceipts",
       method: "GET",
@@ -1235,6 +1269,13 @@ final class ProvidentiaApiClient {
           "/api/v1/homes/{homeId}/ownership-transfers/{transferId}/reject",
       multipart: false,
     ),
+    "relinkShoppingListLine": ApiOperation(
+      operationId: "relinkShoppingListLine",
+      method: "PUT",
+      pathTemplate:
+          "/api/v1/homes/{homeId}/shopping-lists/{listId}/lines/{lineId}/product",
+      multipart: false,
+    ),
     "removeAccountEmail": ApiOperation(
       operationId: "removeAccountEmail",
       method: "POST",
@@ -1303,6 +1344,12 @@ final class ProvidentiaApiClient {
       pathTemplate: "/api/v1/me/security-codes",
       multipart: false,
     ),
+    "revalidateSynchronizationOperations": ApiOperation(
+      operationId: "revalidateSynchronizationOperations",
+      method: "POST",
+      pathTemplate: "/api/v1/homes/{homeId}/sync/revalidate",
+      multipart: false,
+    ),
     "reviewAiExtractionCandidate": ApiOperation(
       operationId: "reviewAiExtractionCandidate",
       method: "PUT",
@@ -1322,6 +1369,13 @@ final class ProvidentiaApiClient {
       method: "PUT",
       pathTemplate:
           "/api/v1/homes/{homeId}/ai/extractions/{extractionId}/observations/{decisionId}",
+      multipart: false,
+    ),
+    "reviewStockCountSession": ApiOperation(
+      operationId: "reviewStockCountSession",
+      method: "POST",
+      pathTemplate:
+          "/api/v1/homes/{homeId}/stock-count-sessions/{sessionId}/review",
       multipart: false,
     ),
     "revokeAiProviderProfileCredential": ApiOperation(
@@ -1866,6 +1920,44 @@ final class ProvidentiaApiClient {
     return invokeOperation(
       operationId: "confirmHomeCatalogImport",
       pathParameters: <String, String>{"homeId": homeId, "importId": importId},
+      query: query,
+      headers: headers,
+      body: body,
+    );
+  }
+
+  Future<ApiResponse> correctFinishedReceiptLine({
+    required String homeId,
+    required String receiptId,
+    required Map<String, Object?> body,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "correctFinishedReceiptLine",
+      pathParameters: <String, String>{
+        "homeId": homeId,
+        "receiptId": receiptId,
+      },
+      query: query,
+      headers: headers,
+      body: body,
+    );
+  }
+
+  Future<ApiResponse> correctReceiptPurchaseDate({
+    required String homeId,
+    required String receiptId,
+    required Map<String, Object?> body,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "correctReceiptPurchaseDate",
+      pathParameters: <String, String>{
+        "homeId": homeId,
+        "receiptId": receiptId,
+      },
       query: query,
       headers: headers,
       body: body,
@@ -2708,6 +2800,19 @@ final class ProvidentiaApiClient {
     );
   }
 
+  Future<ApiResponse> getSynchronizationDiagnostics({
+    required String homeId,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "getSynchronizationDiagnostics",
+      pathParameters: <String, String>{"homeId": homeId},
+      query: query,
+      headers: headers,
+    );
+  }
+
   Future<ApiResponse> getSynchronizationOperationStatuses({
     required String homeId,
     required Map<String, Object?> body,
@@ -3081,6 +3186,40 @@ final class ProvidentiaApiClient {
     );
   }
 
+  Future<ApiResponse> listReceiptDateCorrections({
+    required String homeId,
+    required String receiptId,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "listReceiptDateCorrections",
+      pathParameters: <String, String>{
+        "homeId": homeId,
+        "receiptId": receiptId,
+      },
+      query: query,
+      headers: headers,
+    );
+  }
+
+  Future<ApiResponse> listReceiptLineCorrections({
+    required String homeId,
+    required String receiptId,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "listReceiptLineCorrections",
+      pathParameters: <String, String>{
+        "homeId": homeId,
+        "receiptId": receiptId,
+      },
+      query: query,
+      headers: headers,
+    );
+  }
+
   Future<ApiResponse> listReceipts({
     required String homeId,
     Map<String, String>? query,
@@ -3417,6 +3556,27 @@ final class ProvidentiaApiClient {
     );
   }
 
+  Future<ApiResponse> relinkShoppingListLine({
+    required String homeId,
+    required String listId,
+    required String lineId,
+    required Map<String, Object?> body,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "relinkShoppingListLine",
+      pathParameters: <String, String>{
+        "homeId": homeId,
+        "listId": listId,
+        "lineId": lineId,
+      },
+      query: query,
+      headers: headers,
+      body: body,
+    );
+  }
+
   Future<ApiResponse> removeAccountEmail({
     required String emailId,
     required Map<String, Object?> body,
@@ -3580,6 +3740,21 @@ final class ProvidentiaApiClient {
     );
   }
 
+  Future<ApiResponse> revalidateSynchronizationOperations({
+    required String homeId,
+    required Map<String, Object?> body,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "revalidateSynchronizationOperations",
+      pathParameters: <String, String>{"homeId": homeId},
+      query: query,
+      headers: headers,
+      body: body,
+    );
+  }
+
   Future<ApiResponse> reviewAiExtractionCandidate({
     required String homeId,
     required String extractionId,
@@ -3636,6 +3811,25 @@ final class ProvidentiaApiClient {
         "homeId": homeId,
         "extractionId": extractionId,
         "decisionId": decisionId,
+      },
+      query: query,
+      headers: headers,
+      body: body,
+    );
+  }
+
+  Future<ApiResponse> reviewStockCountSession({
+    required String homeId,
+    required String sessionId,
+    required Map<String, Object?> body,
+    Map<String, String>? query,
+    Map<String, String> headers = const <String, String>{},
+  }) {
+    return invokeOperation(
+      operationId: "reviewStockCountSession",
+      pathParameters: <String, String>{
+        "homeId": homeId,
+        "sessionId": sessionId,
       },
       query: query,
       headers: headers,
