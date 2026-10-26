@@ -16,6 +16,100 @@ const String _homeProduct = '0198a0b1-c2d3-7e4f-a678-9abcdef01234';
 const String _homeCategory = '0198a0b1-c2d3-7e4f-8678-9abcdef01234';
 
 void main() {
+  test('loads signed zero and distinct home links sharing a pack', () async {
+    final source = GeneratedHomeItemMasterSource(
+      _client(
+        (_) async => _page(
+          data: [
+            _item(
+              productId: _productOne,
+              packId: _packOne,
+              homeProductId: _homeProduct,
+              quantity: '-2.25',
+            ),
+            _item(
+              productId: _productOne,
+              packId: _packOne,
+              homeProductId: _homeCategory,
+              quantity: '0',
+            ),
+            _item(
+              productId: _productTwo,
+              packId: _packTwo,
+              homeProductId: null,
+              quantity: '0',
+            ),
+          ],
+          offset: 0,
+          total: 3,
+          hasMore: false,
+          nextOffset: null,
+        ),
+      ),
+    );
+    final rows = await source.loadAll(homeId: _homeId);
+    expect(rows.map((row) => row.currentQuantity), [-2.25, 0, null]);
+    expect(rows.map((row) => row.id).toSet(), hasLength(3));
+  });
+
+  for (final quantity in ['NaN', 'Infinity', 'invalid']) {
+    test(
+      'malformed quantity $quantity remains an explicit read failure',
+      () async {
+        final source = GeneratedHomeItemMasterSource(
+          _client(
+            (_) async => _page(
+              data: [
+                _item(
+                  productId: _productOne,
+                  packId: _packOne,
+                  homeProductId: _homeProduct,
+                  quantity: quantity,
+                ),
+              ],
+              offset: 0,
+              total: 1,
+              hasMore: false,
+              nextOffset: null,
+            ),
+          ),
+        );
+        await expectLater(
+          source.loadAll(homeId: _homeId),
+          throwsFormatException,
+        );
+      },
+    );
+  }
+
+  test(
+    'empty domain name becomes safe FormatException rather than ArgumentError',
+    () async {
+      final source = GeneratedHomeItemMasterSource(
+        _client(
+          (_) async => _page(
+            data: [
+              {
+                ..._item(
+                  productId: _productOne,
+                  packId: _packOne,
+                  homeProductId: _homeProduct,
+                  quantity: '1',
+                ),
+                'canonicalName': '',
+              },
+            ],
+            offset: 0,
+            total: 1,
+            hasMore: false,
+            nextOffset: null,
+          ),
+        ),
+      );
+      await expectLater(source.loadAll(homeId: _homeId), throwsFormatException);
+    },
+  );
+
   test(
     'loads every stable item-master page without losing pack identity',
     () async {

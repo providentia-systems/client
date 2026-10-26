@@ -72,6 +72,10 @@ final class ItemMasterRefreshingSynchronization
       };
     } on FormatException {
       return _staleCatalog(outcome);
+    } on ArgumentError {
+      // Domain validation errors are not Exceptions. Preserve the last verified
+      // snapshot rather than letting one invalid row look like an empty home.
+      return _staleCatalog(outcome);
     } on Exception {
       return _staleCatalog(outcome);
     }
