@@ -119,6 +119,29 @@ void main() {
     },
   );
 
+  for (final name in <String?>[null, '', '   ']) {
+    test('missing or blank inventory name keeps the unresolved row', () async {
+      final repository = GeneratedHouseholdReportRepository(
+        _client((request) async {
+          final body = _reportForPath(request.url.path);
+          if (request.url.path.endsWith('/inventory')) {
+            (body['data']! as List)
+                    .cast<Map<String, Object?>>()
+                    .single['productName'] =
+                name;
+          }
+          return _json(body);
+        }),
+      );
+      final fact = (await repository.load(
+        homeId: _homeId,
+      )).inventoryFacts.single;
+      expect(fact.homeProductId, _homeProductId);
+      expect(fact.productName, 'Unresolved product');
+      expect(fact.factualQuantity, '12.12500001');
+    });
+  }
+
   for (final state in ['unknown', 'recorded', 'uncertain']) {
     test(
       'preserves $state inventory evidence and signed ledger values',

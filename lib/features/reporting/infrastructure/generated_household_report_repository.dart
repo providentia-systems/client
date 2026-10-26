@@ -175,10 +175,13 @@ InventoryReportFact _inventoryFact(Map<String, Object?> object, String homeId) {
       (state == 'recorded' && uncertain)) {
     throw const FormatException('Inconsistent inventory evidence state.');
   }
+  final productName = _optionalString(object['productName'], allowEmpty: true);
   return InventoryReportFact(
     homeId: homeId,
     homeProductId: _uuid(object, 'homeProductId'),
-    productName: _optionalString(object['productName']) ?? 'Unresolved product',
+    productName: productName == null || productName.trim().isEmpty
+        ? 'Unresolved product'
+        : productName,
     packText: _string(object, 'packText', allowEmpty: true),
     factualQuantity: quantity,
     stockUnit: _optionalString(object['stockUnit'], allowEmpty: true) ?? '',
