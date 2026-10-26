@@ -113,7 +113,7 @@ final class _ReadyReport extends StatelessWidget {
                 (line) => _ReportRow(
                   title: line.pricingComplete
                       ? '${line.month} · ${line.currency} ${line.total}'
-                      : '${line.month} · Total unknown',
+                      : '${line.month} · ${line.currency} total unknown',
                   detail:
                       '${line.receiptCount} receipt'
                       '${line.receiptCount == 1 ? '' : 's'}'

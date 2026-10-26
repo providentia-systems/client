@@ -92,6 +92,33 @@ void main() {
     },
   );
 
+  test(
+    'large aggregates and unresolved names retain readable exact rows',
+    () async {
+      final repository = GeneratedHouseholdReportRepository(
+        _client((request) async {
+          final body = _reportForPath(request.url.path);
+          if (request.url.path.endsWith('/inventory')) {
+            (body['data']! as List)
+                    .cast<Map<String, Object?>>()
+                    .single['productName'] =
+                null;
+          }
+          if (request.url.path.endsWith('/purchases')) {
+            (body['data']! as List)
+                    .cast<Map<String, Object?>>()
+                    .single['total'] =
+                '1999999999.98';
+          }
+          return _json(body);
+        }),
+      );
+      final report = await repository.load(homeId: _homeId);
+      expect(report.inventoryFacts.single.productName, 'Unresolved product');
+      expect(report.purchaseTotals.single.total, '1999999999.98');
+    },
+  );
+
   for (final state in ['unknown', 'recorded', 'uncertain']) {
     test(
       'preserves $state inventory evidence and signed ledger values',

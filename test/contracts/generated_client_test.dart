@@ -133,8 +133,16 @@ void main() {
       );
     });
 
-    test('publishes only the API 2.2.0 homeowner operation registry', () {
-      expect(ProvidentiaApiClient.operations, hasLength(168));
+    test('publishes only the API 2.4.0 homeowner operation registry', () {
+      expect(ProvidentiaApiClient.operations, hasLength(176));
+      expect(
+        ProvidentiaApiClient.operations.keys,
+        containsAll(<String>[
+          'correctFinishedReceiptLine',
+          'correctReceiptPurchaseDate',
+          'reviewStockCountSession',
+        ]),
+      );
       expect(
         ProvidentiaApiClient.operations['purchaseReceiptLine'],
         isA<ApiOperation>()
