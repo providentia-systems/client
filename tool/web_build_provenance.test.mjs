@@ -27,6 +27,8 @@ test('web provenance requires committed source and refuses mismatched contract b
     const provenance = JSON.parse(await readFile(path.join(root, 'web/build-provenance.json'), 'utf8'));
     assert.equal(provenance.clientRevision, git('rev-parse', 'HEAD'));
     assert.equal(provenance.contractSha256, digest);
+    assert.equal(provenance.PROVIDENTIA_BUILD_REVISION, provenance.clientRevision);
+    assert.equal(provenance.PROVIDENTIA_CONTRACT_SHA256, digest);
     await writeFile(path.join(root, 'uncommitted.dart'), '// synthetic source change\n');
     assert.throws(run, /uncommitted source workspace/u);
     await assert.rejects(readFile(path.join(root, 'web/build-provenance.json')), {code: 'ENOENT'});

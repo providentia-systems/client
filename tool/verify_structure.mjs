@@ -325,6 +325,7 @@ const generatedClientAdapters = new Set([
   'lib/features/inventory/infrastructure/generated_home_item_master_source.dart',
       'lib/features/inventory/infrastructure/generated_published_category_source.dart',
   'lib/features/inventory/infrastructure/item_master_refreshing_synchronization.dart',
+  'lib/features/purchasing/infrastructure/generated_purchase_receipt_history_reader.dart',
   'lib/features/reporting/infrastructure/generated_household_report_repository.dart',
   'lib/features/shopping/infrastructure/generated_online_shopping_suggestion_repository.dart',
 ]);

@@ -13,5 +13,5 @@ const hash = createHash('sha256').update(contract).digest('hex');
 if (hash !== lock.sha256) throw new Error('Cannot package a mismatched contract.');
 const revision = execFileSync('git', ['rev-parse', 'HEAD'], {cwd: fileURLToPath(root), encoding: 'utf8'}).trim();
 if (!/^[0-9a-f]{40}$/u.test(revision)) throw new Error('A complete source revision is required.');
-await writeFile(new URL('web/build-provenance.json', root), `${JSON.stringify({schemaVersion: 1, clientRevision: revision, contractVersion: lock.version, contractSha256: hash}, null, 2)}\n`);
+await writeFile(new URL('web/build-provenance.json', root), `${JSON.stringify({schemaVersion: 1, clientRevision: revision, contractVersion: lock.version, contractSha256: hash, PROVIDENTIA_BUILD_REVISION: revision, PROVIDENTIA_CONTRACT_VERSION: lock.version, PROVIDENTIA_CONTRACT_SHA256: hash}, null, 2)}\n`);
 console.log(`Embedded Client ${revision} and API ${lock.version} provenance.`);

@@ -49,3 +49,6 @@ Thumbs.db
 
 # Generated source metadata embedded by web build/release workflows
 /web/build-provenance.json
+
+# Generated golden comparison images
+/test/goldens/failures/

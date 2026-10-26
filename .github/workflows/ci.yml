@@ -140,7 +140,7 @@ jobs:
           - target: web
             os: ubuntu-24.04
             installer: linux
-            command: flutter build web --release
+            command: flutter build web --release --dart-define-from-file=web/build-provenance.json
             artifact: build/web
           - target: linux
             os: ubuntu-24.04

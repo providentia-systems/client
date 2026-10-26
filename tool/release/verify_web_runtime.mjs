@@ -57,10 +57,18 @@ try {
   const response = await page.goto(target.href, {waitUntil: 'networkidle'});
   assert(response?.ok(), `Initial page returned HTTP ${response?.status() ?? 'unknown'}.`);
   evidence.checks.initialLoad = true;
-  const provenanceResponse = await context.request.get(new URL('build-provenance.json', target).href);
-  assert(provenanceResponse.ok(), 'The installed Client build-provenance.json is unavailable; deploy a build that records its exact source.');
-  evidence.installedClient = await provenanceResponse.json();
-  assert(/^[0-9a-f]{40}$/u.test(evidence.installedClient?.clientRevision ?? ''), 'The installed Client source revision is incomplete.');
+  await page.waitForFunction(() => globalThis.providentiaBuildIdentity !== undefined, undefined, {timeout: 30_000});
+  evidence.installedClient = await page.evaluate(() => globalThis.providentiaBuildIdentity);
+  assert(/^[0-9a-f]{40}$/u.test(evidence.installedClient?.clientRevision ?? ''),
+    'The running Client was built without a complete compiled source identity.');
+  const baseUri = await page.evaluate(() => document.baseURI);
+  const provenanceResponse = await context.request.get(new URL('build-provenance.json', baseUri).href);
+  assert(provenanceResponse.ok(), 'The served Client artifact provenance is unavailable.');
+  const served = await provenanceResponse.json();
+  for (const key of ['clientRevision', 'contractVersion', 'contractSha256']) {
+    assert(served[key] === evidence.installedClient[key],
+      'The running cached Client differs from the served release artifact; acceptance cannot establish one installed build.');
+  }
   evidence.checks.clientBuildIdentity = true;
 
   const manifestHref = await page.locator('link[rel="manifest"]').getAttribute('href');
