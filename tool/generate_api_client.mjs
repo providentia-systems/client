@@ -198,7 +198,7 @@ function validateContract(document) {
     }
   }
   if (operationIds.size !== 244) {
-    throw new Error(`Expected the API 2.4 surface, found ${operationIds.size} operations.`);
+    throw new Error(`Expected the API 2.4.0 surface, found ${operationIds.size} operations.`);
   }
 
   // Human authentication uses bound email codes. Password and approval-link

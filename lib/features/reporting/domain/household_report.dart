@@ -28,8 +28,8 @@ final class HouseholdReportMetadata implements HomeScopedReportLine {
 
 /// Evidence classification supplied by the reporting contract.
 ///
-/// [unavailable] is an older/incomplete response, not confirmation that its
-/// numeric projection was physically counted.
+/// [unavailable] is older, incomplete or future evidence metadata, not
+/// confirmation that its numeric projection was physically counted.
 enum InventoryReportQuantityState { unknown, recorded, uncertain, unavailable }
 
 /// A signed ledger projection and its independently described stock evidence.

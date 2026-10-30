@@ -180,11 +180,13 @@ InventoryReportFact _inventoryFact(Map<String, Object?> object, String homeId) {
       (state == InventoryReportQuantityState.uncertain && uncertain == false)) {
     throw const FormatException('Contradictory inventory quantity evidence.');
   }
+  final productName = _optionalString(object['productName'], allowEmpty: true);
   return InventoryReportFact(
     homeId: homeId,
     homeProductId: _uuid(object, 'homeProductId'),
-    productName:
-        _optionalString(object['productName']) ?? 'Product name unavailable',
+    productName: productName == null || productName.trim().isEmpty
+        ? 'Unresolved product'
+        : productName,
     packText: _optionalString(object['packText'], allowEmpty: true) ?? '',
     factualQuantity: quantity,
     quantityState: state,
@@ -212,8 +214,21 @@ PurchaseReportTotal _purchaseTotal(Map<String, Object?> object, String homeId) {
   }
   final total = _optionalReportDecimal(object['total']);
   final complete = _optionalBoolean(object['pricingComplete']);
+  final source = switch (object['amountSource']) {
+    null => PurchaseReportAmountSource.unavailable,
+    'declared' => PurchaseReportAmountSource.declared,
+    'derived' => PurchaseReportAmountSource.derived,
+    'mixed' => PurchaseReportAmountSource.mixed,
+    'partial' => PurchaseReportAmountSource.partial,
+    'unknown' => PurchaseReportAmountSource.unknown,
+    String() => PurchaseReportAmountSource.unavailable,
+    _ => throw const FormatException('Invalid purchase amount source.'),
+  };
   if ((complete == true && total == null) ||
-      (complete == false && total != null)) {
+      (complete == false && total != null) ||
+      (complete == true &&
+          (source == PurchaseReportAmountSource.partial ||
+              source == PurchaseReportAmountSource.unknown))) {
     throw const FormatException('Contradictory purchase pricing completeness.');
   }
   return PurchaseReportTotal(
@@ -226,16 +241,7 @@ PurchaseReportTotal _purchaseTotal(Map<String, Object?> object, String homeId) {
     total: total,
     knownSubtotal: _optionalReportDecimal(object['knownSubtotal']),
     pricingComplete: complete,
-    amountSource: switch (object['amountSource']) {
-      null => PurchaseReportAmountSource.unavailable,
-      'declared' => PurchaseReportAmountSource.declared,
-      'derived' => PurchaseReportAmountSource.derived,
-      'mixed' => PurchaseReportAmountSource.mixed,
-      'partial' => PurchaseReportAmountSource.partial,
-      'unknown' => PurchaseReportAmountSource.unknown,
-      String() => PurchaseReportAmountSource.unavailable,
-      _ => throw const FormatException('Invalid purchase amount source.'),
-    },
+    amountSource: source,
     completeReceiptCount: _optionalNonNegativeInteger(
       object['completeReceiptCount'],
     ),

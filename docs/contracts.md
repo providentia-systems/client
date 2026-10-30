@@ -14,6 +14,9 @@ local `providentia_api_client` Dart package.
 ## Current pin
 
 - Client OpenAPI version: `2.4.0`
+- Contract SHA-256: `2b7b38490dc42ad967cfff7e32dd56db41d30842a7d39845b9beecb7f7d4e254`
+- Canonical backend operations: 244
+- Generated homeowner operations: 176
 - Exact contract SHA-256 and operation counts: [contract lock](../contracts/contract.lock.json)
   and [generation manifest](../contracts/generated/providentia_api_client/generation-manifest.json).
 - Backend source: the paired `providentia-systems/backend#39` implementation.
@@ -40,6 +43,19 @@ for email-code verification, refresh, logout and authenticated reads/writes.
 The HttpOnly homeowner cookie namespace and its CSRF proof remain distinct
 from Admin and legacy cookies. Native requests retain bearer transport and do
 not select a browser cookie namespace.
+
+The production report adapter preserves nullable stock evidence, uncertainty,
+pending quantities and limitations.
+Monthly purchase totals remain nullable when pricing is incomplete; available
+amounts appear as an explicitly incomplete known subtotal. An explicit declared
+receipt total retains discounts and takes precedence over product line subtotals.
+
+The paired backend CI exercises real HTTP, handwritten report parsing and durable
+Drift/outbox recovery against its pinned Client revision. These checks do not
+establish that an installed browser/native build has been upgraded or that a
+particular user's pending queue has recovered. Generated endpoint availability
+alone does not establish that the paired server accepts every workflow; see the
+[acceptance matrix](client-28-46-acceptance.md) for remaining dependencies.
 
 Application-owned adapters compose:
 

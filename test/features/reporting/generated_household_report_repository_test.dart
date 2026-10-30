@@ -93,6 +93,168 @@ void main() {
   );
 
   test(
+    'large aggregates and unresolved names retain readable exact rows',
+    () async {
+      final repository = GeneratedHouseholdReportRepository(
+        _client((request) async {
+          final body = _reportForPath(request.url.path);
+          if (request.url.path.endsWith('/inventory')) {
+            (body['data']! as List)
+                    .cast<Map<String, Object?>>()
+                    .single['productName'] =
+                null;
+          }
+          if (request.url.path.endsWith('/purchases')) {
+            (body['data']! as List)
+                    .cast<Map<String, Object?>>()
+                    .single['total'] =
+                '1999999999.98';
+          }
+          return _json(body);
+        }),
+      );
+      final report = await repository.load(homeId: _homeId);
+      expect(report.inventoryFacts.single.productName, 'Unresolved product');
+      expect(report.purchaseTotals.single.total, '1999999999.98');
+    },
+  );
+
+  for (final name in <String?>[null, '', '   ']) {
+    test('missing or blank inventory name keeps the unresolved row', () async {
+      final repository = GeneratedHouseholdReportRepository(
+        _client((request) async {
+          final body = _reportForPath(request.url.path);
+          if (request.url.path.endsWith('/inventory')) {
+            (body['data']! as List)
+                    .cast<Map<String, Object?>>()
+                    .single['productName'] =
+                name;
+          }
+          return _json(body);
+        }),
+      );
+      final fact = (await repository.load(
+        homeId: _homeId,
+      )).inventoryFacts.single;
+      expect(fact.homeProductId, _homeProductId);
+      expect(fact.productName, 'Unresolved product');
+      expect(fact.factualQuantity, '12.12500001');
+    });
+  }
+
+  for (final state in ['unknown', 'recorded', 'uncertain']) {
+    test(
+      'preserves $state inventory evidence and signed ledger values',
+      () async {
+        final repository = GeneratedHouseholdReportRepository(
+          _client((request) async {
+            final body = _reportForPath(request.url.path);
+            if (request.url.path.endsWith('/inventory')) {
+              final row =
+                  (body['data']! as List).single as Map<String, Object?>;
+              row.addAll({
+                'factualQuantity': state == 'unknown'
+                    ? null
+                    : state == 'recorded'
+                    ? '0'
+                    : '-1.25',
+                'stockUnit': 'kg',
+                'quantityState': state,
+                'uncertain': state == 'uncertain',
+                'pendingQuantity': state == 'unknown' ? null : '0.25',
+                'limitations': ['Synthetic chronology limitation'],
+                'checkpointId': _movementId,
+              });
+            }
+            return _json(body);
+          }),
+        );
+        final fact = (await repository.load(
+          homeId: _homeId,
+        )).inventoryFacts.single;
+        expect(
+          fact.quantityState,
+          InventoryReportQuantityState.values.byName(state),
+        );
+        expect(
+          fact.factualQuantity,
+          state == 'unknown'
+              ? null
+              : state == 'recorded'
+              ? '0'
+              : '-1.25',
+        );
+        expect(fact.stockUnit, 'kg');
+        expect(fact.uncertain, state == 'uncertain');
+        expect(fact.pendingQuantity, state == 'unknown' ? null : '0.25');
+        expect(fact.limitations, ['Synthetic chronology limitation']);
+        expect(fact.checkpointId, _movementId);
+      },
+    );
+  }
+
+  for (final source in ['declared', 'derived', 'mixed', 'partial', 'unknown']) {
+    test(
+      'preserves $source prices without inventing a complete zero',
+      () async {
+        final complete = !['partial', 'unknown'].contains(source);
+        final repository = GeneratedHouseholdReportRepository(
+          _client((request) async {
+            final body = _reportForPath(request.url.path);
+            if (request.url.path.endsWith('/purchases')) {
+              final row =
+                  (body['data']! as List).single as Map<String, Object?>;
+              row.addAll({
+                'total': complete ? '0' : null,
+                'knownSubtotal': source == 'unknown' ? null : '0',
+                'pricingComplete': complete,
+                'amountSource': source,
+                'completeReceiptCount': complete ? 2 : 0,
+                'partialReceiptCount': source == 'partial' ? 2 : 0,
+                'unknownReceiptCount': source == 'unknown' ? 2 : 0,
+                'declaredReceiptCount': source == 'declared' ? 2 : 0,
+                'derivedReceiptCount': source == 'derived' ? 2 : 0,
+              });
+            }
+            return _json(body);
+          }),
+        );
+        final total = (await repository.load(
+          homeId: _homeId,
+        )).purchaseTotals.single;
+        expect(total.total, complete ? '0' : null);
+        expect(total.knownSubtotal, source == 'unknown' ? null : '0');
+        expect(total.pricingComplete, complete);
+        expect(
+          total.amountSource,
+          PurchaseReportAmountSource.values.byName(source),
+        );
+      },
+    );
+  }
+
+  test(
+    'malformed evidence discriminator is rejected at adapter boundary',
+    () async {
+      final repository = GeneratedHouseholdReportRepository(
+        _client((request) async {
+          final body = _reportForPath(request.url.path);
+          if (request.url.path.endsWith('/inventory')) {
+            ((body['data']! as List).single
+                    as Map<String, Object?>)['quantityState'] =
+                42;
+          }
+          return _json(body);
+        }),
+      );
+      await expectLater(
+        repository.load(homeId: _homeId),
+        throwsA(isA<ReportRepositoryException>()),
+      );
+    },
+  );
+
+  test(
     'preserves explicit unknown, recorded zero and signed uncertain stock',
     () async {
       final repository = GeneratedHouseholdReportRepository(
@@ -214,7 +376,7 @@ void main() {
       )).inventoryFacts.single;
       expect(row.factualQuantity, isNull);
       expect(row.quantityState, InventoryReportQuantityState.unavailable);
-      expect(row.productName, 'Product name unavailable');
+      expect(row.productName, 'Unresolved product');
       expect(row.packText, '');
       expect(row.stockUnit, isNull);
     },
@@ -373,7 +535,7 @@ void main() {
       );
       final report = await repository.load(homeId: _homeId);
       final stock = report.inventoryFacts.single;
-      expect(stock.productName, 'Product name unavailable');
+      expect(stock.productName, 'Unresolved product');
       expect(stock.factualQuantity, '-1234567890.123456789');
       expect(stock.quantityState, InventoryReportQuantityState.unavailable);
       expect(stock.uncertain, isTrue);
@@ -383,6 +545,62 @@ void main() {
         PurchaseReportAmountSource.unavailable,
       );
       expect(report.purchaseTotals.single.pricingComplete, isNull);
+    },
+  );
+
+  for (final source in ['partial', 'unknown']) {
+    test('rejects complete total with $source pricing provenance', () async {
+      final repository = GeneratedHouseholdReportRepository(
+        _client((request) async {
+          final body = _reportForPath(request.url.path);
+          if (request.url.path.endsWith('/purchases')) {
+            final row = (body['data']! as List).single as Map<String, Object?>;
+            row.addAll({
+              'total': '0',
+              'pricingComplete': true,
+              'amountSource': source,
+            });
+          }
+          return _json(body);
+        }),
+      );
+      await expectLater(
+        repository.load(homeId: _homeId),
+        throwsA(
+          isA<ReportRepositoryException>().having(
+            (error) => error.kind,
+            'kind',
+            ReportRepositoryFailureKind.invalidResponse,
+          ),
+        ),
+      );
+    });
+  }
+
+  test(
+    'malformed pricing provenance is rejected at adapter boundary',
+    () async {
+      final repository = GeneratedHouseholdReportRepository(
+        _client((request) async {
+          final body = _reportForPath(request.url.path);
+          if (request.url.path.endsWith('/purchases')) {
+            ((body['data']! as List).single
+                    as Map<String, Object?>)['amountSource'] =
+                42;
+          }
+          return _json(body);
+        }),
+      );
+      await expectLater(
+        repository.load(homeId: _homeId),
+        throwsA(
+          isA<ReportRepositoryException>().having(
+            (error) => error.kind,
+            'kind',
+            ReportRepositoryFailureKind.invalidResponse,
+          ),
+        ),
+      );
     },
   );
 

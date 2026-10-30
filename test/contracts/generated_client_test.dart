@@ -135,16 +135,17 @@ void main() {
 
     test('publishes only the API 2.4.0 homeowner operation registry', () {
       expect(ProvidentiaApiClient.operations, hasLength(176));
-      for (final operation in <String>[
-        'correctFinishedReceiptLine',
-        'correctReceiptPurchaseDate',
-        'reviewStockCountSession',
-        'relinkShoppingListLine',
-        'getSynchronizationDiagnostics',
-        'revalidateSynchronizationOperations',
-      ]) {
-        expect(ProvidentiaApiClient.operations, contains(operation));
-      }
+      expect(
+        ProvidentiaApiClient.operations.keys,
+        containsAll(<String>[
+          'correctFinishedReceiptLine',
+          'correctReceiptPurchaseDate',
+          'reviewStockCountSession',
+          'relinkShoppingListLine',
+          'getSynchronizationDiagnostics',
+          'revalidateSynchronizationOperations',
+        ]),
+      );
       expect(
         ProvidentiaApiClient.operations['purchaseReceiptLine'],
         isA<ApiOperation>()
