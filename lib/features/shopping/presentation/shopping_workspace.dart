@@ -5,6 +5,7 @@ import 'package:providentia/features/inventory/domain/inventory_models.dart';
 import 'package:providentia/features/shopping/domain/online_shopping_suggestion_models.dart';
 import 'package:providentia/features/shopping/domain/shopping_models.dart';
 import 'package:providentia/features/shopping/presentation/shopping_controller.dart';
+import 'package:providentia/features/shopping/presentation/shopping_relink_dialog.dart';
 
 class ShoppingWorkspace extends StatefulWidget {
   const ShoppingWorkspace({required this.controller, super.key});
@@ -20,6 +21,8 @@ class _ShoppingWorkspaceState extends State<ShoppingWorkspace> {
   final TextEditingController _draft = TextEditingController();
   final TextEditingController _quantityDraft = TextEditingController(text: '1');
   String? _selectedProductId;
+  String? _selectedPackId;
+  final _instructions = TextEditingController();
   String? _entryError;
   var _quantityReset = 0;
 
@@ -36,6 +39,7 @@ class _ShoppingWorkspaceState extends State<ShoppingWorkspace> {
     setState(() {
       if (selected == null || _draft.text != _productLabel(selected)) {
         _selectedProductId = null;
+        _selectedPackId = null;
       }
       _entryError = null;
     });
@@ -66,6 +70,7 @@ class _ShoppingWorkspaceState extends State<ShoppingWorkspace> {
     _draft.removeListener(_textChanged);
     _draft.dispose();
     _quantityDraft.dispose();
+    _instructions.dispose();
     super.dispose();
   }
 
@@ -140,13 +145,60 @@ class _ShoppingWorkspaceState extends State<ShoppingWorkspace> {
                 key: ObjectKey(widget.controller),
                 child: _manualEntry(),
               ),
-              if (_selectedProduct case final product?)
+              if (_selectedProduct case final product?) ...[
                 Text(
-                  'Selected household product: ${product.canonicalName}. '
-                  'Quantity uses this product’s stock measurement (${product.unit}).',
+                  'Selected household product: ${product.canonicalName}. Choose its stock measurement or compatible buying pack.',
                   key: const Key('shopping-selected-product'),
-                )
-              else if (_draft.text.trim().isNotEmpty)
+                ),
+                DropdownButtonFormField<String>(
+                  key: ValueKey('shopping-manual-pack-${product.id}'),
+                  initialValue: _selectedPackId ?? '',
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Quantity refers to',
+                  ),
+                  items: [
+                    DropdownMenuItem(
+                      value: '',
+                      child: Text('Stock measurement (${product.unit})'),
+                    ),
+                    if (_selectedPackId != null &&
+                        !widget.controller
+                            .packChoices(product.id)
+                            .any((pack) => pack.id == _selectedPackId))
+                      DropdownMenuItem(
+                        value: _selectedPackId,
+                        enabled: false,
+                        child: const Text(
+                          'Selected pack unavailable — choose again',
+                        ),
+                      ),
+                    for (final pack in widget.controller.packChoices(
+                      product.id,
+                    ))
+                      DropdownMenuItem(
+                        value: pack.id,
+                        child: Text('Packs: ${pack.label}'),
+                      ),
+                  ],
+                  onChanged: widget.controller.manualBusy
+                      ? null
+                      : (value) => setState(
+                          () => _selectedPackId = value == '' ? null : value,
+                        ),
+                ),
+                TextField(
+                  key: const Key('shopping-manual-instructions'),
+                  controller: _instructions,
+                  enabled: !widget.controller.manualBusy,
+                  maxLength: 191,
+                  decoration: const InputDecoration(
+                    labelText: 'Purchasing instructions (optional)',
+                    helperText:
+                        'Instructions do not change the selected product.',
+                  ),
+                ),
+              ] else if (_draft.text.trim().isNotEmpty)
                 Align(
                   alignment: Alignment.centerLeft,
                   child: TextButton(
@@ -258,6 +310,20 @@ class _ShoppingWorkspaceState extends State<ShoppingWorkspace> {
               ))
                 _ShoppingLineTile(
                   line: line,
+                  productLabel: widget.controller.linkedProductLabel(line),
+                  quantityLabel: widget.controller.quantityLabel(line),
+                  onRelink:
+                      widget.controller.canRelinkLines &&
+                          !list.archived &&
+                          !line.archived
+                      ? () => showDialog<void>(
+                          context: context,
+                          builder: (_) => ShoppingRelinkDialog(
+                            controller: widget.controller,
+                            line: line,
+                          ),
+                        )
+                      : null,
                   onToggle: list.archived || line.archived
                       ? null
                       : () => widget.controller.toggle(line.id),
@@ -321,6 +387,7 @@ class _ShoppingWorkspaceState extends State<ShoppingWorkspace> {
       ),
       onSelected: (id) => setState(() {
         _selectedProductId = id;
+        _selectedPackId = null;
         _entryError = null;
       }),
     );
@@ -489,7 +556,10 @@ class _ShoppingWorkspaceState extends State<ShoppingWorkspace> {
     final listId = controller.state.list?.id;
     final duplicate = product == null
         ? null
-        : controller.duplicateForProduct(product.id);
+        : controller.duplicateForProduct(
+            product.id,
+            selectedPackId: _selectedPackId,
+          );
     var separate = false;
     if (duplicate != null) {
       final choice = await showDialog<bool>(
@@ -498,7 +568,7 @@ class _ShoppingWorkspaceState extends State<ShoppingWorkspace> {
           title: const Text('Product already on this list'),
           content: Text(
             '${duplicate.name} already has quantity ${_formatQuantity(duplicate.quantity)}. '
-            'Add ${_formatQuantity(quantity)} to that quantity or keep a separate line?',
+            'Add ${_formatQuantity(quantity)} to that quantity or keep a separate line? Existing instructions are retained when quantities are combined.',
           ),
           actions: <Widget>[
             TextButton(
@@ -534,10 +604,14 @@ class _ShoppingWorkspaceState extends State<ShoppingWorkspace> {
             quantity: quantity,
             homeProductId: product?.id,
             allowDuplicate: separate,
+            selectedPackId: product == null ? null : _selectedPackId,
+            instructions: product == null ? null : _instructions.text,
           );
     if (mounted && widget.controller == controller && saved) {
       setState(() {
         _selectedProductId = null;
+        _selectedPackId = null;
+        _instructions.clear();
         _draft.clear();
         _quantityDraft.text = '1';
         _quantityReset++;
@@ -970,6 +1044,9 @@ class _ShoppingLineTile extends StatelessWidget {
   const _ShoppingLineTile({
     required this.line,
     required this.onToggle,
+    required this.productLabel,
+    required this.quantityLabel,
+    this.onRelink,
     this.onEdit,
     this.onArchive,
     required this.canEditQuantity,
@@ -981,6 +1058,9 @@ class _ShoppingLineTile extends StatelessWidget {
 
   final ShoppingListLine line;
   final VoidCallback? onToggle;
+  final String productLabel;
+  final String quantityLabel;
+  final VoidCallback? onRelink;
   final VoidCallback? onEdit;
   final VoidCallback? onArchive;
   final bool canEditQuantity;
@@ -1032,6 +1112,10 @@ class _ShoppingLineTile extends StatelessWidget {
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: <Widget>[
                   Text('Quantity: ${_formatQuantity(line.quantity)}'),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 6),
+                    child: Text(quantityLabel),
+                  ),
                   if (onEdit != null && !line.archived)
                     IconButton(
                       tooltip: 'Edit item',
@@ -1058,6 +1142,22 @@ class _ShoppingLineTile extends StatelessWidget {
                 ],
               ),
             ),
+            Padding(
+              padding: const EdgeInsets.only(left: 8),
+              child: Text('Product: $productLabel'),
+            ),
+            if (line.pending)
+              const Padding(
+                padding: EdgeInsets.only(left: 8),
+                child: Text('Saved locally · awaiting synchronization'),
+              ),
+            if (onRelink != null)
+              TextButton.icon(
+                key: Key('relink-shopping-line-${line.id}'),
+                onPressed: onRelink,
+                icon: const Icon(Icons.link),
+                label: const Text('Change product or pack'),
+              ),
             if (suggested) ...<Widget>[
               if (explanation != null && explanation.isNotEmpty)
                 TextButton.icon(

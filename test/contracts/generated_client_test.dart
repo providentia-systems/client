@@ -141,6 +141,9 @@ void main() {
           'correctFinishedReceiptLine',
           'correctReceiptPurchaseDate',
           'reviewStockCountSession',
+          'relinkShoppingListLine',
+          'getSynchronizationDiagnostics',
+          'revalidateSynchronizationOperations',
         ]),
       );
       expect(

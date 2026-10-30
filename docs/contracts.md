@@ -17,19 +17,45 @@ local `providentia_api_client` Dart package.
 - Contract SHA-256: `2b7b38490dc42ad967cfff7e32dd56db41d30842a7d39845b9beecb7f7d4e254`
 - Canonical backend operations: 244
 - Generated homeowner operations: 176
+- Exact contract SHA-256 and operation counts: [contract lock](../contracts/contract.lock.json)
+  and [generation manifest](../contracts/generated/providentia_api_client/generation-manifest.json).
+- Backend source: the paired `providentia-systems/backend#39` implementation.
 
-The exact artifact is paired with backend PR #39. The production report adapter
-preserves nullable stock evidence, uncertainty, pending quantities and limitations.
+API 2.4 extends 2.3 chronology, count evidence, calendar-day receipt dates,
+independent shopping packs/relinking, session namespaces and binding recovery
+with atomic audited finished-receipt line corrections and truthful reporting
+completeness. The generator verifies the exact supported operation surface and
+rejects changes that remove required dates, signed balances, chronology
+metadata or synchronization commands. Frozen archives, materialization
+checksums, locks and generated files move together.
+
+API 2.2 installations remain a historical regression boundary, not a supported
+pairing for the new workflows. A receipt response without
+`lineCorrectionState: available` cannot authorize a finished-line correction;
+older report responses show evidence as unavailable instead of certifying a
+quantity. Missing recovery endpoints retain saved operations and require a
+compatible backend. Deploy the paired backend migrations and release before
+installing this Client build. CI compatibility evidence is separate from
+installed browser/native acceptance and recovery of a real household.
+
+Browser requests consistently select `X-Providentia-Application: homeowner`
+for email-code verification, refresh, logout and authenticated reads/writes.
+The HttpOnly homeowner cookie namespace and its CSRF proof remain distinct
+from Admin and legacy cookies. Native requests retain bearer transport and do
+not select a browser cookie namespace.
+
+The production report adapter preserves nullable stock evidence, uncertainty,
+pending quantities and limitations.
 Monthly purchase totals remain nullable when pricing is incomplete; available
 amounts appear as an explicitly incomplete known subtotal. An explicit declared
 receipt total retains discounts and takes precedence over product line subtotals.
 
-Deploy the matching backend before this Client. Backend CI pins this Client commit
-and exercises real HTTP, handwritten report parsing and durable Drift/outbox
-recovery. These checks do not establish that an installed browser/native build has
-been upgraded or that a particular user's pending queue has recovered. Finished
-receipt correction controls and other requirements in linked issues remain
-separate work; generated endpoint availability alone does not implement a workflow.
+The paired backend CI exercises real HTTP, handwritten report parsing and durable
+Drift/outbox recovery against its pinned Client revision. These checks do not
+establish that an installed browser/native build has been upgraded or that a
+particular user's pending queue has recovered. Generated endpoint availability
+alone does not establish that the paired server accepts every workflow; see the
+[acceptance matrix](client-28-46-acceptance.md) for remaining dependencies.
 
 Application-owned adapters compose:
 

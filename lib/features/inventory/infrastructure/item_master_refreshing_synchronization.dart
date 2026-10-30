@@ -1,5 +1,6 @@
 import 'package:providentia/core/synchronization/sync_models.dart';
 import 'package:providentia/core/synchronization/sync_ports.dart';
+import 'package:providentia/core/synchronization/synchronization_recovery.dart';
 import 'package:providentia/features/inventory/domain/inventory_models.dart';
 import 'package:providentia/features/inventory/infrastructure/generated_home_item_master_source.dart';
 import 'package:providentia/features/inventory/infrastructure/generated_published_category_source.dart';
@@ -18,7 +19,8 @@ typedef HomeItemMasterCacheWriter =
 /// cache. Authentication and authorization failures remain visible to the
 /// application so revoked-home handling can stop synchronization and purge
 /// every home-scoped record, including this cache.
-final class ItemMasterRefreshingSynchronization implements AppSynchronization {
+final class ItemMasterRefreshingSynchronization
+    implements AppSynchronization, AppSyncRecovery {
   const ItemMasterRefreshingSynchronization({
     required AppSynchronization delegate,
     required HomeItemMasterSource source,
@@ -70,6 +72,10 @@ final class ItemMasterRefreshingSynchronization implements AppSynchronization {
       };
     } on FormatException {
       return _staleCatalog(outcome);
+    } on ArgumentError {
+      // Domain validation errors are not Exceptions. Preserve the last verified
+      // snapshot rather than letting one invalid row look like an empty home.
+      return _staleCatalog(outcome);
     } on Exception {
       return _staleCatalog(outcome);
     }
@@ -100,6 +106,34 @@ final class ItemMasterRefreshingSynchronization implements AppSynchronization {
         ? 'Home changes synchronized, but the catalog could not be refreshed. The last verified catalog is shown; retry synchronization.'
         : 'The catalog could not be refreshed. Queued or blocked uploads remain unresolved; the last verified catalog is shown.',
   );
+
+  AppSyncRecovery _recovery(String homeId) {
+    _requireBoundHome(homeId);
+    final delegate = _delegate;
+    if (delegate is! AppSyncRecovery) {
+      throw const RetryableSyncException(
+        'Protected recovery is unavailable in this installation.',
+      );
+    }
+    return delegate as AppSyncRecovery;
+  }
+
+  @override
+  Future<SyncRecoveryInspection> inspectRecovery(String homeId) =>
+      _recovery(homeId).inspectRecovery(homeId);
+
+  @override
+  Future<SyncRecoveryOutcome> revalidateSavedOperations(String homeId) =>
+      _recovery(homeId).revalidateSavedOperations(homeId);
+
+  @override
+  Future<SyncRecoveryOutcome> rebuildSavedHome(String homeId) async {
+    final outcome = await _recovery(homeId).rebuildSavedHome(homeId);
+    final items = await _source.loadAll(homeId: homeId);
+    final categories = await _categorySource?.loadAll();
+    await _replaceCache(homeId: homeId, items: items, categories: categories);
+    return outcome;
+  }
 
   void _requireBoundHome(String homeId) {
     if (homeId != _homeId) {

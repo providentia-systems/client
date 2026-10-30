@@ -1,6 +1,6 @@
 {
   "generator": "tool/generate_api_client.mjs",
-  "generatorVersion": 7,
+  "generatorVersion": 8,
   "clientProfile": "homeowner",
   "contract": "../../providentia-v1.json",
   "contractVersion": "2.4.0",

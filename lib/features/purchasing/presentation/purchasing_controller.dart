@@ -5,11 +5,13 @@ import 'package:providentia/core/synchronization/sync_models.dart';
 import 'package:providentia/features/inventory/application/inventory_repository.dart';
 import 'package:providentia/features/inventory/domain/inventory_models.dart';
 import 'package:providentia/features/purchasing/application/purchase_draft_maintenance_repository.dart';
+import 'package:providentia/features/purchasing/application/purchase_receipt_history.dart';
 import 'package:providentia/features/purchasing/application/purchase_repository.dart';
 import 'package:providentia/features/purchasing/application/purchase_store_repository.dart';
 import 'package:providentia/features/purchasing/domain/purchase_models.dart';
 import 'package:providentia/features/purchasing/domain/purchase_quantity.dart';
 import 'package:providentia/features/purchasing/domain/purchase_services.dart';
+import 'package:providentia/features/purchasing/domain/receipt_spend.dart';
 
 enum PurchaseView { recent, history }
 
@@ -94,6 +96,26 @@ final class PurchasingController extends ChangeNotifier {
     final summary = _synchronizationSummary;
     if (synchronizationBusy) {
       return 'Synchronizing… Household dependencies are processed before this receipt.';
+    }
+    if (capture.status == PurchaseReceiptStatus.cancelled) {
+      if (capture.auditEntries.any(
+        (entry) =>
+            entry.kind == 'Receipt cancellation' &&
+            entry.state == PurchaseReceiptAuditState.failed,
+      )) {
+        return 'Cancellation needs review. Server acceptance is not confirmed; saved receipt and operation context are retained in history and synchronization.';
+      }
+      return capture.cancellationConfirmed
+          ? capture.synchronizationState ==
+                    PurchaseSynchronizationState.synchronized
+                ? 'Cancellation is synchronized. The retained receipt remains available in history.'
+                : 'Cancellation accepted by the server; retained receipt details are refreshing.'
+          : 'Cancellation is saved locally. Server confirmation and stock readback are pending; review synchronization if it needs attention.';
+    }
+    if (capture.auditEntries.any(
+      (entry) => entry.state != PurchaseReceiptAuditState.accepted,
+    )) {
+      return 'Saved receipt corrections are pending or need review. Correction history shows their current state; synchronization preserves the original operation identities.';
     }
     if (capture.commitConfirmed && capture.commitAwaitingReadback) {
       return 'Server confirmed; receipt details are refreshing. Local stock application and server readback are separate.'
@@ -183,6 +205,14 @@ final class PurchasingController extends ChangeNotifier {
   StreamSubscription<PurchaseReceiptCapture?>? _captureSubscription;
   StreamSubscription<List<PurchaseReceiptCapture>>? _receiptsSubscription;
   List<PurchaseReceiptCapture> _receipts = const [];
+  bool _hasLoadedLines = false;
+  bool _linesReadFailed = false;
+  bool _hasLoadedReceipts = false;
+  bool _receiptReadFailed = false;
+  bool get hasLoadedLines => _hasLoadedLines;
+  bool get linesReadFailed => _linesReadFailed;
+  bool get hasLoadedReceipts => _hasLoadedReceipts;
+  bool get receiptReadFailed => _receiptReadFailed;
   String? _selectedReceiptId;
   List<PurchaseReceiptCapture> get receipts => _receipts;
   bool get canSelectReceipts =>
@@ -190,6 +220,41 @@ final class PurchasingController extends ChangeNotifier {
   bool get canReviewPacks => _repository is PurchasePackReviewRepository;
   bool get canQuickEntry =>
       captureEnabled && _repository is PurchaseQuickEntryRepository;
+
+  final Set<String> _historyBusy = {};
+  final Map<String, String> _historyErrors = {};
+  bool historyRefreshing(String receiptId) => _historyBusy.contains(receiptId);
+  String? historyError(String receiptId) => _historyErrors[receiptId];
+  bool get canRefreshReceiptHistory =>
+      _repository is PurchaseReceiptHistoryRepository &&
+      (_repository as PurchaseReceiptHistoryRepository)
+          .supportsReceiptHistoryRefresh;
+  Future<void> refreshReceiptHistory(String receiptId) async {
+    if (_disposed || _historyBusy.contains(receiptId)) return;
+    if (!canRefreshReceiptHistory) {
+      _historyErrors[receiptId] =
+          'Receipt history refresh is unavailable offline. Saved history remains available.';
+      _notifyIfActive();
+      return;
+    }
+    _historyBusy.add(receiptId);
+    _historyErrors.remove(receiptId);
+    _notifyIfActive();
+    try {
+      await (_repository as PurchaseReceiptHistoryRepository)
+          .refreshReceiptHistory(homeId: homeId, receiptId: receiptId);
+    } on PurchaseReceiptHistoryException catch (error) {
+      if (!_disposed) _historyErrors[receiptId] = error.safeMessage;
+    } catch (_) {
+      if (!_disposed) {
+        _historyErrors[receiptId] =
+            'Receipt history refresh was interrupted. Saved work is retained.';
+      }
+    } finally {
+      _historyBusy.remove(receiptId);
+      _notifyIfActive();
+    }
+  }
 
   void selectReceipt(String receiptId) {
     _selectedReceiptId = receiptId;
@@ -249,12 +314,19 @@ final class PurchasingController extends ChangeNotifier {
   }
 
   PurchasingState get state => _state;
-  List<PurchaseGroup> get recentGroups =>
-      _grouper.groupRecent(homeId: homeId, lines: _state.lines);
+  List<PurchaseGroup> get recentGroups => _grouper.groupRecent(
+    homeId: homeId,
+    lines: _state.lines,
+    receipts: canSelectReceipts ? _receipts : null,
+  );
   List<MonthlyPurchaseSummary> get monthlyHistory =>
       _grouper.summarizeHistory(homeId: homeId, lines: _state.lines);
+  ReceiptSpendSummary get receiptSpendSummary =>
+      ReceiptSpendSummary.fromReceipts(homeId: homeId, receipts: _receipts);
   Money? get recentSpend =>
-      _grouper.recentSpend(homeId: homeId, lines: _state.lines);
+      canSelectReceipts ? receiptSpendSummary.singleCurrencyAmount : null;
+  Money? get recentProductSubtotal =>
+      _grouper.recentProductSubtotal(homeId: homeId, lines: _state.lines);
   bool get captureEnabled => _mayWrite && _captureRepository != null;
   bool get canAddPublishedPack =>
       captureEnabled &&
@@ -286,6 +358,7 @@ final class PurchasingController extends ChangeNotifier {
         .listen(
           (lines) {
             if (lines.any((line) => line.homeId != homeId)) {
+              _linesReadFailed = true;
               _state = PurchasingState(
                 lines: _state.lines,
                 matchCandidates: _state.matchCandidates,
@@ -300,6 +373,8 @@ final class PurchasingController extends ChangeNotifier {
               _notifyIfActive();
               return;
             }
+            _hasLoadedLines = true;
+            _linesReadFailed = false;
             _state = PurchasingState(
               lines: List<PurchaseLine>.unmodifiable(lines),
               matchCandidates: _state.matchCandidates,
@@ -313,6 +388,7 @@ final class PurchasingController extends ChangeNotifier {
             _notifyIfActive();
           },
           onError: (Object _) {
+            _linesReadFailed = true;
             _state = PurchasingState(
               lines: _state.lines,
               matchCandidates: _state.matchCandidates,
@@ -328,7 +404,6 @@ final class PurchasingController extends ChangeNotifier {
           },
         );
     final captureRepository = _captureRepository;
-    if (!captureEnabled || captureRepository == null) return;
     if (_repository is PurchaseReceiptSelectionRepository) {
       _receiptsSubscription =
           (_repository as PurchaseReceiptSelectionRepository)
@@ -336,9 +411,12 @@ final class PurchasingController extends ChangeNotifier {
               .listen(
                 (receipts) {
                   if (receipts.any((receipt) => receipt.homeId != homeId)) {
+                    _receiptReadFailed = true;
                     _setCaptureError('Purchase capture access was rejected.');
                     return;
                   }
+                  _hasLoadedReceipts = true;
+                  _receiptReadFailed = false;
                   _receipts = List.unmodifiable(receipts);
                   PurchaseReceiptCapture? selected;
                   for (final receipt in receipts) {
@@ -353,11 +431,12 @@ final class PurchasingController extends ChangeNotifier {
                   _receiveCapture(selected);
                 },
                 onError: (Object error) {
+                  _receiptReadFailed = true;
                   _captureReadFailed = true;
                   _setCaptureError(_captureSafeError(error));
                 },
               );
-    } else {
+    } else if (captureEnabled && captureRepository != null) {
       _captureSubscription = captureRepository
           .watchActiveReceiptCapture(homeId: homeId)
           .listen(
@@ -368,6 +447,7 @@ final class PurchasingController extends ChangeNotifier {
             },
           );
     }
+    if (!captureEnabled || captureRepository == null) return;
     _candidateSubscription = captureRepository
         .watchPurchaseMatchCandidates(homeId: homeId)
         .listen(
@@ -434,6 +514,10 @@ final class PurchasingController extends ChangeNotifier {
           ? null
           : confirmed
           ? 'The receipt commit is synchronized.'
+          : capture.auditEntries.any(
+              (entry) => entry.state != PurchaseReceiptAuditState.accepted,
+            )
+          ? 'Saved receipt changes await server acceptance or review. See correction history and synchronization.'
           : capture.commitConfirmed && capture.commitAwaitingReadback
           ? 'The server confirmed the receipt commit. Receipt details are refreshing.'
           : capture.synchronizationState == PurchaseSynchronizationState.pending
@@ -514,6 +598,11 @@ final class PurchasingController extends ChangeNotifier {
         lineId: original.id,
         expectedRevision: original.revision,
         line: PurchaseReceiptLineRequest(
+          allowUnknownPrice:
+              canCorrectFinishedReceipt &&
+              _state.capture?.id == original.receiptId &&
+              original.unresolved &&
+              !original.stockApplied,
           homeId: homeId,
           receiptId: original.receiptId,
           rawDescription: rawDescription,
@@ -526,6 +615,8 @@ final class PurchasingController extends ChangeNotifier {
       ),
       queuedNotice: original.stockApplied
           ? 'Purchase corrected. Stock is updated locally; synchronization is pending.'
+          : _state.capture?.status == PurchaseReceiptStatus.committed
+          ? 'Unresolved line changes are saved locally; no stock is added.'
           : 'Line changes are saved locally. Review the edited line before committing.',
     );
   }
@@ -546,6 +637,95 @@ final class PurchasingController extends ChangeNotifier {
     );
   }
 
+  bool get canCorrectFinishedReceipt {
+    final receipt = _state.capture;
+    return captureEnabled &&
+        _repository is PurchaseFinishedReceiptCorrectionRepository &&
+        receipt?.status == PurchaseReceiptStatus.committed &&
+        receipt!.commitConfirmed &&
+        receipt.lineCorrectionState == 'available';
+  }
+
+  Future<bool> completeFinishedLine({
+    required PurchaseReceiptCapture originalReceipt,
+    required String homeProductId,
+    required String rawDescription,
+    required String quantityText,
+    required String reason,
+    PurchaseReceiptLineCapture? originalLine,
+    String? packId,
+    String? originalPackText,
+    Money? unitPrice,
+    Money? lineTotal,
+  }) {
+    if (!canCorrectFinishedReceipt ||
+        _state.capture?.id != originalReceipt.id ||
+        originalReceipt.homeId != homeId ||
+        (originalLine != null &&
+            (originalLine.receiptId != originalReceipt.id ||
+                !originalLine.unresolved ||
+                originalLine.stockApplied))) {
+      return _rejectCapture(
+        'Refresh this finished receipt before correcting an omitted or unresolved purchase.',
+      );
+    }
+    return _runCaptureMutation(
+      () => (_repository as PurchaseFinishedReceiptCorrectionRepository)
+          .completeFinishedReceiptLine(
+            line: PurchaseReceiptLineRequest(
+              allowUnknownPrice: true,
+              homeId: homeId,
+              receiptId: originalReceipt.id,
+              rawDescription: rawDescription,
+              quantity: double.tryParse(quantityText) ?? double.nan,
+              quantityText: quantityText,
+              originalPackText: originalPackText,
+              unitPrice: unitPrice,
+              lineTotal: lineTotal,
+            ),
+            expectedReceiptRevision: originalReceipt.revision,
+            homeProductId: homeProductId,
+            packId: packId,
+            existingLineId: originalLine?.id,
+            expectedLineRevision: originalLine?.revision,
+            reason: reason,
+          ),
+      queuedNotice:
+          'Purchase correction saved locally and queued. Only this line adds stock; the finished receipt and existing purchases are retained.',
+    );
+  }
+
+  bool get canCorrectReceiptDate =>
+      captureEnabled &&
+      _repository is PurchaseReceiptDateCorrectionRepository &&
+      _state.capture?.status != PurchaseReceiptStatus.cancelled;
+
+  Future<bool> correctPurchaseDate({
+    required PurchaseReceiptCapture original,
+    required DateTime purchaseDate,
+    required String reason,
+  }) {
+    if (!canCorrectReceiptDate ||
+        original.homeId != homeId ||
+        _state.capture?.id != original.id) {
+      return _rejectCapture(
+        'Purchase day correction is unavailable for this receipt.',
+      );
+    }
+    return _runCaptureMutation(
+      () => (_repository as PurchaseReceiptDateCorrectionRepository)
+          .correctReceiptPurchaseDate(
+            homeId: homeId,
+            receiptId: original.id,
+            expectedRevision: original.revision,
+            purchaseDate: purchaseDate,
+            reason: reason,
+          ),
+      queuedNotice:
+          'Purchase day correction saved locally and queued. Stock chronology awaits server readback.',
+    );
+  }
+
   Future<bool> cancelDraft(PurchaseReceiptCapture original) {
     if (!canMaintainDraft) {
       return _rejectCapture('Receipt editing is unavailable.');
@@ -557,7 +737,7 @@ final class PurchasingController extends ChangeNotifier {
         expectedRevision: original.revision,
       ),
       queuedNotice:
-          'Draft cancellation is saved locally and queued for synchronization.',
+          'Receipt cancellation is saved locally and queued. Stock reversal is pending server confirmation; history is retained.',
     );
   }
 

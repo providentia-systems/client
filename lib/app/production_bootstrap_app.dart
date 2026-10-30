@@ -24,11 +24,13 @@ import 'package:providentia/core/security/platform_session_coordination.dart';
 import 'package:providentia/core/security/platform_session_credential_store.dart';
 import 'package:providentia/core/security/uuid_v4.dart';
 import 'package:providentia/core/synchronization/generated_sync_gateway.dart';
+import 'package:providentia/core/synchronization/generated_sync_recovery_gateway.dart';
 import 'package:providentia/core/synchronization/privacy_safe_sync_metrics.dart';
 import 'package:providentia/core/synchronization/session_bound_sync_gateway.dart';
 import 'package:providentia/core/synchronization/sync_coordinator.dart';
 import 'package:providentia/core/synchronization/sync_models.dart';
 import 'package:providentia/core/synchronization/sync_ports.dart';
+import 'package:providentia/core/synchronization/synchronization_recovery.dart';
 import 'package:providentia/features/ai_integration/application/ai_ports.dart';
 import 'package:providentia/features/ai_integration/application/ai_review_resume_store.dart';
 import 'package:providentia/features/ai_integration/application/receipt_ai_handoff_controller.dart';
@@ -86,6 +88,7 @@ import 'package:providentia/features/homes/infrastructure/drift_active_home_stor
 import 'package:providentia/features/homes/infrastructure/home_data_revocation.dart';
 import 'package:providentia/features/homes/presentation/home_selection_page.dart';
 import 'package:providentia/features/homes/presentation/homes_controller.dart';
+import 'package:providentia/features/household_sync/presentation/synchronization_recovery_dialog.dart';
 import 'package:providentia/features/identity/application/identity_session_manager.dart';
 import 'package:providentia/features/identity/domain/identity_models.dart';
 import 'package:providentia/features/identity/infrastructure/api11_identity_transport.dart';
@@ -102,7 +105,9 @@ import 'package:providentia/features/inventory/infrastructure/item_master_refres
 import 'package:providentia/features/inventory/presentation/inventory_controller.dart';
 import 'package:providentia/features/profile/account_profile_page.dart';
 import 'package:providentia/features/profile/infrastructure/generated_profile_port.dart';
+import 'package:providentia/features/purchasing/application/purchase_receipt_history.dart';
 import 'package:providentia/features/purchasing/application/purchase_repository.dart';
+import 'package:providentia/features/purchasing/infrastructure/generated_purchase_receipt_history_reader.dart';
 import 'package:providentia/features/purchasing/presentation/purchasing_controller.dart';
 import 'package:providentia/features/reporting/application/household_report_service.dart';
 import 'package:providentia/features/reporting/application/reporting_controller.dart';
@@ -489,11 +494,20 @@ final class _ProductionBootstrapAppState extends State<ProductionBootstrapApp>
         !permissions.contains(HomePermissions.reportsRead) ||
         (!_identityController.snapshot.isAuthenticated ||
             _identityController.snapshot.isOffline)) {
-      return const _ProtectedRouteUnavailable();
+      return _HouseholdReportsUnavailable(
+        detail: home == null
+            ? 'Select an authorized household to view its reports.'
+            : !_identityController.snapshot.isAuthenticated
+            ? 'Sign in to view household reports. Saved local work is preserved.'
+            : _identityController.snapshot.isOffline
+            ? 'Reports for ${home.name} require an online session. Your saved stock and pending local work are preserved.'
+            : 'Your role cannot view reports for ${home.name}. Account/settings remains separate from household report access.',
+      );
     }
     return ProductionHouseholdReportsRoute(
       repository: GeneratedHouseholdReportRepository(_authorizedApi),
       homeId: home.id,
+      homeName: home.name,
       protectedRouteRegistry: _protectedRouteRegistry,
       onAuthorizationLost: _handleCatalogSharingAuthorizationLost,
     );
@@ -700,6 +714,7 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
     with WidgetsBindingObserver {
   late final AppController _app;
   late final SessionBoundSyncGateway _syncGateway;
+  late final AppSyncRecovery _synchronizationRecovery;
   late final DriftHouseholdRepository _household;
   late final HouseholdFeatures _features;
   late final SyncConflictController _syncConflicts;
@@ -711,6 +726,7 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
   SyncMetricsSnapshot? _latestSyncMetrics;
   bool _revocationRouted = false;
   bool _featuresReady = false;
+  Future<void>? _aiAuthorizationVerification;
 
   @override
   void initState() {
@@ -729,6 +745,9 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
         if (_bindingIsCurrent) await _app.refresh();
       },
       stockPreferenceReader: GeneratedStockPreferenceReader(widget.api),
+      receiptHistoryReader: widget.identityController.snapshot.isOffline
+          ? null
+          : GeneratedPurchaseReceiptHistoryReader(widget.api),
     );
     _household = household;
     _syncMetrics = PrivacySafeSyncMetrics(
@@ -746,6 +765,13 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
     AppSynchronization synchronization = SyncCoordinator(
       local: localSync,
       remote: _syncGateway,
+      recoveryGateway: GeneratedSyncRecoveryGateway(
+        client: widget.api,
+        accountId: widget.userId,
+        deviceId: widget.deviceId,
+        homeId: widget.home.id,
+        isCurrent: () => _bindingIsCurrent && !_revocationRouted,
+      ),
       connectivity: GeneratedApiConnectivityProbe(widget.api),
       metrics: _syncMetrics,
     );
@@ -770,6 +796,7 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
       gate: widget.syncRevocationGate,
       homeId: widget.home.id,
     );
+    _synchronizationRecovery = synchronization as AppSyncRecovery;
     _catalogProductSource = DriftCatalogProductSourcePreparation(
       database: widget.database,
       synchronization: synchronization,
@@ -800,6 +827,8 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
     final inventory = InventoryController(
       repository: household,
       homeId: widget.home.id,
+      mayReviewCounts: widget.homesController.snapshot.effectivePermissions
+          .contains('inventory.write'),
       mayManageStockPreferences: widget
           .homesController
           .snapshot
@@ -967,7 +996,7 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
         pickAssets: chooseStockGallery,
         loadRoute: loadPreferredRoute,
         idGenerator: UuidV4Generator().call,
-        onAuthorizationDenied: _handleHomeAuthorizationLost,
+        onAuthorizationDenied: _handleAiAuthorizationLost,
         onServerReviewRequired: _openStockEvidenceReview,
       );
       stockPhotoAcquisition = StockPhotoAcquisitionActions(
@@ -1008,7 +1037,7 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
         ),
         capabilities:
             ShoppingInteractionCapabilities.durableEvidenceSuggestions,
-        onAuthorizationDenied: _handleHomeAuthorizationLost,
+        onAuthorizationDenied: _handleAiAuthorizationLost,
       ),
       stockPhotoCount: stockPhotoCount,
       stockPhotoAcquisition: stockPhotoAcquisition,
@@ -1045,6 +1074,8 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
         return ProvidentiaApp(
           controller: _app,
           features: _features,
+          householdName: widget.home.name,
+          householdReportsPageBuilder: widget.householdReportsPageBuilder,
           catalogContributionPageBuilder: _catalogContributionPageBuilder,
           receiptImportPageBuilder: widget.identityController.snapshot.isOffline
               ? null
@@ -1079,6 +1110,18 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
                   catalogImportPageBuilder: _catalogImportPageBuilder,
                   householdReportsPageBuilder:
                       widget.householdReportsPageBuilder,
+                  onRecoverHome: () {
+                    if (!_bindingIsCurrent || _revocationRouted) return;
+                    unawaited(
+                      showDialog<void>(
+                        context: context,
+                        builder: (_) => SynchronizationRecoveryDialog(
+                          homeId: widget.home.id,
+                          recovery: _synchronizationRecovery,
+                        ),
+                      ),
+                    );
+                  },
                   householdAiPageBuilder: _connectedHouseholdAiPageBuilder,
                   dataGovernancePageBuilder: widget.dataGovernancePageBuilder,
                 ),
@@ -1179,7 +1222,7 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
             permissions: widget.homesController.snapshot.effectivePermissions,
           ),
           protectedRouteRegistry: widget.protectedRouteRegistry,
-          onAuthorizationLost: _handleHomeAuthorizationLost,
+          onAuthorizationLost: _handleAiAuthorizationLost,
           stockPhotoController: _features.stockPhotoCount,
           initialExtractionId: extractionId,
           reviewResumeStore: DriftAiReviewResumeStore(
@@ -1211,7 +1254,7 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
       homeId: widget.home.id,
       capabilities: capabilities,
       protectedRouteRegistry: widget.protectedRouteRegistry,
-      onAuthorizationLost: _handleHomeAuthorizationLost,
+      onAuthorizationLost: _handleAiAuthorizationLost,
       purchaseRepository: _household,
       mayWritePurchases:
           widget.access.purchasesRead && widget.access.purchasesWrite,
@@ -1254,7 +1297,7 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
         homeId: widget.home.id,
         capabilities: capabilities,
         protectedRouteRegistry: widget.protectedRouteRegistry,
-        onAuthorizationLost: _handleHomeAuthorizationLost,
+        onAuthorizationLost: _handleAiAuthorizationLost,
         stockPhotoController: _features.stockPhotoCount,
         reviewResumeStore: DriftAiReviewResumeStore(
           widget.database,
@@ -1330,6 +1373,26 @@ final class _ConnectedHomeWorkspaceState extends State<_ConnectedHomeWorkspace>
       return;
     }
     unawaited(_handleHomeAuthorizationLost());
+  }
+
+  Future<void> _handleAiAuthorizationLost() {
+    // Revocation also blocks stock-photo processing; its callback must not
+    // await this same in-flight verification recursively.
+    if (_revocationRouted || !_bindingIsCurrent) return Future<void>.value();
+    return _aiAuthorizationVerification ??= _verifyAiAuthorizationLoss()
+        .whenComplete(() => _aiAuthorizationVerification = null);
+  }
+
+  Future<void> _verifyAiAuthorizationLoss() async {
+    if (_revocationRouted || !_bindingIsCurrent) return;
+    final revoked = await verifyProductionAiHomeRevocation(
+      api: widget.api,
+      homeId: widget.home.id,
+      bindingIsCurrent: () => _bindingIsCurrent && !_revocationRouted,
+    );
+    if (revoked && _bindingIsCurrent && !_revocationRouted) {
+      await _handleHomeAuthorizationLost();
+    }
   }
 
   Future<void> _handleHomeAuthorizationLost() async {
@@ -1416,6 +1479,26 @@ final class ProductionResumeSyncGate {
   void dispose() {
     _disposed = true;
     _ready = false;
+  }
+}
+
+/// AI/resource failures cannot authorize household deletion. Only a successful
+/// current-account home listing which omits this home confirms revocation.
+@visibleForTesting
+Future<bool> verifyProductionAiHomeRevocation({
+  required ProvidentiaApiClient api,
+  required String homeId,
+  required bool Function() bindingIsCurrent,
+}) async {
+  if (!bindingIsCurrent()) return false;
+  try {
+    final homes = await Api11HomeTransport(api).listHomes();
+    if (!bindingIsCurrent()) return false;
+    return !homes.any((home) => home.id == homeId);
+  } catch (_) {
+    // Authentication, offline, invalid response and transport failures leave
+    // membership unverified. AI remains blocked; saved household work remains.
+    return false;
   }
 }
 
@@ -1787,12 +1870,14 @@ final class ProductionHouseholdReportsRoute extends StatefulWidget {
     required this.repository,
     required this.homeId,
     required this.protectedRouteRegistry,
+    this.homeName,
     this.onAuthorizationLost,
     super.key,
   });
 
   final HouseholdReportRepository repository;
   final String homeId;
+  final String? homeName;
   final ProductionProtectedRouteRegistry protectedRouteRegistry;
   final Future<void> Function()? onAuthorizationLost;
 
@@ -1831,7 +1916,18 @@ final class _ProductionHouseholdReportsRouteState
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Household reports')),
+    appBar: AppBar(
+      title: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Household reports'),
+          Text(
+            'Home: ${widget.homeName ?? widget.homeId}',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
+      ),
+    ),
     body: HouseholdReportsPage(controller: _controller),
   );
 
@@ -2301,13 +2397,7 @@ final class _ProductionServerAiRouteState
       _clearRegisteredSources();
     }
     if (_handlingAuthorizationLoss) return;
-    final lostAuthorization =
-        _controller.status == ServerAiWorkspaceStatus.accessDenied ||
-        (_controller.status == ServerAiWorkspaceStatus.failed &&
-            const <String>{
-              'Sign in again before using household AI.',
-              'Your current household role does not allow this AI action.',
-            }.contains(_controller.safeMessage));
+    final lostAuthorization = _controller.homeAccessRevoked;
     if (!lostAuthorization) return;
     _handlingAuthorizationLoss = true;
     unawaited(widget.onAuthorizationLost());
@@ -2397,6 +2487,19 @@ final class ProductionAiIdentifierFactory implements AiIdentifierFactory {
   String nextId() => _generator();
 }
 
+final class _HouseholdReportsUnavailable extends StatelessWidget {
+  const _HouseholdReportsUnavailable({required this.detail});
+  final String detail;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Household reports')),
+    body: Center(
+      child: Padding(padding: const EdgeInsets.all(24), child: Text(detail)),
+    ),
+  );
+}
+
 final class _ProtectedRouteUnavailable extends StatelessWidget {
   const _ProtectedRouteUnavailable();
 
@@ -2426,6 +2529,7 @@ DriftHouseholdRepository createProductionHouseholdRepository({
   DateTime Function()? clock,
   String Function()? idGenerator,
   StockPreferenceReader? stockPreferenceReader,
+  PurchaseReceiptHistoryReader? receiptHistoryReader,
 }) {
   return DriftHouseholdRepository(
     database,
@@ -2436,6 +2540,7 @@ DriftHouseholdRepository createProductionHouseholdRepository({
     idGenerator: idGenerator,
     onMutationCommitted: onMutationCommitted,
     stockPreferenceReader: stockPreferenceReader,
+    receiptHistoryReader: receiptHistoryReader,
   );
 }
 

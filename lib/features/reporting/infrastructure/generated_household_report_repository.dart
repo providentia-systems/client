@@ -161,19 +161,24 @@ _ParsedReport _report(
 }
 
 InventoryReportFact _inventoryFact(Map<String, Object?> object, String homeId) {
-  final quantity = _optionalDecimal(object['factualQuantity']);
-  final state = object.containsKey('quantityState')
-      ? _enumValue(object, 'quantityState', {
-          'unknown',
-          'recorded',
-          'uncertain',
-        })
-      : 'recorded';
-  final uncertain = _optionalBoolean(object['uncertain']) ?? false;
-  if ((quantity == null) != (state == 'unknown') ||
-      (state == 'uncertain' && !uncertain) ||
-      (state == 'recorded' && uncertain)) {
-    throw const FormatException('Inconsistent inventory evidence state.');
+  final quantity = _optionalReportDecimal(object['factualQuantity']);
+  final state = switch (object['quantityState']) {
+    null => InventoryReportQuantityState.unavailable,
+    'unknown' => InventoryReportQuantityState.unknown,
+    'recorded' => InventoryReportQuantityState.recorded,
+    'uncertain' => InventoryReportQuantityState.uncertain,
+    String() => InventoryReportQuantityState.unavailable,
+    _ => throw const FormatException('Invalid inventory quantity state.'),
+  };
+  final uncertain = _optionalBoolean(object['uncertain']);
+  final unit = _optionalString(object['stockUnit'], allowEmpty: true);
+  if ((state == InventoryReportQuantityState.unknown && quantity != null) ||
+      ((state == InventoryReportQuantityState.recorded ||
+              state == InventoryReportQuantityState.uncertain) &&
+          quantity == null) ||
+      (state == InventoryReportQuantityState.recorded && uncertain == true) ||
+      (state == InventoryReportQuantityState.uncertain && uncertain == false)) {
+    throw const FormatException('Contradictory inventory quantity evidence.');
   }
   final productName = _optionalString(object['productName'], allowEmpty: true);
   return InventoryReportFact(
@@ -182,20 +187,20 @@ InventoryReportFact _inventoryFact(Map<String, Object?> object, String homeId) {
     productName: productName == null || productName.trim().isEmpty
         ? 'Unresolved product'
         : productName,
-    packText: _string(object, 'packText', allowEmpty: true),
+    packText: _optionalString(object['packText'], allowEmpty: true) ?? '',
     factualQuantity: quantity,
-    stockUnit: _optionalString(object['stockUnit'], allowEmpty: true) ?? '',
     quantityState: state,
+    stockUnit: unit == null || unit.trim().isEmpty ? null : unit,
     uncertain: uncertain,
-    pendingQuantity: _optionalDecimal(object['pendingQuantity']),
-    limitations: object.containsKey('limitations')
-        ? _stringList(object, 'limitations')
-        : const <String>[],
+    pendingQuantity: _optionalReportDecimal(object['pendingQuantity']),
+    limitations: object['limitations'] == null
+        ? const <String>[]
+        : List<String>.unmodifiable(_stringList(object, 'limitations')),
     checkpointId: _optionalUuid(object['checkpointId']),
     balanceRevision: _optionalPositiveInteger(object['balanceRevision']),
     lastMovementId: _optionalUuid(object['lastMovementId']),
     balanceUpdatedAt: _optionalDateTime(object['balanceUpdatedAt']),
-    configuredMinimum: _optionalDecimal(object['configuredMinimum']),
+    configuredMinimum: _optionalReportDecimal(object['configuredMinimum']),
     alwaysKeep: _optionalBoolean(object['alwaysKeep']),
     neverSuggest: _optionalBoolean(object['neverSuggest']),
   );
@@ -207,22 +212,24 @@ PurchaseReportTotal _purchaseTotal(Map<String, Object?> object, String homeId) {
   if (!_monthPattern.hasMatch(month) || !_currencyPattern.hasMatch(currency)) {
     throw const FormatException('Invalid purchase report key.');
   }
-  final total = _optionalDecimal(object['total']);
-  final complete = object.containsKey('pricingComplete')
-      ? _boolean(object, 'pricingComplete')
-      : total != null;
-  final source = object.containsKey('amountSource')
-      ? _enumValue(object, 'amountSource', {
-          'declared',
-          'derived',
-          'mixed',
-          'partial',
-          'unknown',
-        })
-      : 'derived';
-  if ((total != null) != complete ||
-      (complete && (source == 'partial' || source == 'unknown'))) {
-    throw const FormatException('Inconsistent purchase pricing state.');
+  final total = _optionalReportDecimal(object['total']);
+  final complete = _optionalBoolean(object['pricingComplete']);
+  final source = switch (object['amountSource']) {
+    null => PurchaseReportAmountSource.unavailable,
+    'declared' => PurchaseReportAmountSource.declared,
+    'derived' => PurchaseReportAmountSource.derived,
+    'mixed' => PurchaseReportAmountSource.mixed,
+    'partial' => PurchaseReportAmountSource.partial,
+    'unknown' => PurchaseReportAmountSource.unknown,
+    String() => PurchaseReportAmountSource.unavailable,
+    _ => throw const FormatException('Invalid purchase amount source.'),
+  };
+  if ((complete == true && total == null) ||
+      (complete == false && total != null) ||
+      (complete == true &&
+          (source == PurchaseReportAmountSource.partial ||
+              source == PurchaseReportAmountSource.unknown))) {
+    throw const FormatException('Contradictory purchase pricing completeness.');
   }
   return PurchaseReportTotal(
     homeId: homeId,
@@ -232,21 +239,24 @@ PurchaseReportTotal _purchaseTotal(Map<String, Object?> object, String homeId) {
     storeName: _optionalString(object['storeName']),
     receiptCount: _nonNegativeInteger(object, 'receiptCount'),
     total: total,
-    knownSubtotal: object.containsKey('knownSubtotal')
-        ? _optionalDecimal(object['knownSubtotal'])
-        : total,
+    knownSubtotal: _optionalReportDecimal(object['knownSubtotal']),
     pricingComplete: complete,
     amountSource: source,
-    completeReceiptCount:
-        _optionalNonNegativeInteger(object['completeReceiptCount']) ?? 0,
-    partialReceiptCount:
-        _optionalNonNegativeInteger(object['partialReceiptCount']) ?? 0,
-    unknownReceiptCount:
-        _optionalNonNegativeInteger(object['unknownReceiptCount']) ?? 0,
-    declaredReceiptCount:
-        _optionalNonNegativeInteger(object['declaredReceiptCount']) ?? 0,
-    derivedReceiptCount:
-        _optionalNonNegativeInteger(object['derivedReceiptCount']) ?? 0,
+    completeReceiptCount: _optionalNonNegativeInteger(
+      object['completeReceiptCount'],
+    ),
+    partialReceiptCount: _optionalNonNegativeInteger(
+      object['partialReceiptCount'],
+    ),
+    unknownReceiptCount: _optionalNonNegativeInteger(
+      object['unknownReceiptCount'],
+    ),
+    declaredReceiptCount: _optionalNonNegativeInteger(
+      object['declaredReceiptCount'],
+    ),
+    derivedReceiptCount: _optionalNonNegativeInteger(
+      object['derivedReceiptCount'],
+    ),
   );
 }
 
@@ -405,14 +415,6 @@ String? _optionalString(Object? value, {bool allowEmpty = false}) {
   return value;
 }
 
-String _enumValue(Map<String, Object?> object, String key, Set<String> values) {
-  final value = _string(object, key);
-  if (!values.contains(value)) {
-    throw FormatException('Invalid $key value.');
-  }
-  return value;
-}
-
 String _uuid(Map<String, Object?> object, String key) {
   final value = _string(object, key);
   if (!_uuidPattern.hasMatch(value)) {
@@ -444,7 +446,7 @@ String _decimal(Map<String, Object?> object, String key) {
   return normalized;
 }
 
-String? _optionalDecimal(Object? value) {
+String? _optionalReportDecimal(Object? value) {
   if (value == null) {
     return null;
   }
@@ -453,8 +455,8 @@ String? _optionalDecimal(Object? value) {
       : value is num
       ? '$value'
       : null;
-  if (normalized == null || !_decimalPattern.hasMatch(normalized)) {
-    throw const FormatException('Invalid optional fixed decimal.');
+  if (normalized == null || !_reportDecimalPattern.hasMatch(normalized)) {
+    throw const FormatException('Invalid optional report decimal.');
   }
   return normalized;
 }
@@ -613,7 +615,10 @@ DateTime? _optionalDate(Object? value) {
 final RegExp _uuidPattern = RegExp(
   r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
 );
-final RegExp _decimalPattern = RegExp(r'^-?(?:0|[1-9]\d*)(?:\.\d{1,8})?$');
+final RegExp _decimalPattern = RegExp(r'^-?(?:0|[1-9]\d{0,8})(?:\.\d{1,8})?$');
+// Report projections and aggregates have their own unbounded exact-decimal
+// schema; individual command quantities retain the FixedDecimal contract.
+final RegExp _reportDecimalPattern = RegExp(r'^-?(?:0|[1-9]\d*)(?:\.\d+)?$');
 final RegExp _confidencePattern = RegExp(
   r'^(?:0(?:\.\d{1,4})?|1(?:\.0{1,4})?)$',
 );

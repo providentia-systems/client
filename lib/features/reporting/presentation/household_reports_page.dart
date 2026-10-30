@@ -66,6 +66,75 @@ final class HouseholdReportsPage extends StatelessWidget {
   }
 }
 
+String _inventoryDetail(InventoryReportFact line) {
+  final unit = line.stockUnit == null ? '' : ' ${line.stockUnit}';
+  return <String>[
+    line.factualQuantity == null
+        ? 'Quantity unknown'
+        : 'Quantity ${line.factualQuantity}$unit',
+    switch (line.quantityState) {
+      InventoryReportQuantityState.unknown => 'No recorded stock evidence',
+      InventoryReportQuantityState.uncertain =>
+        'Uncertain ledger balance; requires review',
+      InventoryReportQuantityState.recorded => 'Recorded ledger balance',
+      InventoryReportQuantityState.unavailable =>
+        'Stock evidence unavailable in this response',
+    },
+    if (line.quantityState == InventoryReportQuantityState.unavailable &&
+        line.uncertain == true)
+      'Uncertainty reported; review stock evidence',
+    if (line.factualQuantity != null)
+      'Ledger quantity is not a verified physical count',
+    if (line.stockUnit == null) 'Stock unit unavailable',
+    if (line.pendingQuantity != null)
+      'Pending quantity ${line.pendingQuantity}$unit',
+    if (line.checkpointId != null)
+      'An observation checkpoint anchors this ledger balance',
+    if (line.balanceUpdatedAt != null)
+      'Balance updated ${line.balanceUpdatedAt!.toUtc().toIso8601String()}',
+    ...line.limitations,
+    if (line.packText.isNotEmpty) line.packText,
+    if (line.configuredMinimum != null)
+      'Minimum ${line.configuredMinimum}$unit',
+  ].join(' · ');
+}
+
+String _purchaseTitle(PurchaseReportTotal line) {
+  final prefix = '${line.month} · ${line.currency}';
+  if (line.total != null) return '$prefix ${line.total}';
+  if (line.knownSubtotal != null) {
+    return '$prefix ${line.knownSubtotal} known subtotal';
+  }
+  return '$prefix · Spend unknown';
+}
+
+String _purchaseDetail(PurchaseReportTotal line) {
+  return <String>[
+    '${line.receiptCount} receipt${line.receiptCount == 1 ? '' : 's'}',
+    if (line.storeName != null) line.storeName!,
+    switch (line.pricingComplete) {
+      true => 'Complete receipt spend',
+      false => 'Incomplete pricing; total spend is unknown',
+      null => 'Pricing completeness unavailable in this response',
+    },
+    switch (line.amountSource) {
+      PurchaseReportAmountSource.declared => 'Declared receipt totals',
+      PurchaseReportAmountSource.derived =>
+        'Derived from entered product prices',
+      PurchaseReportAmountSource.mixed => 'Declared and derived receipt totals',
+      PurchaseReportAmountSource.partial => 'Available amounts only',
+      PurchaseReportAmountSource.unknown => 'Receipt amounts unavailable',
+      PurchaseReportAmountSource.unavailable => 'Amount source unavailable',
+    },
+    if (line.completeReceiptCount != null)
+      '${line.completeReceiptCount} completely priced',
+    if (line.partialReceiptCount != null)
+      '${line.partialReceiptCount} partially priced',
+    if (line.unknownReceiptCount != null)
+      '${line.unknownReceiptCount} with unknown prices',
+  ].join(' · ');
+}
+
 final class _ReadyReport extends StatelessWidget {
   const _ReadyReport({required this.report, required this.onRefresh});
 
@@ -85,21 +154,7 @@ final class _ReadyReport extends StatelessWidget {
               .map(
                 (line) => _ReportRow(
                   title: line.productName,
-                  detail: <String>[
-                    line.factualQuantity == null
-                        ? 'Quantity unknown · no recorded balance'
-                        : 'Ledger quantity ${line.factualQuantity} ${line.stockUnit}'
-                              .trim(),
-                    if (line.quantityState == 'uncertain')
-                      'Uncertain history · not a verified physical count',
-                    if (line.pendingQuantity != null &&
-                        line.pendingQuantity != '0')
-                      'Pending quantity ${line.pendingQuantity} ${line.stockUnit}',
-                    if (line.packText.isNotEmpty) line.packText,
-                    if (line.configuredMinimum != null)
-                      'Minimum ${line.configuredMinimum}',
-                    ...line.limitations,
-                  ].join(' · '),
+                  detail: _inventoryDetail(line),
                 ),
               )
               .toList(growable: false),
@@ -111,18 +166,8 @@ final class _ReadyReport extends StatelessWidget {
           children: report.purchaseTotals
               .map(
                 (line) => _ReportRow(
-                  title: line.pricingComplete
-                      ? '${line.month} · ${line.currency} ${line.total}'
-                      : '${line.month} · ${line.currency} total unknown',
-                  detail:
-                      '${line.receiptCount} receipt'
-                      '${line.receiptCount == 1 ? '' : 's'}'
-                      '${line.storeName == null ? '' : ' · ${line.storeName}'}'
-                      '${line.pricingComplete
-                          ? ''
-                          : line.knownSubtotal == null
-                          ? ' · Prices unknown'
-                          : ' · Known subtotal ${line.currency} ${line.knownSubtotal} · Incomplete pricing'}',
+                  title: _purchaseTitle(line),
+                  detail: _purchaseDetail(line),
                 ),
               )
               .toList(growable: false),
@@ -328,56 +373,67 @@ final class _ReadyReport extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return CustomScrollView(
-      slivers: <Widget>[
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
-            child: Row(
-              children: <Widget>[
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Text(
-                        'Household reports',
-                        style: Theme.of(context).textTheme.headlineMedium,
+    return Scrollbar(
+      thumbVisibility: true,
+      child: Focus(
+        autofocus: true,
+        child: CustomScrollView(
+          primary: true,
+          key: const Key('household-report-scroll'),
+          slivers: <Widget>[
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+                child: Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            'Household reports',
+                            style: Theme.of(context).textTheme.headlineMedium,
+                          ),
+                          const Text(
+                            'Private to the selected home · evidence-aware',
+                          ),
+                        ],
                       ),
-                      const Text(
-                        'Private to the selected home · evidence-aware',
-                      ),
-                    ],
-                  ),
+                    ),
+                    IconButton(
+                      tooltip: 'Refresh reports',
+                      onPressed: () {
+                        unawaited(onRefresh());
+                      },
+                      icon: const Icon(Icons.refresh_rounded),
+                    ),
+                  ],
                 ),
-                IconButton(
-                  tooltip: 'Refresh reports',
-                  onPressed: () {
-                    unawaited(onRefresh());
-                  },
-                  icon: const Icon(Icons.refresh_rounded),
-                ),
-              ],
+              ),
             ),
-          ),
-        ),
-        SliverPadding(
-          padding: const EdgeInsets.all(16),
-          sliver: SliverLayoutBuilder(
-            builder: (context, constraints) {
-              final columns = constraints.crossAxisExtent >= 900 ? 2 : 1;
-              return SliverGrid(
-                delegate: SliverChildListDelegate(_sections()),
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: columns,
-                  crossAxisSpacing: 14,
-                  mainAxisSpacing: 14,
-                  mainAxisExtent: 260,
+            const SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                child: Text(
+                  'Scroll this page to see every report row. Sections expand to show all their records.',
                 ),
-              );
-            },
-          ),
+              ),
+            ),
+            SliverPadding(
+              padding: const EdgeInsets.all(16),
+              sliver: SliverList.list(
+                children: [
+                  for (final section in _sections())
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 14),
+                      child: section,
+                    ),
+                ],
+              ),
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 }
@@ -416,11 +472,13 @@ final class _ReportSection extends StatelessWidget {
               ],
             ),
             const Divider(),
-            Expanded(
-              child: children.isEmpty
-                  ? Center(child: Text(emptyText, textAlign: TextAlign.center))
-                  : ListView(children: children),
-            ),
+            if (children.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                child: Text(emptyText, textAlign: TextAlign.center),
+              )
+            else
+              ...children,
           ],
         ),
       ),

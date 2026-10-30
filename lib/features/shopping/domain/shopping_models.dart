@@ -6,6 +6,38 @@ enum EstimateConfidence { insufficient, low, medium, high }
 
 enum SuggestionFeedbackKind { accepted, dismissed, snoozed, quantityEdited }
 
+/// A published catalog pack chosen independently of the household stock label.
+final class ShoppingPackChoice {
+  const ShoppingPackChoice({required this.id, required this.label});
+  final String id;
+  final String label;
+}
+
+/// Selection eligibility mirrors the supported backend's measurement check.
+/// It authorizes buying a pack, never an inventory conversion or stock write.
+bool shoppingPackIsCompatible({
+  required String stockUnit,
+  required String? selectedAmount,
+  required String? selectedUnit,
+  required bool hasBasePack,
+  required bool selectedIsBasePack,
+  String? baseAmount,
+  String? baseUnit,
+}) {
+  bool positive(String? value) =>
+      value != null &&
+      RegExp(r'^(?:0|[1-9]\d{0,8})(?:\.\d{1,8})?$').hasMatch(value) &&
+      (double.tryParse(value) ?? 0) > 0;
+  if (stockUnit == 'units' && selectedIsBasePack) return true;
+  if (!positive(selectedAmount)) return false;
+  if (stockUnit == 'g' || stockUnit == 'kg') return selectedUnit == 'g';
+  if (stockUnit == 'ml' || stockUnit == 'l') return selectedUnit == 'ml';
+  if (stockUnit != 'units') return false;
+  return hasBasePack
+      ? positive(baseAmount) && baseUnit == selectedUnit
+      : selectedUnit == 'units';
+}
+
 final class ShoppingListLine {
   ShoppingListLine({
     required this.id,
@@ -17,6 +49,9 @@ final class ShoppingListLine {
     this.suggestionId,
     this.homeProductId,
     this.selectedPackId,
+    this.productId,
+    this.stockUnit,
+    this.quantityBasis,
     @Deprecated(
       'Legacy field retained until the Drift shopping projection is migrated. '
       'New suggestion lines must use suggestionId, homeProductId, and '
@@ -26,6 +61,7 @@ final class ShoppingListLine {
     this.checked = false,
     this.archived = false,
     this.revision = 0,
+    this.pending = false,
     this.explanation,
   }) {
     _requireText(id, 'id');
@@ -36,9 +72,19 @@ final class ShoppingListLine {
       (suggestionId, 'suggestionId'),
       (homeProductId, 'homeProductId'),
       (selectedPackId, 'selectedPackId'),
+      (productId, 'productId'),
       (productPackId, 'productPackId'),
     ]) {
       if (value != null) _requireText(value, label);
+    }
+    if (quantityBasis != null &&
+        quantityBasis != 'pack-count' &&
+        quantityBasis != 'stock-unit') {
+      throw ArgumentError.value(quantityBasis, 'quantityBasis');
+    }
+    if (stockUnit != null &&
+        !const <String>{'units', 'g', 'kg', 'ml', 'l'}.contains(stockUnit)) {
+      throw ArgumentError.value(stockUnit, 'stockUnit');
     }
     if (suggestionId != null &&
         (origin != ShoppingLineOrigin.suggestion || homeProductId == null)) {
@@ -59,6 +105,11 @@ final class ShoppingListLine {
   final String? homeProductId;
   final String? selectedPackId;
 
+  /// Server-resolved identities and measurement basis; null is unavailable.
+  final String? productId;
+  final String? stockUnit;
+  final String? quantityBasis;
+
   /// Legacy local suggestion identity. It was historically populated with a
   /// home-product ID despite its name, so it must not be used by new code.
   @Deprecated(
@@ -69,6 +120,7 @@ final class ShoppingListLine {
   final bool checked;
   final bool archived;
   final int revision;
+  final bool pending;
   final String? explanation;
 
   ShoppingListLine copyWith({
@@ -87,10 +139,14 @@ final class ShoppingListLine {
       suggestionId: suggestionId,
       homeProductId: homeProductId,
       selectedPackId: selectedPackId,
+      productId: productId,
+      stockUnit: stockUnit,
+      quantityBasis: quantityBasis,
       productPackId: productPackId,
       checked: checked ?? this.checked,
       archived: archived ?? this.archived,
       revision: revision,
+      pending: pending,
       explanation: explanation,
     );
   }

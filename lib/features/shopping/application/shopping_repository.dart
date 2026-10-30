@@ -17,3 +17,16 @@ abstract interface class ShoppingRepository {
 abstract interface class ShoppingListLifecycleRepository {
   Stream<List<ShoppingList>> watchLists({required String homeId});
 }
+
+/// Deliberate, audited identity change; ordinary description edits never relink.
+abstract interface class ShoppingLineRelinkRepository {
+  Future<void> relinkShoppingLine({
+    required String homeId,
+    required String listId,
+    required String lineId,
+    required int expectedRevision,
+    required String? homeProductId,
+    required String? selectedPackId,
+    required String reason,
+  });
+}

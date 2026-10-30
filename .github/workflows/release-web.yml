@@ -57,7 +57,9 @@ jobs:
           RELEASE_VERSION: ${{ steps.gate.outputs.version }}
         run: |
           flutter pub get --enforce-lockfile
+          node tool/write_web_build_provenance.mjs
           flutter build web --release --pwa-strategy=offline-first \
+            --dart-define-from-file=web/build-provenance.json \
             --build-name "$RELEASE_VERSION" --build-number "$GITHUB_RUN_NUMBER" \
             --dart-define PROVIDENTIA_ENVIRONMENT=production \
             --dart-define PROVIDENTIA_API_BASE_URL="$API_BASE_URL"

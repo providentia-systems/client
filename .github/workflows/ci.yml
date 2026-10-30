@@ -103,6 +103,9 @@ jobs:
       - name: Enforce handwritten production coverage
         run: node tool/check_coverage.mjs coverage/lcov.info 80
 
+      - name: Record exact Client and contract acceptance scope
+        run: node tool/write_compatibility_evidence.mjs
+
       - name: Produce dependency inventory
         run: |
           mkdir -p build/compliance
@@ -116,6 +119,7 @@ jobs:
           path: |
             coverage/lcov.info
             build/compliance/dart-dependencies.json
+            build/compliance/client-compatibility.json
             build/browser-security-proof/result.json
           if-no-files-found: error
           retention-days: 14
@@ -136,7 +140,7 @@ jobs:
           - target: web
             os: ubuntu-24.04
             installer: linux
-            command: flutter build web --release
+            command: flutter build web --release --dart-define-from-file=web/build-provenance.json
             artifact: build/web
           - target: linux
             os: ubuntu-24.04
@@ -193,6 +197,10 @@ jobs:
 
       - name: Resolve pinned dependencies
         run: flutter pub get --enforce-lockfile
+
+      - name: Embed installed web source and contract identity
+        if: matrix.target == 'web'
+        run: node tool/write_web_build_provenance.mjs
 
       - name: Build target
         run: ${{ matrix.command }}

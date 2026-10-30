@@ -60,12 +60,30 @@ void main() {
       var item = (await repository.watchItems(homeId: home).first).single;
       expect(item.category, 'Produce');
       expect(item.unit, 'kg');
+      await expectLater(
+        repository.updateHomeProduct(
+          homeId: home,
+          productId: item.id,
+          privateName: 'Apple',
+          originalPackText: 'Crate',
+          unit: 'units',
+          globalCategoryId: globalCategory,
+          archived: false,
+          expectedRevision: item.revision,
+        ),
+        throwsA(isA<InventoryUnitChangeException>()),
+      );
+      expect(await db.select(db.clientOperations).get(), hasLength(1));
+      item = (await repository.watchItems(homeId: home).first).single;
+      expect(item.canonicalName, 'Aple');
+      expect(item.unit, 'kg');
+      expect(item.currentQuantity, 3.5);
       await repository.updateHomeProduct(
         homeId: home,
         productId: item.id,
         privateName: 'Apple',
         originalPackText: 'Crate',
-        unit: 'units',
+        unit: 'kg',
         globalCategoryId: globalCategory,
         archived: false,
         expectedRevision: item.revision,
@@ -75,7 +93,7 @@ void main() {
       expect(item.id, created.homeProductId);
       expect(item.canonicalName, 'Apple');
       expect(item.packSize, 'Crate');
-      expect(item.unit, 'units');
+      expect(item.unit, 'kg');
       expect(item.currentQuantity, 3.5);
       expect(item.globalCategoryId, globalCategory);
       final operations = await db.select(db.clientOperations).get();
@@ -84,6 +102,7 @@ void main() {
           .map((op) => jsonDecode(op.payload) as Map<String, dynamic>)
           .toList();
       expect(payloads.any((p) => jsonEncode(p).contains('Apple')), isTrue);
+      expect(payloads.last, isNot(contains('unit')));
       expect(
         payloads.every((p) => jsonEncode(p).contains('globalCategoryId')),
         isTrue,

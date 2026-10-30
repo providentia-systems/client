@@ -309,7 +309,7 @@ void main() {
   });
 
   testWidgets(
-    'overview baseline reports 292 catalog packs while preserving private counted products',
+    'overview counts household products, recorded balances and every saved purchase line',
     (tester) async {
       const homeId = 'home-baseline';
       final catalogItems = List<InventoryItem>.generate(292, (index) {
@@ -427,9 +427,12 @@ void main() {
         ),
         hasLength(16),
       );
-      expect(find.text('292'), findsOneWidget);
-      expect(find.text('60'), findsOneWidget);
-      expect(find.text('16'), findsOneWidget);
+      expect(find.text('292'), findsNothing);
+      expect(find.text('60'), findsNWidgets(2));
+      expect(find.text('19'), findsOneWidget);
+      expect(find.text('Household products'), findsOneWidget);
+      expect(find.text('Products with a balance'), findsOneWidget);
+      expect(find.text('Saved purchase lines'), findsOneWidget);
     },
   );
 }

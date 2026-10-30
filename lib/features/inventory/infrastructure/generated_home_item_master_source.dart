@@ -94,14 +94,21 @@ final class GeneratedHomeItemMasterSource implements HomeItemMasterSource {
       }
       total = expectedTotal;
       for (final record in data) {
-        final item = _item(record, homeId);
+        late final InventoryItem item;
+        try {
+          item = _item(record, homeId);
+        } on ArgumentError {
+          throw const FormatException(
+            'An item-master row is invalid. The previous catalog was retained.',
+          );
+        }
         if (!itemIds.add(item.id)) {
           throw const FormatException(
             'The item master returned the same identity more than once.',
           );
         }
         final packId = item.packId;
-        if (packId != null && !packIds.add(packId)) {
+        if (!item.isHomeProduct && packId != null && !packIds.add(packId)) {
           throw const FormatException(
             'The item master returned the same pack more than once.',
           );

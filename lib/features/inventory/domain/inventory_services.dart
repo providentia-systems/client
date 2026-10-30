@@ -11,7 +11,9 @@ final class InventoryItemSearch {
     final category = criteria.category?.trim();
     final filtered = items
         .where((item) {
-          if (criteria.view == InventoryView.counted && !item.isCounted) {
+          if (criteria.view == InventoryView.counted &&
+              !item.isCounted &&
+              item.pendingOpeningQuantity == null) {
             return false;
           }
           if (category != null &&

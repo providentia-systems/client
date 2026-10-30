@@ -21,6 +21,7 @@ enum StockPhotoCountStatus {
   idle,
   preparing,
   awaitingConsent,
+  waitingForCountSession,
   processing,
   review,
   failed,
@@ -265,6 +266,7 @@ final class StockPhotoCountController extends ChangeNotifier {
   int _accessEpoch = 0;
   bool _disposed = false;
   bool _authorizationDenialReported = false;
+  bool _extractionInFlight = false;
 
   StockPhotoCountState get state => _state;
   AiConsent? get confirmedConsent => _consent;

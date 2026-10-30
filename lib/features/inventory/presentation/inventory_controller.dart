@@ -37,6 +37,7 @@ final class InventoryController extends ChangeNotifier {
     required InventoryRepository repository,
     required String homeId,
     bool mayManageStockPreferences = false,
+    bool mayReviewCounts = false,
     InventoryItemSearch search = const InventoryItemSearch(),
     DateTime Function()? clock,
     String Function()? idGenerator,
@@ -47,6 +48,7 @@ final class InventoryController extends ChangeNotifier {
     clock ?? DateTime.now,
     idGenerator ?? UuidV4Generator().call,
     mayManageStockPreferences,
+    mayReviewCounts,
   );
 
   InventoryController._(
@@ -56,11 +58,26 @@ final class InventoryController extends ChangeNotifier {
     this._clock,
     this._idGenerator,
     this.mayManageStockPreferences,
+    this.mayReviewCounts,
   ) : _repository = repository,
       _productCreationRepository =
           repository is InventoryProductCreationRepository ? repository : null;
 
   final bool mayManageStockPreferences;
+  final bool mayReviewCounts;
+  StreamSubscription<List<StockCountSession>>? _countHistorySubscription;
+  List<StockCountSession> _countHistory = const [];
+  List<StockCountSession> get countHistory => _countHistory;
+  String? _countNotice;
+  String? get countNotice => _countNotice;
+  String? _countError;
+  String? get countError => _countError;
+  bool _countBusy = false;
+  bool _disposed = false;
+  bool get countBusy => _countBusy;
+  bool get canReviewCounts =>
+      mayReviewCounts && _repository is InventoryCountReviewRepository;
+
   StockPreferenceRepository? get _stockPreferences =>
       _repository is StockPreferenceRepository
       ? _repository as StockPreferenceRepository
@@ -96,6 +113,10 @@ final class InventoryController extends ChangeNotifier {
   StreamSubscription<StockCountSession?>? _sessionSubscription;
   InventoryViewState _state = const InventoryViewState();
   bool _started = false;
+  bool _hasLoadedItems = false;
+  bool _itemsReadFailed = false;
+  bool get hasLoadedItems => _hasLoadedItems;
+  bool get itemsReadFailed => _itemsReadFailed;
   StreamSubscription<List<HomeInventoryCategory>>? _categoriesSubscription;
   StreamSubscription<List<InventoryItem>>? _archivedSubscription;
   List<InventoryItem> _archivedProducts = const [];
@@ -112,6 +133,26 @@ final class InventoryController extends ChangeNotifier {
       ? _repository as InventoryMetadataRepository
       : null;
   bool get canEditMetadata => _metadata?.supportsInventoryMetadata == true;
+
+  String? _metadataError;
+  String? get metadataError => _metadataError;
+
+  Future<InventoryUnitChangeEligibility> unitChangeEligibility(
+    InventoryItem item,
+  ) async {
+    if (item.homeId != homeId) {
+      throw StateError('Product belongs to another home.');
+    }
+    if (item.currentQuantity != null && item.currentQuantity != 0) {
+      return InventoryUnitChangeEligibility.inUse;
+    }
+    final repository = _repository;
+    if (repository is InventoryUnitChangeRepository) {
+      return (repository as InventoryUnitChangeRepository)
+          .unitChangeEligibility(homeId: homeId, productId: item.id);
+    }
+    return InventoryUnitChangeEligibility.serverConfirmationRequired;
+  }
 
   Future<bool> saveCategory({
     HomeInventoryCategory? category,
@@ -159,13 +200,17 @@ final class InventoryController extends ChangeNotifier {
 
   Future<bool> _metadataMutation(Future<void> Function() action) async {
     if (!canEditMetadata) return false;
+    _metadataError = null;
     try {
       await action();
       return true;
+    } on InventoryUnitChangeException catch (failure) {
+      _metadataError = failure.safeMessage;
+      _setProductCreationError(failure.safeMessage);
+      return false;
     } catch (_) {
-      _setProductCreationError(
-        'The change could not be saved. Refresh and try again.',
-      );
+      _metadataError = 'The change could not be saved. Refresh and try again.';
+      _setProductCreationError(_metadataError!);
       return false;
     }
   }
@@ -222,6 +267,29 @@ final class InventoryController extends ChangeNotifier {
   void start() {
     if (_started) return;
     _started = true;
+    final countRepository = _repository;
+    if (countRepository is InventoryCountReviewRepository) {
+      _countHistorySubscription = (countRepository as InventoryCountReviewRepository)
+          .watchCountSessions(homeId: homeId)
+          .listen(
+            (sessions) {
+              if (_disposed) return;
+              if (sessions.any((session) => session.homeId != homeId)) {
+                _countError =
+                    'Count history belongs to another home and was rejected.';
+              } else {
+                _countHistory = List.unmodifiable(sessions);
+              }
+              notifyListeners();
+            },
+            onError: (Object _) {
+              if (_disposed) return;
+              _countError =
+                  'Count history could not be loaded. Refresh synchronization.';
+              notifyListeners();
+            },
+          );
+    }
     _locationsSubscription = _locationsRepository
         ?.watchHomeLocations(homeId)
         .listen(
@@ -264,23 +332,34 @@ final class InventoryController extends ChangeNotifier {
       notifyListeners();
     }, onError: (Object _) => _setSafeError('Categories could not be loaded.'));
 
-    _itemsSubscription = _repository.watchItems(homeId: homeId).listen((items) {
-      if (items.any((item) => item.homeId != homeId)) {
-        _setSafeError('Inventory access was rejected.');
-        return;
-      }
-      _setState(
-        InventoryViewState(
-          items: List<InventoryItem>.unmodifiable(items),
-          criteria: _state.criteria,
-          activeSession: _state.activeSession,
-          loading: false,
-          productCreationBusy: _state.productCreationBusy,
-          productCreationNotice: _state.productCreationNotice,
-          productCreationError: _state.productCreationError,
-        ),
-      );
-    }, onError: (Object _) => _setSafeError('Inventory could not be loaded.'));
+    _itemsSubscription = _repository
+        .watchItems(homeId: homeId)
+        .listen(
+          (items) {
+            if (items.any((item) => item.homeId != homeId)) {
+              _itemsReadFailed = true;
+              _setSafeError('Inventory access was rejected.');
+              return;
+            }
+            _hasLoadedItems = true;
+            _itemsReadFailed = false;
+            _setState(
+              InventoryViewState(
+                items: List<InventoryItem>.unmodifiable(items),
+                criteria: _state.criteria,
+                activeSession: _state.activeSession,
+                loading: false,
+                productCreationBusy: _state.productCreationBusy,
+                productCreationNotice: _state.productCreationNotice,
+                productCreationError: _state.productCreationError,
+              ),
+            );
+          },
+          onError: (Object _) {
+            _itemsReadFailed = true;
+            _setSafeError('Inventory could not be loaded.');
+          },
+        );
     _sessionSubscription = _repository
         .watchActiveCountSession(homeId: homeId)
         .listen(
@@ -361,6 +440,10 @@ final class InventoryController extends ChangeNotifier {
     String? homeCategoryId,
     String? globalCategoryId,
     String unit = 'units',
+    String? clientProductId,
+    double? openingQuantity,
+    DateTime? openingObservedAt,
+    bool openingCountConfirmed = false,
   }) async {
     final repository = _productCreationRepository;
     if (repository == null || !repository.supportsPrivateHomeProductCreation) {
@@ -390,6 +473,10 @@ final class InventoryController extends ChangeNotifier {
           homeCategoryId: homeCategoryId,
           globalCategoryId: globalCategoryId,
           unit: unit,
+          clientProductId: clientProductId,
+          openingQuantity: openingQuantity,
+          openingObservedAt: openingObservedAt,
+          openingCountConfirmed: openingCountConfirmed,
         ),
       );
       _setState(
@@ -399,7 +486,9 @@ final class InventoryController extends ChangeNotifier {
           activeSession: _state.activeSession,
           loading: _state.loading,
           productCreationNotice: result.awaitsServerConfirmation
-              ? 'The private product is saved locally and queued; server confirmation is pending.'
+              ? openingQuantity == null
+                    ? 'The private product is saved locally and queued; server confirmation is pending.'
+                    : 'Product and opening count are saved locally in order; product creation and stock confirmation are pending synchronization.'
               : 'The private product is synchronized.',
           safeError: _state.safeError,
         ),
@@ -419,7 +508,13 @@ final class InventoryController extends ChangeNotifier {
     }
   }
 
-  Future<bool> addCatalogProduct(InventoryItem item) async {
+  Future<bool> addCatalogProduct(
+    InventoryItem item, {
+    String? clientProductId,
+    double? openingQuantity,
+    DateTime? openingObservedAt,
+    bool openingCountConfirmed = false,
+  }) async {
     final repository = _productCreationRepository;
     if (repository == null || !repository.supportsCatalogHomeProductCreation) {
       _setProductCreationError(
@@ -445,7 +540,13 @@ final class InventoryController extends ChangeNotifier {
     );
     try {
       final result = await repository.createCatalogHomeProduct(
-        CatalogHomeProductDraft.fromItem(item),
+        CatalogHomeProductDraft.fromItem(
+          item,
+          clientProductId: clientProductId,
+          openingQuantity: openingQuantity,
+          openingObservedAt: openingObservedAt,
+          openingCountConfirmed: openingCountConfirmed,
+        ),
       );
       _setState(
         InventoryViewState(
@@ -454,7 +555,9 @@ final class InventoryController extends ChangeNotifier {
           activeSession: _state.activeSession,
           loading: _state.loading,
           productCreationNotice: result.awaitsServerConfirmation
-              ? 'The catalog product is added locally and queued; server confirmation is pending.'
+              ? openingQuantity == null
+                    ? 'The catalog product is added locally and queued; server confirmation is pending.'
+                    : 'Product and opening count are saved locally in order; product creation and stock confirmation are pending synchronization.'
               : 'The catalog product is synchronized.',
           safeError: _state.safeError,
         ),
@@ -472,6 +575,27 @@ final class InventoryController extends ChangeNotifier {
       );
       return false;
     }
+  }
+
+  Future<bool> ensureCountSessionAcknowledged(String sessionId) async {
+    final active = _state.activeSession;
+    final repository = _repository;
+    if (_disposed ||
+        active?.id != sessionId ||
+        active?.status != CountSessionStatus.open ||
+        repository is! InventoryCountAcknowledgementRepository) {
+      return false;
+    }
+    final accepted =
+        await (repository as InventoryCountAcknowledgementRepository)
+            .ensureCountSessionAcknowledged(
+              homeId: homeId,
+              sessionId: sessionId,
+            );
+    return !_disposed &&
+        accepted &&
+        _state.activeSession?.id == sessionId &&
+        _state.activeSession?.status == CountSessionStatus.open;
   }
 
   Future<void> saveSession(StockCountSession session) {
@@ -501,6 +625,13 @@ final class InventoryController extends ChangeNotifier {
     required InventoryItem item,
     required double observedQuantity,
   }) {
+    if (item.homeId != homeId ||
+        !observedQuantity.isFinite ||
+        observedQuantity < 0) {
+      throw StateError(
+        'Choose a product in this home and a finite nonnegative observed quantity.',
+      );
+    }
     final session = _state.activeSession;
     if (session == null) {
       throw StateError('Start a count session before recording quantities.');
@@ -516,6 +647,7 @@ final class InventoryController extends ChangeNotifier {
           status: CountLineStatus.confirmed,
           source: CountSource.manual,
           observedQuantity: observedQuantity,
+          unit: item.unit,
         ),
       ),
     );
@@ -577,6 +709,7 @@ final class InventoryController extends ChangeNotifier {
         status: CountLineStatus.confirmed,
         source: CountSource.photo,
         observedQuantity: observedQuantity,
+        unit: item.unit,
         photoId: photoId,
       ),
     );
@@ -594,6 +727,13 @@ final class InventoryController extends ChangeNotifier {
           startedAt: updated.startedAt,
           status: updated.status,
           closedAt: updated.closedAt,
+          scopeComplete: updated.scopeComplete,
+          reliability: updated.reliability,
+          observedAt: updated.observedAt,
+          observedTimezone: updated.observedTimezone,
+          revision: updated.revision,
+          serverAccepted: updated.serverAccepted,
+          reviewPending: updated.reviewPending,
           lines: updated.lines,
         ),
         loading: _state.loading,
@@ -617,12 +757,65 @@ final class InventoryController extends ChangeNotifier {
     await saveSession(session.removeLine(line.id));
   }
 
-  Future<void> closeCount() {
+  Future<void> closeCount({StockCountEvidence? evidence}) async {
     final session = _state.activeSession;
     if (session == null) {
       throw StateError('There is no active count to close.');
     }
-    return saveSession(session.close(_clock().toUtc()));
+    if (evidence?.observedAt.toUtc().isAfter(_clock().toUtc()) == true) {
+      throw StateError(
+        'The physical observation time cannot be in the future.',
+      );
+    }
+    await saveSession(
+      (evidence == null ? session : session.withEvidence(evidence)).close(
+        _clock().toUtc(),
+      ),
+    );
+    _countNotice =
+        'Count observations saved; server acceptance and chronology readback are pending. '
+        'Unlisted products stay unchanged. Finishing never reapplies purchase stock.';
+    if (!_disposed) notifyListeners();
+  }
+
+  Future<bool> reviewAcceptedCount({
+    required StockCountSession session,
+    required StockCountEvidence evidence,
+    required String reason,
+    required List<StockCountLineCorrection> corrections,
+  }) async {
+    if (_disposed ||
+        _countBusy ||
+        !canReviewCounts ||
+        session.homeId != homeId ||
+        !session.serverAccepted ||
+        session.reviewPending ||
+        session.status != CountSessionStatus.closed ||
+        evidence.observedAt.toUtc().isAfter(_clock().toUtc())) {
+      return false;
+    }
+    _countBusy = true;
+    _countError = null;
+    notifyListeners();
+    try {
+      await (_repository as InventoryCountReviewRepository).reviewCountSession(
+        session: session,
+        evidence: evidence,
+        reason: reason,
+        corrections: corrections,
+      );
+      _countNotice =
+          'The audited review is queued. Accepted quantities and previous evidence '
+          'remain visible until server readback; do not submit the correction again.';
+      return true;
+    } catch (_) {
+      _countError =
+          'This count changed or could not be queued. Refresh its accepted revision and retry; your input is kept.';
+      return false;
+    } finally {
+      _countBusy = false;
+      if (!_disposed) notifyListeners();
+    }
   }
 
   Future<void> cancelCount() {
@@ -687,12 +880,14 @@ final class InventoryController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _locationsSubscription?.cancel();
     unawaited(_archivedSubscription?.cancel());
     unawaited(_categoriesSubscription?.cancel());
     unawaited(_publishedCategoriesSubscription?.cancel());
     unawaited(_itemsSubscription?.cancel());
     unawaited(_sessionSubscription?.cancel());
+    unawaited(_countHistorySubscription?.cancel());
     super.dispose();
   }
 }

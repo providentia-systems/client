@@ -10,6 +10,13 @@ Future<void> showInventoryProductEditor(
   InventoryItem item, {
   bool archived = false,
 }) async {
+  var unitEligibility = InventoryUnitChangeEligibility.unavailable;
+  try {
+    unitEligibility = await controller.unitChangeEligibility(item);
+  } catch (_) {
+    // Retain other editable input even when unit evidence is unavailable.
+  }
+  if (!context.mounted) return;
   var categoryId = item.homeCategoryId;
   var globalCategoryId = item.globalCategoryId;
   var unit = item.unit;
@@ -70,17 +77,27 @@ Future<void> showInventoryProductEditor(
                         key: const Key('inventory-product-unit'),
                         initialValue: unit,
                         isExpanded: true,
-                        decoration: const InputDecoration(
+                        decoration: InputDecoration(
                           labelText: 'Stock unit',
                           helperText:
-                              'A unit correction keeps the existing numbers; it does not convert stock quantities.',
-                          helperMaxLines: 4,
+                              unitEligibility ==
+                                  InventoryUnitChangeEligibility.inUse
+                              ? 'Stock, count, shopping or preference evidence already uses this unit. An ordinary edit cannot change it. Other product details remain editable.'
+                              : unitEligibility ==
+                                    InventoryUnitChangeEligibility.unavailable
+                              ? 'Unit evidence is unavailable. Keep the current unit and refresh this home before requesting a change. Other product details remain editable.'
+                              : 'A unit change requires server confirmation that no quantity or historical evidence uses this unit. The current unit stays visible until confirmed; no quantities are converted.',
+                          helperMaxLines: 7,
                         ),
                         items: [
                           for (final value in {...householdStockUnits, unit})
                             DropdownMenuItem(value: value, child: Text(value)),
                         ],
-                        onChanged: busy
+                        onChanged:
+                            busy ||
+                                unitEligibility !=
+                                    InventoryUnitChangeEligibility
+                                        .serverConfirmationRequired
                             ? null
                             : (value) {
                                 if (value != null) setState(() => unit = value);
@@ -228,10 +245,20 @@ Future<void> showInventoryProductEditor(
                             if (!context.mounted) return;
                             setState(() => busy = false);
                             if (saved) {
+                              if (unit != item.unit) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Unit change requested. The current unit is retained until the server confirms the change. Resolve any synchronization rejection before entering quantities.',
+                                    ),
+                                  ),
+                                );
+                              }
                               Navigator.pop(context);
                             } else {
                               setState(
                                 () => error =
+                                    controller.metadataError ??
                                     'The product could not be saved. Refresh and try again.',
                               );
                             }

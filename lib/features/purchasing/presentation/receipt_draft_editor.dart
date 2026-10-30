@@ -40,6 +40,11 @@ class _ReceiptDraftEditorState extends State<ReceiptDraftEditor> {
     final receipt = widget.receipt;
     final line = widget.line;
     _storeId = receipt.storeId;
+    widget.controller.addListener(_handleControllerChange);
+    if (line == null) {
+      _focusNodes['store'] = FocusNode();
+      _fieldKeys['store'] = GlobalKey();
+    }
     final values = line == null
         ? <String, String>{
             'date': receipt.purchaseDate.toIso8601String().split('T').first,
@@ -63,8 +68,22 @@ class _ReceiptDraftEditorState extends State<ReceiptDraftEditor> {
     );
   }
 
+  void _handleControllerChange() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void didUpdateWidget(covariant ReceiptDraftEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_handleControllerChange);
+      widget.controller.addListener(_handleControllerChange);
+    }
+  }
+
   @override
   void dispose() {
+    widget.controller.removeListener(_handleControllerChange);
     for (final controller in _fields.values) {
       controller.dispose();
     }
@@ -115,7 +134,7 @@ class _ReceiptDraftEditorState extends State<ReceiptDraftEditor> {
     final text = value.trim();
     String? error;
     if (name == 'date') {
-      final date = DateTime.tryParse(text);
+      final date = DateTime.tryParse('${text}T00:00:00Z');
       if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(text) ||
           date == null ||
           date.toIso8601String().split('T').first != text) {
@@ -157,9 +176,24 @@ class _ReceiptDraftEditorState extends State<ReceiptDraftEditor> {
 
   @override
   Widget build(BuildContext context) {
-    final stores = widget.controller.stores
-        .where((store) => !store.archived)
-        .toList();
+    final allStores = widget.controller.stores;
+    final stores = allStores.where((store) => !store.archived).toList();
+    final originalId = widget.receipt.storeId;
+    final historicalStore = allStores
+        .where((store) => store.id == originalId)
+        .firstOrNull;
+    final originalUnavailable =
+        originalId != null && !stores.any((store) => store.id == originalId);
+    final selectedUnavailable =
+        _storeId != null &&
+        _storeId != originalId &&
+        !stores.any((store) => store.id == _storeId);
+    final unavailableSelection = allStores
+        .where((store) => store.id == _storeId)
+        .firstOrNull;
+    final historicalLabel = historicalStore != null
+        ? '${historicalStore.name} (archived · current store)'
+        : '${widget.receipt.storeName == null || widget.receipt.storeName == 'Unavailable store' ? 'Historical store' : widget.receipt.storeName} (unavailable · current store)';
     return AlertDialog(
       title: Text(widget.line == null ? 'Edit receipt' : 'Edit receipt line'),
       content: SizedBox(
@@ -172,43 +206,71 @@ class _ReceiptDraftEditorState extends State<ReceiptDraftEditor> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 if (widget.line == null) ...[
-                  DropdownButtonFormField<String>(
-                    key: const Key('receipt-edit-store'),
-                    initialValue: stores.any((store) => store.id == _storeId)
-                        ? _storeId
-                        : null,
-                    decoration: const InputDecoration(labelText: 'Store'),
-                    items: [
-                      const DropdownMenuItem<String>(
-                        value: null,
-                        child: Text('No store'),
-                      ),
-                      for (final store in stores)
-                        DropdownMenuItem(
-                          value: store.id,
-                          child: Text(store.name),
+                  KeyedSubtree(
+                    key: _fieldKeys['store'],
+                    child: DropdownButtonFormField<String>(
+                      key: const Key('receipt-edit-store'),
+                      initialValue: _storeId,
+                      focusNode: _focusNodes['store'],
+                      isExpanded: true,
+                      hint: const Text('No store'),
+                      decoration: const InputDecoration(labelText: 'Store'),
+                      autovalidateMode: AutovalidateMode.onUserInteraction,
+                      validator: (value) {
+                        if (value == null ||
+                            value == originalId ||
+                            stores.any((store) => store.id == value)) {
+                          return null;
+                        }
+                        _invalidField ??= 'store';
+                        return 'Choose an active store from this home, or keep the current historical store.';
+                      },
+                      items: [
+                        const DropdownMenuItem<String>(
+                          value: null,
+                          child: Text('No store'),
                         ),
-                    ],
-                    onChanged: _saving
-                        ? null
-                        : (value) => setState(() => _storeId = value),
+                        if (originalUnavailable)
+                          DropdownMenuItem(
+                            value: originalId,
+                            child: Text(historicalLabel),
+                          ),
+                        for (final store in stores)
+                          DropdownMenuItem(
+                            value: store.id,
+                            child: Text(store.name),
+                          ),
+                        if (selectedUnavailable)
+                          DropdownMenuItem(
+                            value: _storeId,
+                            enabled: false,
+                            child: Text(
+                              '${unavailableSelection?.name ?? 'Selected store'} (unavailable · choose another store)',
+                            ),
+                          ),
+                      ],
+                      onChanged: _saving
+                          ? null
+                          : (value) => setState(() => _storeId = value),
+                    ),
                   ),
+                  if (originalUnavailable && _storeId == originalId)
+                    Text(
+                      historicalStore == null
+                          ? 'This historical store is unavailable. Its saved association stays on this receipt unless you choose another store or No store.'
+                          : 'This store is archived. It stays on this receipt unless you choose another store or No store.',
+                      key: const Key('receipt-edit-historical-store'),
+                    ),
                   _field(
                     'date',
                     'Purchase date (YYYY-MM-DD)',
-                    readOnly:
-                        widget.receipt.status ==
-                            PurchaseReceiptStatus.committed ||
-                        widget.receipt.lines.any((line) => line.stockApplied),
+                    readOnly: widget.receipt.purchaseBasisFixed,
                   ),
                   _field(
                     'currency',
                     'Currency',
                     maxLength: 3,
-                    readOnly:
-                        widget.receipt.status ==
-                            PurchaseReceiptStatus.committed ||
-                        widget.receipt.lines.any((line) => line.stockApplied),
+                    readOnly: widget.receipt.purchaseBasisFixed,
                   ),
                   _field('total', 'Receipt total (optional)', number: true),
                   _field('notes', 'Notes', maxLength: 2000),
@@ -227,6 +289,9 @@ class _ReceiptDraftEditorState extends State<ReceiptDraftEditor> {
                   Text(
                     widget.line!.stockApplied
                         ? 'Saving this correction adjusts stock by the difference. The selected product and pack stay the same.'
+                        : widget.receipt.status ==
+                              PurchaseReceiptStatus.committed
+                        ? 'This line remains intentionally unresolved. Editing its details does not add stock. Use Resolve purchase to record it.'
                         : 'Review the edited line again before committing this receipt.',
                   ),
                 ],
@@ -361,7 +426,7 @@ class _ReceiptDraftEditorState extends State<ReceiptDraftEditor> {
       bool saved;
       if (line == null) {
         final text = _fields['date']!.text.trim();
-        final date = DateTime.tryParse(text);
+        final date = DateTime.tryParse('${text}T00:00:00Z');
         if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(text) ||
             date == null ||
             date.toIso8601String().split('T').first != text) {

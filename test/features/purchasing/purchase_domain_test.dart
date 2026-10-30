@@ -57,16 +57,19 @@ void main() {
       expect(summaries.last.quantity, 3.25);
     });
 
-    test('recent spend uses private priced lines and exact minor units', () {
-      final spend = const PurchaseHistoryGrouper().recentSpend(
-        homeId: 'home-a',
-        lines: <PurchaseLine>[
-          _line('1', total: Money(minorUnits: 7996, currency: 'NAD')),
-          _line('2', total: Money(minorUnits: 15999, currency: 'NAD')),
-        ],
-      );
-      expect(spend, Money(minorUnits: 23995, currency: 'NAD'));
-    });
+    test(
+      'product subtotal uses private priced lines and exact minor units',
+      () {
+        final spend = const PurchaseHistoryGrouper().recentProductSubtotal(
+          homeId: 'home-a',
+          lines: <PurchaseLine>[
+            _line('1', total: Money(minorUnits: 7996, currency: 'NAD')),
+            _line('2', total: Money(minorUnits: 15999, currency: 'NAD')),
+          ],
+        );
+        expect(spend, Money(minorUnits: 23995, currency: 'NAD'));
+      },
+    );
 
     test('all read models reject cross-home lines', () {
       expect(
@@ -86,7 +89,7 @@ void main() {
         [nad, _line('unknown')],
       ]) {
         expect(
-          const PurchaseHistoryGrouper().recentSpend(
+          const PurchaseHistoryGrouper().recentProductSubtotal(
             homeId: 'home-a',
             lines: lines,
           ),
@@ -104,7 +107,7 @@ void main() {
         );
       }
       expect(
-        () => const PurchaseHistoryGrouper().recentSpend(
+        () => const PurchaseHistoryGrouper().recentProductSubtotal(
           homeId: 'home-a',
           lines: [
             nad,

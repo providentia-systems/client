@@ -10,6 +10,143 @@ import 'package:providentia/features/shopping/presentation/shopping_controller.d
 import 'package:providentia/features/shopping/presentation/shopping_workspace.dart';
 
 void main() {
+  testWidgets(
+    'independent published pack and instructions are distinct from stock',
+    (tester) async {
+      final repository = _Repository();
+      repository.items.clear();
+      repository.items.addAll([
+        InventoryItem(
+          id: 'rice',
+          homeId: 'home',
+          canonicalName: 'Rice',
+          packSize: '1 kg',
+          category: 'Groceries',
+          unit: 'kg',
+          isHomeProduct: true,
+          productId: 'family',
+          packId: 'base',
+          normalizedBaseAmount: '1000',
+          normalizedBaseUnit: 'g',
+          packStatus: 'published',
+        ),
+        InventoryItem(
+          id: 'small',
+          homeId: 'home',
+          canonicalName: 'Rice',
+          packSize: '500 g',
+          category: 'Groceries',
+          productId: 'family',
+          packId: 'small',
+          normalizedBaseAmount: '500',
+          normalizedBaseUnit: 'g',
+          packStatus: 'published',
+        ),
+        InventoryItem(
+          id: 'bad',
+          homeId: 'home',
+          canonicalName: 'Rice',
+          packSize: '1 l',
+          category: 'Groceries',
+          productId: 'family',
+          packId: 'bad',
+          normalizedBaseAmount: '1000',
+          normalizedBaseUnit: 'ml',
+          packStatus: 'published',
+        ),
+      ]);
+      final controller = _controller(repository);
+      await _show(tester, controller);
+      expect(controller.packChoices('rice').map((pack) => pack.id), [
+        'base',
+        'small',
+      ]);
+      await tester.tap(find.byKey(const Key('manual-list-input')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Rice · 1 kg (kg)').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('shopping-manual-pack-rice')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Packs: 500 g').last);
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('shopping-manual-instructions')),
+        'Sealed bags only',
+      );
+      await tester.enterText(
+        find.byKey(const Key('manual-list-quantity')),
+        '2',
+      );
+      await tester.tap(find.byKey(const Key('manual-list-add')));
+      await tester.pumpAndSettle();
+      final line = controller.state.list!.lines.single;
+      expect(line.selectedPackId, 'small');
+      expect(line.quantityBasis, 'pack-count');
+      expect(line.name, 'Sealed bags only');
+      expect(line.quantity, 2);
+      expect(line.stockUnit, 'kg');
+      await _close(tester, controller, repository);
+    },
+  );
+
+  testWidgets(
+    'failed explicit relink retains typed selection and original revision',
+    (tester) async {
+      final repository = _Repository()..failSave = true;
+      repository.current = _list('new').copyWith(
+        lines: [
+          ShoppingListLine(
+            id: 'existing',
+            homeId: 'home',
+            name: 'For visitors',
+            quantity: 3,
+            origin: ShoppingLineOrigin.manual,
+            createdAt: DateTime.utc(2026),
+            homeProductId: 'rice',
+            revision: 7,
+          ),
+        ],
+      );
+      final controller = _controller(repository);
+      await _show(tester, controller);
+      await tester.ensureVisible(
+        find.byKey(const Key('relink-shopping-line-existing')),
+      );
+      await tester.tap(find.byKey(const Key('relink-shopping-line-existing')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('shopping-relink-product')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Milk · 1 l').last);
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('shopping-relink-reason')),
+        'Buy milk instead',
+      );
+      await tester.tap(find.byKey(const Key('shopping-relink-save')));
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.textContaining('selection is retained'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('shopping-relink-reason')))
+            .controller!
+            .text,
+        'Buy milk instead',
+      );
+      expect(repository.lastRelinkRevision, 7);
+      expect(repository.lastRelinkProduct, 'milk');
+      expect(controller.state.list!.lines.single.homeProductId, 'rice');
+      await tester.tap(find.text('Cancel').last);
+      await tester.pumpAndSettle();
+      await _close(tester, controller, repository);
+    },
+  );
+
   testWidgets('offline alias lookup selects a zero-stock household product', (
     tester,
   ) async {
@@ -307,6 +444,7 @@ class _Repository
     implements
         ShoppingRepository,
         ShoppingListLifecycleRepository,
+        ShoppingLineRelinkRepository,
         InventoryRepository {
   _Repository({this.homeId = 'home'})
     : current = _list('new', homeId: homeId),
@@ -317,6 +455,8 @@ class _Repository
   Completer<void>? saveGate;
   ShoppingList? other;
   bool failSave = false;
+  int? lastRelinkRevision;
+  String? lastRelinkProduct;
   final List<InventoryItem> items;
   final itemUpdates = StreamController<List<InventoryItem>>.broadcast(
     sync: true,
@@ -347,6 +487,21 @@ class _Repository
     if (failSave) throw StateError('Save failed');
     current = list;
     updates.add([current, ?other]);
+  }
+
+  @override
+  Future<void> relinkShoppingLine({
+    required String homeId,
+    required String listId,
+    required String lineId,
+    required int expectedRevision,
+    required String? homeProductId,
+    required String? selectedPackId,
+    required String reason,
+  }) async {
+    lastRelinkRevision = expectedRevision;
+    lastRelinkProduct = homeProductId;
+    if (failSave) throw StateError('Synthetic stale revision');
   }
 
   @override

@@ -37,53 +37,70 @@ void main() {
     },
   );
   for (final linked in [false, true]) {
-    testWidgets(
-      '${linked ? 'linked' : 'private'} product name, pack, stock unit and category remain editable',
-      (tester) async {
-        final repository = _Repository(localCategories: true, linked: linked);
-        await _workspace(tester, repository);
-        await tester.ensureVisible(find.byTooltip('Edit product'));
-        await tester.tap(find.byTooltip('Edit product'));
-        await tester.pumpAndSettle();
-        expect(
-          tester
-              .widget<TextField>(
-                find.byKey(const Key('inventory-product-name')),
-              )
-              .enabled,
-          isTrue,
-        );
-        await tester.enterText(
-          find.byKey(const Key('inventory-product-name')),
-          'My apple',
-        );
-        await tester.enterText(
-          find.byKey(const Key('inventory-product-pack')),
-          'Fruit crate',
-        );
-        await _choose(
-          tester,
-          find.byKey(const Key('inventory-product-unit')),
-          'kg',
-        );
-        await _choose(tester, _categoryField(), 'Pantry · Local');
-        await _choose(tester, _categoryField(), 'Produce · Global');
-        await tester.tap(find.text('Save locally'));
-        await tester.pumpAndSettle();
-        expect(repository.edits.single, {
-          'id': 'apple',
-          'name': 'My apple',
-          'pack': 'Fruit crate',
-          'unit': 'kg',
-          'global': 'global',
-          'local': null,
-          'revision': 5,
-          'archived': false,
-        });
-        expect(repository.adjustments, isEmpty);
-        expect(tester.takeException(), isNull);
-      },
-    );
+    for (final quantity in [0.0, 3.0]) {
+      testWidgets(
+        '${linked ? 'linked' : 'private'} metadata stays editable with ${quantity == 0 ? 'an unused' : 'a protected'} stock unit',
+        (tester) async {
+          final repository = _Repository(
+            localCategories: true,
+            linked: linked,
+            quantity: quantity,
+          );
+          await _workspace(tester, repository);
+          await tester.ensureVisible(find.byTooltip('Edit product'));
+          await tester.tap(find.byTooltip('Edit product'));
+          await tester.pumpAndSettle();
+          expect(
+            tester
+                .widget<TextField>(
+                  find.byKey(const Key('inventory-product-name')),
+                )
+                .enabled,
+            isTrue,
+          );
+          await tester.enterText(
+            find.byKey(const Key('inventory-product-name')),
+            'My apple',
+          );
+          await tester.enterText(
+            find.byKey(const Key('inventory-product-pack')),
+            'Fruit crate',
+          );
+          if (quantity == 0) {
+            await _choose(
+              tester,
+              find.byKey(const Key('inventory-product-unit')),
+              'kg',
+            );
+          } else {
+            expect(
+              tester
+                  .widget<DropdownButtonFormField<String>>(
+                    find.byKey(const Key('inventory-product-unit')),
+                  )
+                  .onChanged,
+              isNull,
+            );
+          }
+          await _choose(tester, _categoryField(), 'Pantry · Local');
+          await _choose(tester, _categoryField(), 'Produce · Global');
+          await tester.tap(find.text('Save locally'));
+          await tester.pumpAndSettle();
+          expect(repository.edits.single, {
+            'id': 'apple',
+            'name': 'My apple',
+            'pack': 'Fruit crate',
+            'unit': quantity == 0 ? 'kg' : 'units',
+            'global': 'global',
+            'local': null,
+            'revision': 5,
+            'archived': false,
+          });
+          expect(repository.adjustments, isEmpty);
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
   }
   for (final quantity in <double?>[null, 3]) {
     testWidgets(
@@ -98,6 +115,24 @@ void main() {
         await tester.ensureVisible(find.text('Apple'));
         await tester.tap(find.text('Apple'));
         await tester.pumpAndSettle();
+        final quantityInput = tester.widget<TextField>(
+          find.byKey(const Key('inventory-quantity-input')),
+        );
+        expect(quantityInput.focusNode!.hasFocus, isTrue);
+        expect(
+          quantityInput.controller!.selection,
+          TextSelection(
+            baseOffset: 0,
+            extentOffset: quantityInput.controller!.text.length,
+          ),
+        );
+        // The initial select-all runs once; later cursor movement is retained.
+        quantityInput.controller!.selection = const TextSelection.collapsed(
+          offset: 0,
+        );
+        await tester.pump();
+        expect(quantityInput.controller!.selection.isCollapsed, isTrue);
+        expect(find.text('1 kg · Stock unit: units'), findsOneWidget);
         expect(find.text('Reason for adjustment'), findsNothing);
         expect(find.text('Stock count correction'), findsNothing);
         expect(
@@ -128,6 +163,35 @@ void main() {
       },
     );
   }
+  testWidgets('quantity save failure retains typed amount for a safe retry', (
+    tester,
+  ) async {
+    final repository = _Repository()..failNextAdjustment = true;
+    await _workspace(tester, repository);
+    await tester.ensureVisible(find.text('Apple'));
+    await tester.tap(find.text('Apple'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('inventory-quantity-input')),
+      '8.25',
+    );
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Your entry is retained.'), findsOneWidget);
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('inventory-quantity-input')))
+          .controller!
+          .text,
+      '8.25',
+    );
+    expect(repository.adjustments, isEmpty);
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(repository.adjustments.single.observedQuantity, 8.25);
+    expect(find.byType(AlertDialog), findsNothing);
+  });
+
   testWidgets(
     'quantity validation and cancellation do not write stock; zero is accepted',
     (tester) async {
@@ -309,6 +373,7 @@ class _Repository
   final created = <PrivateHomeProductDraft>[];
   final edits = <Map<String, Object?>>[];
   final adjustments = <ManualAdjustmentIntent>[];
+  bool failNextAdjustment = false;
   @override
   bool get supportsInventoryMetadata => true;
   @override
@@ -341,6 +406,10 @@ class _Repository
     required ManualAdjustmentIntent intent,
     required StockMovement? movement,
   }) async {
+    if (failNextAdjustment) {
+      failNextAdjustment = false;
+      throw StateError('Synthetic validation failure');
+    }
     adjustments.add(intent);
   }
 

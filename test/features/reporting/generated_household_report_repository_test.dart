@@ -172,7 +172,10 @@ void main() {
         final fact = (await repository.load(
           homeId: _homeId,
         )).inventoryFacts.single;
-        expect(fact.quantityState, state);
+        expect(
+          fact.quantityState,
+          InventoryReportQuantityState.values.byName(state),
+        );
         expect(
           fact.factualQuantity,
           state == 'unknown'
@@ -222,13 +225,16 @@ void main() {
         expect(total.total, complete ? '0' : null);
         expect(total.knownSubtotal, source == 'unknown' ? null : '0');
         expect(total.pricingComplete, complete);
-        expect(total.amountSource, source);
+        expect(
+          total.amountSource,
+          PurchaseReportAmountSource.values.byName(source),
+        );
       },
     );
   }
 
   test(
-    'incompatible evidence discriminator is rejected at adapter boundary',
+    'malformed evidence discriminator is rejected at adapter boundary',
     () async {
       final repository = GeneratedHouseholdReportRepository(
         _client((request) async {
@@ -236,7 +242,7 @@ void main() {
           if (request.url.path.endsWith('/inventory')) {
             ((body['data']! as List).single
                     as Map<String, Object?>)['quantityState'] =
-                'verified';
+                42;
           }
           return _json(body);
         }),
@@ -244,6 +250,356 @@ void main() {
       await expectLater(
         repository.load(homeId: _homeId),
         throwsA(isA<ReportRepositoryException>()),
+      );
+    },
+  );
+
+  test(
+    'preserves explicit unknown, recorded zero and signed uncertain stock',
+    () async {
+      final repository = GeneratedHouseholdReportRepository(
+        _client((request) async {
+          final body = _reportForPath(request.url.path);
+          if (request.url.path.endsWith('/inventory')) {
+            body['data'] = <Object?>[
+              <String, Object?>{
+                'homeProductId': _homeProductId,
+                'productName': 'Unknown stock',
+                'packText': '',
+                'stockUnit': 'kg',
+                'factualQuantity': null,
+                'quantityState': 'unknown',
+                'uncertain': false,
+                'pendingQuantity': null,
+                'limitations': <String>['No stock balance has been recorded.'],
+                'checkpointId': null,
+              },
+              <String, Object?>{
+                'homeProductId': _homeProductId,
+                'productName': 'Recorded zero',
+                'packText': '',
+                'stockUnit': 'each',
+                'factualQuantity': '0',
+                'quantityState': 'recorded',
+                'uncertain': false,
+                'pendingQuantity': '0',
+                'limitations': <String>[],
+                'checkpointId': _movementId,
+              },
+              <String, Object?>{
+                'homeProductId': _homeProductId,
+                'productName': 'Uncertain balance',
+                'packText': 'Private pack',
+                'stockUnit': 'kg',
+                'factualQuantity': '-2.12500001',
+                'quantityState': 'uncertain',
+                'uncertain': true,
+                'pendingQuantity': '1.00000001',
+                'limitations': <String>[
+                  'A date-only purchase requires review.',
+                ],
+                'checkpointId': _movementId,
+                'balanceRevision': 7,
+                'balanceUpdatedAt': '2026-08-11T11:00:00Z',
+              },
+            ];
+          }
+          return _json(body);
+        }),
+      );
+
+      final report = await repository.load(homeId: _homeId);
+      expect(report.inventoryFacts, hasLength(3));
+      final unknown = report.inventoryFacts[0];
+      expect(unknown.factualQuantity, isNull);
+      expect(unknown.quantityState, InventoryReportQuantityState.unknown);
+      expect(unknown.pendingQuantity, isNull);
+      expect(unknown.limitations, <String>[
+        'No stock balance has been recorded.',
+      ]);
+      final zero = report.inventoryFacts[1];
+      expect(zero.factualQuantity, '0');
+      expect(zero.quantityState, InventoryReportQuantityState.recorded);
+      expect(zero.uncertain, isFalse);
+      expect(zero.stockUnit, 'each');
+      final uncertain = report.inventoryFacts[2];
+      expect(uncertain.factualQuantity, '-2.12500001');
+      expect(uncertain.quantityState, InventoryReportQuantityState.uncertain);
+      expect(uncertain.uncertain, isTrue);
+      expect(uncertain.pendingQuantity, '1.00000001');
+      expect(uncertain.checkpointId, _movementId);
+      expect(uncertain.limitations, <String>[
+        'A date-only purchase requires review.',
+      ]);
+      expect(uncertain.balanceRevision, 7);
+      expect(uncertain.balanceUpdatedAt, DateTime.utc(2026, 8, 11, 11));
+    },
+  );
+
+  test(
+    'older responses retain quantities with evidence explicitly unavailable',
+    () async {
+      final repository = GeneratedHouseholdReportRepository(
+        _client((request) async => _json(_reportForPath(request.url.path))),
+      );
+      final row = (await repository.load(
+        homeId: _homeId,
+      )).inventoryFacts.single;
+      expect(row.factualQuantity, '12.12500001');
+      expect(row.quantityState, InventoryReportQuantityState.unavailable);
+      expect(row.stockUnit, isNull);
+      expect(row.uncertain, isNull);
+      expect(row.pendingQuantity, isNull);
+      expect(row.checkpointId, isNull);
+    },
+  );
+
+  test(
+    'incomplete quantity evidence does not turn absence into zero',
+    () async {
+      final repository = GeneratedHouseholdReportRepository(
+        _client((request) async {
+          final body = _reportForPath(request.url.path);
+          if (request.url.path.endsWith('/inventory')) {
+            final rows = body['data']! as List<Object?>;
+            final row = rows.single! as Map<String, Object?>;
+            row.remove('factualQuantity');
+            row.remove('productName');
+            row.remove('packText');
+            row['stockUnit'] = '';
+          }
+          return _json(body);
+        }),
+      );
+      final row = (await repository.load(
+        homeId: _homeId,
+      )).inventoryFacts.single;
+      expect(row.factualQuantity, isNull);
+      expect(row.quantityState, InventoryReportQuantityState.unavailable);
+      expect(row.productName, 'Unresolved product');
+      expect(row.packText, '');
+      expect(row.stockUnit, isNull);
+    },
+  );
+
+  for (final contradictory in <Map<String, Object?>>[
+    <String, Object?>{'quantityState': 'unknown', 'factualQuantity': '0'},
+    <String, Object?>{'quantityState': 'recorded', 'factualQuantity': null},
+    <String, Object?>{'quantityState': 'recorded', 'uncertain': true},
+    <String, Object?>{'quantityState': 'uncertain', 'uncertain': false},
+  ]) {
+    test('rejects contradictory inventory evidence $contradictory', () async {
+      final repository = GeneratedHouseholdReportRepository(
+        _client((request) async {
+          final body = _reportForPath(request.url.path);
+          if (request.url.path.endsWith('/inventory')) {
+            final rows = body['data']! as List<Object?>;
+            (rows.single! as Map<String, Object?>).addAll(contradictory);
+          }
+          return _json(body);
+        }),
+      );
+      await expectLater(
+        repository.load(homeId: _homeId),
+        throwsA(
+          isA<ReportRepositoryException>().having(
+            (error) => error.kind,
+            'kind',
+            ReportRepositoryFailureKind.invalidResponse,
+          ),
+        ),
+      );
+    });
+  }
+
+  test(
+    'preserves complete, partial and wholly unknown receipt spend by currency',
+    () async {
+      final repository = GeneratedHouseholdReportRepository(
+        _client((request) async {
+          final body = _reportForPath(request.url.path);
+          if (request.url.path.endsWith('/purchases')) {
+            body['data'] = <Object?>[
+              <String, Object?>{
+                'month': '2026-08',
+                'currency': 'NAD',
+                'receiptCount': 2,
+                'total': '0',
+                'knownSubtotal': '0',
+                'pricingComplete': true,
+                'amountSource': 'declared',
+                'completeReceiptCount': 2,
+                'partialReceiptCount': 0,
+                'unknownReceiptCount': 0,
+                'declaredReceiptCount': 2,
+                'derivedReceiptCount': 0,
+              },
+              <String, Object?>{
+                'month': '2026-08',
+                'currency': 'USD',
+                'receiptCount': 3,
+                'total': null,
+                'knownSubtotal': '12.12500001',
+                'pricingComplete': false,
+                'amountSource': 'partial',
+                'completeReceiptCount': 1,
+                'partialReceiptCount': 1,
+                'unknownReceiptCount': 1,
+                'declaredReceiptCount': 0,
+                'derivedReceiptCount': 1,
+              },
+              <String, Object?>{
+                'month': '2026-08',
+                'currency': 'EUR',
+                'receiptCount': 1,
+                'total': null,
+                'knownSubtotal': null,
+                'pricingComplete': false,
+                'amountSource': 'unknown',
+                'completeReceiptCount': 0,
+                'partialReceiptCount': 0,
+                'unknownReceiptCount': 1,
+                'declaredReceiptCount': 0,
+                'derivedReceiptCount': 0,
+              },
+            ];
+          }
+          return _json(body);
+        }),
+      );
+      final rows = (await repository.load(homeId: _homeId)).purchaseTotals;
+      expect(rows.map((row) => row.currency), <String>['NAD', 'USD', 'EUR']);
+      expect(rows[0].total, '0');
+      expect(rows[0].pricingComplete, isTrue);
+      expect(rows[0].amountSource, PurchaseReportAmountSource.declared);
+      expect(rows[0].completeReceiptCount, 2);
+      expect(rows[0].declaredReceiptCount, 2);
+      expect(rows[1].total, isNull);
+      expect(rows[1].knownSubtotal, '12.12500001');
+      expect(rows[1].pricingComplete, isFalse);
+      expect(rows[1].amountSource, PurchaseReportAmountSource.partial);
+      expect(rows[1].completeReceiptCount, 1);
+      expect(rows[1].partialReceiptCount, 1);
+      expect(rows[1].unknownReceiptCount, 1);
+      expect(rows[1].derivedReceiptCount, 1);
+      expect(rows[2].total, isNull);
+      expect(rows[2].knownSubtotal, isNull);
+      expect(rows[2].amountSource, PurchaseReportAmountSource.unknown);
+    },
+  );
+
+  test(
+    'legacy purchase totals disclose absent completeness rather than certify',
+    () async {
+      final repository = GeneratedHouseholdReportRepository(
+        _client((request) async => _json(_reportForPath(request.url.path))),
+      );
+      final row = (await repository.load(
+        homeId: _homeId,
+      )).purchaseTotals.single;
+      expect(row.total, '999999999.12345678');
+      expect(row.pricingComplete, isNull);
+      expect(row.knownSubtotal, isNull);
+      expect(row.amountSource, PurchaseReportAmountSource.unavailable);
+    },
+  );
+
+  test(
+    'future evidence metadata remains readable without certifying unknown meanings',
+    () async {
+      final repository = GeneratedHouseholdReportRepository(
+        _client((request) async {
+          final body = _reportForPath(request.url.path);
+          if (request.url.path.endsWith('/inventory')) {
+            final rows = body['data']! as List<Object?>;
+            (rows.single! as Map<String, Object?>).addAll(<String, Object?>{
+              'productName': null,
+              'quantityState': 'future-evidence-kind',
+              'factualQuantity': '-1234567890.123456789',
+              'uncertain': true,
+              'futureMetadata': <String, Object?>{
+                'homeId': _homeId,
+                'reviewed': false,
+              },
+            });
+          }
+          if (request.url.path.endsWith('/purchases')) {
+            final rows = body['data']! as List<Object?>;
+            (rows.single! as Map<String, Object?>).addAll(<String, Object?>{
+              'amountSource': 'future-pricing-kind',
+              'total': '1234567890.123456789',
+            });
+          }
+          return _json(body);
+        }),
+      );
+      final report = await repository.load(homeId: _homeId);
+      final stock = report.inventoryFacts.single;
+      expect(stock.productName, 'Unresolved product');
+      expect(stock.factualQuantity, '-1234567890.123456789');
+      expect(stock.quantityState, InventoryReportQuantityState.unavailable);
+      expect(stock.uncertain, isTrue);
+      expect(report.purchaseTotals.single.total, '1234567890.123456789');
+      expect(
+        report.purchaseTotals.single.amountSource,
+        PurchaseReportAmountSource.unavailable,
+      );
+      expect(report.purchaseTotals.single.pricingComplete, isNull);
+    },
+  );
+
+  for (final source in ['partial', 'unknown']) {
+    test('rejects complete total with $source pricing provenance', () async {
+      final repository = GeneratedHouseholdReportRepository(
+        _client((request) async {
+          final body = _reportForPath(request.url.path);
+          if (request.url.path.endsWith('/purchases')) {
+            final row = (body['data']! as List).single as Map<String, Object?>;
+            row.addAll({
+              'total': '0',
+              'pricingComplete': true,
+              'amountSource': source,
+            });
+          }
+          return _json(body);
+        }),
+      );
+      await expectLater(
+        repository.load(homeId: _homeId),
+        throwsA(
+          isA<ReportRepositoryException>().having(
+            (error) => error.kind,
+            'kind',
+            ReportRepositoryFailureKind.invalidResponse,
+          ),
+        ),
+      );
+    });
+  }
+
+  test(
+    'malformed pricing provenance is rejected at adapter boundary',
+    () async {
+      final repository = GeneratedHouseholdReportRepository(
+        _client((request) async {
+          final body = _reportForPath(request.url.path);
+          if (request.url.path.endsWith('/purchases')) {
+            ((body['data']! as List).single
+                    as Map<String, Object?>)['amountSource'] =
+                42;
+          }
+          return _json(body);
+        }),
+      );
+      await expectLater(
+        repository.load(homeId: _homeId),
+        throwsA(
+          isA<ReportRepositoryException>().having(
+            (error) => error.kind,
+            'kind',
+            ReportRepositoryFailureKind.invalidResponse,
+          ),
+        ),
       );
     },
   );

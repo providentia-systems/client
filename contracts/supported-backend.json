@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "repository": "providentia-systems/backend",
+  "contractSourceRevision": "769518dc50e89004db1e1718417e8daad378618e",
+  "apiVersion": "2.4.0",
+  "contractSha256": "2b7b38490dc42ad967cfff7e32dd56db41d30842a7d39845b9beecb7f7d4e254",
+  "requiredMigration": "Providentia\\Migrations\\Version20261026000100"
+}

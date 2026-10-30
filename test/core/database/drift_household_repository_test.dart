@@ -723,7 +723,11 @@ void main() {
       expect(result.homeProductId, _createdProductId);
       expect(result.revision, 1);
       expect(result.awaitsServerConfirmation, isTrue);
-      final record = await database.select(database.localRecords).getSingle();
+      final record =
+          await (database.select(database.localRecords)..where(
+                (row) => row.entityType.equals('inventory-home-product'),
+              ))
+              .getSingle();
       expect(record.homeId, _homeId);
       expect(record.entityType, 'inventory-home-product');
       expect(record.entityId, _createdProductId);
@@ -1213,11 +1217,15 @@ void main() {
         operations.every((operation) => operation.operationId.contains('-')),
         isTrue,
       );
-      final balance =
-          await (database.select(database.localRecords)
-                ..where((row) => row.entityType.equals('inventory-balance')))
-              .getSingle();
-      expect(jsonDecode(balance.payload), containsPair('quantity', '8'));
+      final balances = await (database.select(
+        database.localRecords,
+      )..where((row) => row.entityType.equals('inventory-balance'))).get();
+      expect(
+        balances,
+        isEmpty,
+        reason:
+            'Closing unassessed observations must await authoritative chronology readback.',
+      );
     },
   );
 
@@ -1286,7 +1294,7 @@ void main() {
   );
 
   test(
-    'photo count queues an ordinary line and changes balance only on one close',
+    'photo count closes once and waits for authoritative eligible stock readback',
     () async {
       var idIndex = 0;
       final operationIds = <String>[
@@ -1360,11 +1368,14 @@ void main() {
         ),
         hasLength(1),
       );
-      final balance =
-          await (database.select(database.localRecords)
-                ..where((row) => row.entityType.equals('inventory-balance')))
-              .getSingle();
-      expect(jsonDecode(balance.payload), containsPair('quantity', '6'));
+      final balances = await (database.select(
+        database.localRecords,
+      )..where((row) => row.entityType.equals('inventory-balance'))).get();
+      expect(
+        balances,
+        isEmpty,
+        reason: 'Photo confirmation alone does not certify count eligibility.',
+      );
       await expectLater(repository.saveCountSession(closed), throwsStateError);
     },
   );
@@ -2166,6 +2177,43 @@ void main() {
         deviceId: _deviceId,
         idGenerator: () => operationIds[idIndex++],
       );
+      await repository.replaceCatalogItemMaster(
+        homeId: _homeId,
+        items: [
+          InventoryItem(
+            id: _selectedPackId,
+            homeId: _homeId,
+            productId: _otherProductId,
+            packId: _selectedPackId,
+            canonicalName: 'Flour',
+            packSize: '2 kg',
+            category: 'Baking',
+            unit: 'kg',
+            normalizedBaseAmount: '2000',
+            normalizedBaseUnit: 'g',
+            packStatus: 'published',
+          ),
+        ],
+      );
+      await database
+          .into(database.localRecords)
+          .insert(
+            LocalRecordsCompanion.insert(
+              homeId: _homeId,
+              entityType: 'inventory-home-product',
+              entityId: _productId,
+              payload: jsonEncode({
+                'homeId': _homeId,
+                'productId': _otherProductId,
+                'packId': _selectedPackId,
+                'unit': 'kg',
+                'status': 'active',
+              }),
+              revision: const Value(1),
+              synchronizedAt: Value(now),
+              updatedAt: now,
+            ),
+          );
       final empty = ShoppingList(
         id: _listId,
         homeId: _homeId,
@@ -2208,6 +2256,7 @@ void main() {
         'description': 'Flour',
         'quantity': '2',
         'suggestionId': _suggestionId,
+        'selectedPackId': _selectedPackId,
       });
       expect(
         operations.any(

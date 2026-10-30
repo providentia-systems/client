@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -26,7 +27,7 @@ void main() {
       expect(requested, hasLength(4));
       expect(controller.status, ReportingStatus.ready);
       expect(find.text('Rice'), findsOneWidget);
-      expect(find.textContaining('Ledger quantity 5.25'), findsOneWidget);
+      expect(find.textContaining('Quantity 5.25'), findsOneWidget);
       expect(find.text('2026-10 · NAD 25'), findsOneWidget);
       expect(find.text('2026-10 · USD 10'), findsOneWidget);
       expect(find.textContaining('1 receipt · Market'), findsOneWidget);
@@ -51,6 +52,202 @@ void main() {
       expect(find.text('Load reports'), findsOneWidget);
     },
   );
+
+  testWidgets(
+    'inventory evidence distinguishes unknown, zero, uncertainty and legacy',
+    (tester) async {
+      final controller = _controller((request) async {
+        final body = _body(request.url.path);
+        if (request.url.path.endsWith('/inventory')) {
+          body['data'] = <Object?>[
+            <String, Object?>{
+              'homeProductId': _product,
+              'productName': 'Uncounted rice',
+              'packText': '',
+              'stockUnit': 'kg',
+              'factualQuantity': null,
+              'quantityState': 'unknown',
+              'uncertain': false,
+              'limitations': <String>['No recorded balance.'],
+            },
+            <String, Object?>{
+              'homeProductId': _product,
+              'productName': 'Zero rice',
+              'packText': '',
+              'stockUnit': 'kg',
+              'factualQuantity': '0',
+              'quantityState': 'recorded',
+              'uncertain': false,
+              'pendingQuantity': '0',
+            },
+            <String, Object?>{
+              'homeProductId': _product,
+              'productName': 'Uncertain rice',
+              'packText': '',
+              'stockUnit': 'kg',
+              'factualQuantity': '-1.25',
+              'quantityState': 'uncertain',
+              'uncertain': true,
+              'pendingQuantity': '2.5',
+              'limitations': <String>['Purchase/count order requires review.'],
+              'checkpointId': _product,
+              'balanceUpdatedAt': '2026-10-03T11:00:00Z',
+            },
+            <String, Object?>{
+              'homeProductId': _product,
+              'productName': 'Legacy rice',
+              'packText': '',
+              'factualQuantity': '3.5',
+            },
+          ];
+        }
+        return _json(body);
+      });
+      addTearDown(controller.dispose);
+      await controller.load();
+      await _show(tester, controller);
+
+      expect(controller.status, ReportingStatus.ready);
+      expect(find.textContaining('Quantity unknown'), findsOneWidget);
+      expect(find.textContaining('No recorded stock evidence'), findsOneWidget);
+      expect(find.textContaining('Quantity 0 kg'), findsOneWidget);
+      expect(find.textContaining('Quantity -1.25 kg'), findsOneWidget);
+      expect(find.textContaining('Uncertain ledger balance'), findsOneWidget);
+      expect(find.textContaining('Pending quantity 2.5 kg'), findsOneWidget);
+      expect(
+        find.textContaining('Purchase/count order requires review.'),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining(
+          'An observation checkpoint anchors this ledger balance',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('Ledger quantity is not a verified physical count'),
+        findsWidgets,
+      );
+      await tester.drag(
+        find.byKey(const Key('household-report-scroll')),
+        const Offset(0, -400),
+      );
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Stock evidence unavailable'), findsOneWidget);
+      expect(find.textContaining('Stock unit unavailable'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'purchase reports label partial and unknown spending without zero',
+    (tester) async {
+      final controller = _controller((request) async {
+        final body = _body(request.url.path);
+        if (request.url.path.endsWith('/purchases')) {
+          body['data'] = <Object?>[
+            <String, Object?>{
+              'month': '2026-10',
+              'currency': 'NAD',
+              'receiptCount': 2,
+              'total': null,
+              'knownSubtotal': '25',
+              'pricingComplete': false,
+              'amountSource': 'partial',
+              'partialReceiptCount': 1,
+              'unknownReceiptCount': 1,
+            },
+            <String, Object?>{
+              'month': '2026-10',
+              'currency': 'USD',
+              'receiptCount': 1,
+              'total': null,
+              'knownSubtotal': null,
+              'pricingComplete': false,
+              'amountSource': 'unknown',
+            },
+            <String, Object?>{
+              'month': '2026-10',
+              'currency': 'EUR',
+              'receiptCount': 1,
+              'total': '0',
+              'knownSubtotal': '0',
+              'pricingComplete': true,
+              'amountSource': 'declared',
+            },
+          ];
+        }
+        return _json(body);
+      });
+      addTearDown(controller.dispose);
+      await controller.load();
+      await _show(tester, controller);
+
+      expect(controller.status, ReportingStatus.ready);
+      expect(find.text('2026-10 · NAD 25 known subtotal'), findsOneWidget);
+      expect(find.text('2026-10 · USD · Spend unknown'), findsOneWidget);
+      expect(find.text('2026-10 · EUR 0'), findsOneWidget);
+      expect(
+        find.textContaining('Incomplete pricing; total spend is unknown'),
+        findsNWidgets(2),
+      );
+      expect(find.textContaining('1 partially priced'), findsOneWidget);
+      expect(find.textContaining('1 with unknown prices'), findsOneWidget);
+      expect(find.textContaining('Complete receipt spend'), findsOneWidget);
+      expect(find.text('2026-10 · USD 0'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('long report sections expose every row through one page scroll', (
+    tester,
+  ) async {
+    final controller = _controller((request) async {
+      final body = _body(request.url.path);
+      if (request.url.path.endsWith('/inventory')) {
+        body['data'] = [
+          for (var index = 0; index < 60; index++)
+            <String, Object?>{
+              'homeProductId': _product,
+              'productName': 'Synthetic row $index',
+              'factualQuantity': '0',
+              'stockUnit': 'units',
+              'quantityState': 'recorded',
+              'uncertain': false,
+            },
+        ];
+      }
+      return _json(body);
+    });
+    addTearDown(controller.dispose);
+    await controller.load();
+    await _show(tester, controller);
+    expect(find.byType(ListView), findsNothing);
+    expect(
+      find.textContaining('Scroll this page to see every report row'),
+      findsOneWidget,
+    );
+    final scroll = find.byKey(const Key('household-report-scroll'));
+    expect(find.text('Synthetic row 59').hitTestable(), findsNothing);
+    await tester.dragUntilVisible(
+      find.text('Synthetic row 59'),
+      scroll,
+      const Offset(0, -700),
+      maxIteration: 30,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Synthetic row 59').hitTestable(), findsOneWidget);
+    final position = tester
+        .state<ScrollableState>(
+          find.descendant(of: scroll, matching: find.byType(Scrollable)).first,
+        )
+        .position;
+    final before = position.pixels;
+    await tester.sendKeyEvent(LogicalKeyboardKey.pageUp);
+    await tester.pumpAndSettle();
+    expect(position.pixels, lessThan(before));
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets(
     'unknown stock and partial spend stay visible without invented zero',
@@ -84,9 +281,11 @@ void main() {
       expect(controller.status, ReportingStatus.ready);
       expect(find.textContaining('Quantity unknown'), findsOneWidget);
       expect(find.textContaining('No stock evidence'), findsOneWidget);
-      expect(find.text('2026-10 · NAD total unknown'), findsOneWidget);
-      expect(find.textContaining('Known subtotal NAD 12.50'), findsOneWidget);
-      expect(find.textContaining('Incomplete pricing'), findsOneWidget);
+      expect(find.text('2026-10 · NAD 12.50 known subtotal'), findsOneWidget);
+      expect(
+        find.textContaining('Incomplete pricing; total spend is unknown'),
+        findsOneWidget,
+      );
       expect(find.textContaining('NAD null'), findsNothing);
       expect(tester.takeException(), isNull);
     },

@@ -8,6 +8,82 @@ import 'package:providentia/features/inventory/presentation/inventory_controller
 import 'package:providentia/features/inventory/presentation/inventory_metadata_dialogs.dart';
 
 void main() {
+  testWidgets('used unit is locked while unrelated details remain editable', (
+    tester,
+  ) async {
+    final repository = _Repository()
+      ..eligibility = InventoryUnitChangeEligibility.inUse;
+    final controller = InventoryController(
+      repository: repository,
+      homeId: 'home',
+    )..start();
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: TextButton(
+              onPressed: () =>
+                  showInventoryProductEditor(context, controller, _product),
+              child: const Text('Edit'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Edit'));
+    await tester.pumpAndSettle();
+    final selector = tester.widget<DropdownButtonFormField<String>>(
+      find.byKey(const Key('inventory-product-unit')),
+    );
+    expect(selector.onChanged, isNull);
+    expect(
+      find.textContaining('ordinary edit cannot change it'),
+      findsOneWidget,
+    );
+    await tester.enterText(_field('Product name'), 'Brown rice');
+    await tester.tap(find.text('Save locally'));
+    await tester.pumpAndSettle();
+    expect(repository.edits.single['name'], 'Brown rice');
+  });
+
+  testWidgets('unit rejection retains typed name and actionable explanation', (
+    tester,
+  ) async {
+    final repository = _Repository()
+      ..failure =
+          'This unit is used by historical evidence. Keep the current unit.';
+    final controller = InventoryController(
+      repository: repository,
+      homeId: 'home',
+    )..start();
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: TextButton(
+              onPressed: () =>
+                  showInventoryProductEditor(context, controller, _product),
+              child: const Text('Edit'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Edit'));
+    await tester.pumpAndSettle();
+    await tester.enterText(_field('Product name'), 'Typed name');
+    await tester.tap(find.text('Save locally'));
+    await tester.pumpAndSettle();
+    expect(find.text(repository.failure!), findsOneWidget);
+    expect(
+      tester.widget<TextField>(_field('Product name')).controller!.text,
+      'Typed name',
+    );
+    expect(find.text('Save locally'), findsOneWidget);
+  });
+
   testWidgets(
     'private product editor saves every editable field and safely exits',
     (tester) async {
@@ -139,7 +215,19 @@ final _product = InventoryItem(
   isHomeProduct: true,
 );
 
-class _Repository implements InventoryRepository, InventoryMetadataRepository {
+class _Repository
+    implements
+        InventoryRepository,
+        InventoryMetadataRepository,
+        InventoryUnitChangeRepository {
+  InventoryUnitChangeEligibility eligibility =
+      InventoryUnitChangeEligibility.serverConfirmationRequired;
+  String? failure;
+  @override
+  Future<InventoryUnitChangeEligibility> unitChangeEligibility({
+    required String homeId,
+    required String productId,
+  }) async => eligibility;
   @override
   Stream<List<PublishedInventoryCategory>> watchPublishedCategories(
     String homeId,
@@ -191,6 +279,7 @@ class _Repository implements InventoryRepository, InventoryMetadataRepository {
     required bool archived,
     int? expectedRevision,
   }) async {
+    if (failure != null) throw InventoryUnitChangeException(failure!);
     edits.add({
       'name': privateName,
       'pack': originalPackText,

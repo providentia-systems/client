@@ -145,6 +145,7 @@ final class SessionHttpClient extends http.BaseClient {
       case ClientSessionTransport.nativeBearer:
         copy.headers['Authorization'] = 'Bearer ${_sessions.accessToken}';
       case ClientSessionTransport.webCookie:
+        copy.headers['X-Providentia-Application'] = 'homeowner';
         if (_changesState(source.method) && _sessions.csrfToken != null) {
           copy.headers['X-CSRF-Token'] = _sessions.csrfToken!;
         }

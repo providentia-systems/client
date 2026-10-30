@@ -60,3 +60,31 @@ abstract interface class InventoryMetadataRepository {
     int? expectedRevision,
   });
 }
+
+/// Local evidence can prohibit a unit change, but cannot certify the absence of
+/// server history. The server always makes the final revision-checked decision.
+abstract interface class InventoryUnitChangeRepository {
+  Future<InventoryUnitChangeEligibility> unitChangeEligibility({
+    required String homeId,
+    required String productId,
+  });
+}
+
+/// The server AI target must be accepted before a cloud extraction uses its ID.
+abstract interface class InventoryCountAcknowledgementRepository {
+  Future<bool> ensureCountSessionAcknowledged({
+    required String homeId,
+    required String sessionId,
+  });
+}
+
+/// Review accepted evidence through the existing audited synchronization command.
+abstract interface class InventoryCountReviewRepository {
+  Stream<List<StockCountSession>> watchCountSessions({required String homeId});
+  Future<void> reviewCountSession({
+    required StockCountSession session,
+    required StockCountEvidence evidence,
+    required String reason,
+    required List<StockCountLineCorrection> corrections,
+  });
+}

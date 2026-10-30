@@ -72,6 +72,8 @@ class ProvidentiaApp extends StatefulWidget {
     this.onChangeHome,
     this.onSignOut,
     this.accountPageBuilder,
+    this.householdReportsPageBuilder,
+    this.householdName,
     this.catalogContributionPageBuilder,
     this.receiptImportPageBuilder,
     this.syncConflictController,
@@ -89,6 +91,8 @@ class ProvidentiaApp extends StatefulWidget {
   final Future<void> Function()? onChangeHome;
   final Future<void> Function()? onSignOut;
   final WidgetBuilder? accountPageBuilder;
+  final WidgetBuilder? householdReportsPageBuilder;
+  final String? householdName;
   final SyncConflictController? syncConflictController;
   final SyncCountReconciliationHandler? onCountReconciliation;
   final VoidCallback? onDispose;
@@ -154,6 +158,8 @@ class _ProvidentiaAppState extends State<ProvidentiaApp> {
             onChangeHome: widget.onChangeHome,
             onSignOut: widget.onSignOut,
             accountPageBuilder: widget.accountPageBuilder,
+            householdReportsPageBuilder: widget.householdReportsPageBuilder,
+            householdName: widget.householdName,
             catalogContributionPageBuilder:
                 widget.catalogContributionPageBuilder,
             receiptImportPageBuilder: widget.receiptImportPageBuilder,
@@ -174,6 +180,8 @@ class _AdaptiveShell extends StatelessWidget {
     required this.onChangeHome,
     required this.onSignOut,
     required this.accountPageBuilder,
+    required this.householdReportsPageBuilder,
+    required this.householdName,
     required this.catalogContributionPageBuilder,
     required this.receiptImportPageBuilder,
     required this.syncConflictController,
@@ -186,6 +194,8 @@ class _AdaptiveShell extends StatelessWidget {
   final Future<void> Function()? onChangeHome;
   final Future<void> Function()? onSignOut;
   final WidgetBuilder? accountPageBuilder;
+  final WidgetBuilder? householdReportsPageBuilder;
+  final String? householdName;
   final WidgetBuilder? catalogContributionPageBuilder;
   final WidgetBuilder? receiptImportPageBuilder;
   final SyncConflictController? syncConflictController;
@@ -213,6 +223,7 @@ class _AdaptiveShell extends StatelessWidget {
         if (width < phoneBreakpoint) {
           return Scaffold(
             key: const Key('phone-shell'),
+            appBar: _workspaceLinks,
             body: content,
             bottomNavigationBar: _BottomNavigation(controller: controller),
             floatingActionButton: _accountActions,
@@ -222,6 +233,7 @@ class _AdaptiveShell extends StatelessWidget {
         if (width < desktopBreakpoint) {
           return Scaffold(
             key: const Key('tablet-shell'),
+            appBar: _workspaceLinks,
             body: Row(
               children: <Widget>[
                 SafeArea(
@@ -238,6 +250,7 @@ class _AdaptiveShell extends StatelessWidget {
 
         return Scaffold(
           key: const Key('desktop-shell'),
+          appBar: _workspaceLinks,
           body: Row(
             children: <Widget>[
               SafeArea(
@@ -254,6 +267,12 @@ class _AdaptiveShell extends StatelessWidget {
     );
   }
 
+  PreferredSizeWidget get _workspaceLinks => _WorkspaceLinks(
+    reportsPageBuilder: householdReportsPageBuilder,
+    accountPageBuilder: accountPageBuilder,
+    householdName: householdName,
+  );
+
   Widget? get _accountActions {
     if (onChangeHome == null &&
         onSignOut == null &&
@@ -266,6 +285,86 @@ class _AdaptiveShell extends StatelessWidget {
       accountPageBuilder: accountPageBuilder,
     );
   }
+}
+
+/// The same named links remain visible above every adaptive workspace. Pushing
+/// existing routes leaves the current feature widget and typed input mounted.
+class _WorkspaceLinks extends StatelessWidget implements PreferredSizeWidget {
+  const _WorkspaceLinks({
+    required this.reportsPageBuilder,
+    required this.accountPageBuilder,
+    required this.householdName,
+  });
+
+  final WidgetBuilder? reportsPageBuilder;
+  final WidgetBuilder? accountPageBuilder;
+  final String? householdName;
+
+  @override
+  Size get preferredSize => const Size.fromHeight(64);
+
+  void _open(BuildContext context, WidgetBuilder? builder, String title) {
+    unawaited(
+      Navigator.of(context).push<void>(
+        MaterialPageRoute<void>(
+          builder:
+              builder ??
+              (_) => Scaffold(
+                appBar: AppBar(title: Text(title)),
+                body: const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Text(
+                      'This service is unavailable in the current session. Connect and sign in with the account authorized for your home. Saved local work is preserved.',
+                    ),
+                  ),
+                ),
+              ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: Theme.of(context).colorScheme.surface,
+    child: SafeArea(
+      bottom: false,
+      child: SizedBox(
+        height: preferredSize.height,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: Tooltip(
+                  message: householdName == null
+                      ? 'Household reports for the selected home'
+                      : 'Household reports for $householdName',
+                  child: TextButton.icon(
+                    key: const Key('workspace-reports'),
+                    onPressed: () =>
+                        _open(context, reportsPageBuilder, 'Household reports'),
+                    icon: const Icon(Icons.assessment_outlined),
+                    label: const Text('Reports'),
+                  ),
+                ),
+              ),
+              Expanded(
+                child: TextButton.icon(
+                  key: const Key('workspace-account-settings'),
+                  onPressed: () =>
+                      _open(context, accountPageBuilder, 'Account/settings'),
+                  icon: const Icon(Icons.manage_accounts_outlined),
+                  label: const Text('Account/settings'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 enum _AccountAction { manageAccess, changeHome, signOut }
@@ -524,6 +623,7 @@ class _HomeWorkspace extends StatelessWidget {
                       const _OverviewGrid(
                         features: null,
                         access: HouseholdWorkspaceAccess.denied,
+                        summary: null,
                       )
                     else
                       ListenableBuilder(
@@ -535,7 +635,11 @@ class _HomeWorkspace extends StatelessWidget {
                         builder: (context, _) => Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: <Widget>[
-                            _OverviewGrid(features: features, access: access),
+                            _OverviewGrid(
+                              features: features,
+                              access: access,
+                              summary: controller.syncSummary,
+                            ),
                             if (access.inventoryRead) ...<Widget>[
                               const SizedBox(height: 20),
                               _RecentStockPanel(features: features!),
@@ -877,67 +981,147 @@ class _SyncStatusCard extends StatelessWidget {
 }
 
 class _OverviewGrid extends StatelessWidget {
-  const _OverviewGrid({required this.features, required this.access});
+  const _OverviewGrid({
+    required this.features,
+    required this.access,
+    required this.summary,
+  });
 
   final HouseholdFeatures? features;
   final HouseholdWorkspaceAccess access;
+  final SyncSummary? summary;
+
+  _OverviewData _metric({
+    required IconData icon,
+    required String label,
+    required String detail,
+    required bool permitted,
+    required bool supported,
+    required bool loaded,
+    required bool failed,
+    required int count,
+  }) {
+    final value = !permitted || !supported
+        ? 'Unavailable'
+        : failed && !loaded
+        ? 'Unavailable'
+        : !loaded
+        ? 'Loading'
+        : '$count';
+    final state = !permitted
+        ? 'Your home role does not provide this view.'
+        : !supported
+        ? 'This data source is unavailable in the current workspace.'
+        : failed
+        ? loaded
+              ? 'Last known data; the latest read failed.'
+              : 'The data could not be loaded; this is not a zero.'
+        : !loaded
+        ? 'Waiting for saved household data.'
+        : summary?.isSynchronizing == true
+        ? 'Refreshing; showing the saved local view.'
+        : summary?.availability == SyncAvailability.offline
+        ? 'Saved offline data; server freshness is unverified.'
+        : summary?.availability != SyncAvailability.online
+        ? 'Saved local data; server availability is unverified.'
+        : summary?.lastSuccessfulSync == null
+        ? 'Saved local data; server readback has not been verified.'
+        : 'Saved local view; last synchronization ${summary!.lastSuccessfulSync!.toUtc().toIso8601String()}.';
+    final pending = (summary?.unresolved ?? 0) > 0
+        ? ' ${summary!.unresolved} unresolved local operations; these figures are not server acceptance.'
+        : '';
+    return _OverviewData(
+      icon: icon,
+      value: value,
+      label: label,
+      detail: '$detail $state$pending',
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final inventory = access.inventoryRead ? features?.inventory.state : null;
-    final purchasing = access.purchasesRead ? features?.purchasing.state : null;
-    final catalogPackCount = inventory?.items
-        .map((item) => item.packId)
-        .whereType<String>()
+    final inventory = features?.inventory;
+    final purchasing = features?.purchasing;
+    final products =
+        inventory?.state.items.where((item) => item.isHomeProduct).toList() ??
+        [];
+    final balances = products
+        .where((item) => item.currentQuantity != null)
+        .map((item) => item.id)
         .toSet()
         .length;
+    final receiptAware = purchasing?.canSelectReceipts == true;
+    final receiptCount =
+        purchasing?.receipts
+            .where(
+              (receipt) => receipt.status == PurchaseReceiptStatus.committed,
+            )
+            .map((receipt) => receipt.id)
+            .toSet()
+            .length ??
+        0;
+    final lineCount =
+        purchasing?.state.lines
+            .where((line) => line.source == PurchaseSource.recentReceipt)
+            .length ??
+        0;
     final cards = <_OverviewData>[
-      _OverviewData(
+      _metric(
         icon: Icons.inventory_2_outlined,
-        value: inventory == null || inventory.loading
-            ? '—'
-            : '$catalogPackCount',
-        label: 'Item master',
+        label: 'Household products',
+        detail:
+            'Distinct products added to this home, including private products. Catalog browsing entries are excluded.',
+        permitted: access.inventoryRead,
+        supported: inventory != null,
+        loaded: inventory?.hasLoadedItems == true,
+        failed: inventory?.itemsReadFailed == true,
+        count: products.map((item) => item.id).toSet().length,
       ),
-      _OverviewData(
-        icon: Icons.check_circle_outline_rounded,
-        value: inventory == null || inventory.loading
-            ? '—'
-            : '${inventory.items.where((item) => item.isCounted).length}',
-        label: 'Counted stock',
+      _metric(
+        icon: Icons.inventory_outlined,
+        label: 'Products with a balance',
+        detail:
+            'Recorded ledger balances, including zero. This is a product count, not a physical-count certification or a sum of mixed units.',
+        permitted: access.inventoryRead,
+        supported: inventory != null,
+        loaded: inventory?.hasLoadedItems == true,
+        failed: inventory?.itemsReadFailed == true,
+        count: balances,
       ),
-      _OverviewData(
-        icon: Icons.shopping_bag_outlined,
-        value: purchasing == null || purchasing.loading
-            ? '—'
-            : '${purchasing.lines.where((line) => line.source == PurchaseSource.recentReceipt && line.lineTotal != null).length}',
-        label: 'Recent purchases',
+      _metric(
+        icon: Icons.receipt_long_outlined,
+        label: receiptAware ? 'Finished receipts' : 'Saved purchase lines',
+        detail: receiptAware
+            ? 'Distinct finished receipt IDs across all saved purchase dates; includes missing prices and header-only receipts. Drafts and cancellations are excluded.'
+            : 'Recent-receipt source lines across all saved purchase dates, including missing prices. Receipt header counts are unavailable in this source.',
+        permitted: access.purchasesRead,
+        supported: purchasing != null,
+        loaded: receiptAware
+            ? purchasing?.hasLoadedReceipts == true
+            : purchasing?.hasLoadedLines == true,
+        failed: receiptAware
+            ? purchasing?.receiptReadFailed == true
+            : purchasing?.linesReadFailed == true,
+        count: receiptAware ? receiptCount : lineCount,
       ),
     ];
-
     return LayoutBuilder(
       builder: (context, constraints) {
         final columns = constraints.maxWidth >= 760 ? 3 : 1;
         const spacing = 12.0;
         final columnWidth =
             (constraints.maxWidth - (columns - 1) * spacing) / columns;
-        final nominalExtent = columnWidth / (columns == 1 ? 3.7 : 2.1);
-
         return Wrap(
           key: const Key('overview-grid'),
           spacing: spacing,
           runSpacing: spacing,
-          children: cards
-              .map(
-                (data) => SizedBox(
-                  width: columnWidth,
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(minHeight: nominalExtent),
-                    child: _OverviewCard(data: data),
-                  ),
-                ),
-              )
-              .toList(growable: false),
+          children: [
+            for (final data in cards)
+              SizedBox(
+                width: columnWidth,
+                child: _OverviewCard(data: data),
+              ),
+          ],
         );
       },
     );
@@ -968,14 +1152,25 @@ class _RecentStockPanel extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
             Text(
-              'Stock needing attention',
+              'Recorded stock balances',
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 8),
-            if (items.isEmpty)
+            if (features.inventory.itemsReadFailed)
+              Text(
+                features.inventory.hasLoadedItems
+                    ? 'Showing last known balances; inventory refresh failed.'
+                    : 'Inventory is unavailable; no conclusion about your stock can be drawn.',
+              ),
+            if (!features.inventory.hasLoadedItems &&
+                !features.inventory.itemsReadFailed)
+              const Text('Loading saved inventory…'),
+            if (items.isEmpty && features.inventory.hasLoadedItems)
               const Padding(
                 padding: EdgeInsets.only(bottom: 12),
-                child: Text('Complete a count to see stock here.'),
+                child: Text(
+                  'No recorded balances in the saved inventory view.',
+                ),
               )
             else
               for (final item in visible)
@@ -985,7 +1180,7 @@ class _RecentStockPanel extends StatelessWidget {
                   subtitle: Text('${item.packSize} · ${item.category}'),
                   trailing: Text(
                     item.currentQuantity == 0
-                        ? 'Out of stock'
+                        ? 'Ledger: 0 ${item.unit}'
                         : '${item.currentQuantity!.toStringAsFixed(item.currentQuantity == item.currentQuantity!.roundToDouble() ? 0 : 2)} ${item.unit}',
                   ),
                 ),
@@ -1001,11 +1196,13 @@ class _OverviewData {
     required this.icon,
     required this.value,
     required this.label,
+    required this.detail,
   });
 
   final IconData icon;
   final String value;
   final String label;
+  final String detail;
 }
 
 class _OverviewCard extends StatelessWidget {
@@ -1045,6 +1242,11 @@ class _OverviewCard extends StatelessWidget {
                     style: Theme.of(context).textTheme.headlineMedium,
                   ),
                   Text(data.label),
+                  const SizedBox(height: 6),
+                  Text(
+                    data.detail,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
                 ],
               ),
             ),

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:providentia/core/database/app_database.dart';
 import 'package:providentia/core/synchronization/sync_models.dart';
 import 'package:providentia/core/synchronization/sync_ports.dart';
+import 'package:providentia/core/synchronization/synchronization_recovery.dart';
 
 /// Serializes home-data purge after every synchronization run that was already
 /// admitted before membership revocation.
@@ -28,6 +29,28 @@ final class HomeSyncRevocationGate {
     }
     state.activeRuns++;
     return Future<SyncRunOutcome>.sync(synchronization).whenComplete(() {
+      state.activeRuns--;
+      if (state.revoked && state.activeRuns == 0) {
+        state.quiesced?.complete();
+        state.quiesced = null;
+      }
+    });
+  }
+
+  /// Recovery is serialized with the same revocation barrier as ordinary
+  /// synchronization. A verified revocation waits for admitted recovery before
+  /// its purge, so no late snapshot can restore revoked household records.
+  Future<T> runRecovery<T>(String homeId, Future<T> Function() recovery) {
+    final state = _states.putIfAbsent(homeId, _HomeSyncState.new);
+    if (state.revoked) {
+      return Future<T>.error(
+        const AuthenticationSyncException(
+          'Access to this home changed. Recovery stopped.',
+        ),
+      );
+    }
+    state.activeRuns++;
+    return Future<T>.sync(recovery).whenComplete(() {
       state.activeRuns--;
       if (state.revoked && state.activeRuns == 0) {
         state.quiesced?.complete();
@@ -63,7 +86,8 @@ final class _HomeSyncState {
 }
 
 /// Binds an [AppSynchronization] instance to one revocable home.
-final class RevocationGuardedSynchronization implements AppSynchronization {
+final class RevocationGuardedSynchronization
+    implements AppSynchronization, AppSyncRecovery {
   factory RevocationGuardedSynchronization({
     required AppSynchronization delegate,
     required HomeSyncRevocationGate gate,
@@ -90,6 +114,37 @@ final class RevocationGuardedSynchronization implements AppSynchronization {
     _requireBoundHome(homeId);
     return _delegate.watchSummary(homeId: homeId);
   }
+
+  Future<T> _recover<T>(
+    String homeId,
+    Future<T> Function(AppSyncRecovery) action,
+  ) {
+    _requireBoundHome(homeId);
+    final delegate = _delegate;
+    if (delegate is! AppSyncRecovery) {
+      return Future<T>.error(
+        const RetryableSyncException(
+          'Protected recovery is unavailable in this installation.',
+        ),
+      );
+    }
+    return _gate.runRecovery(homeId, () => action(delegate as AppSyncRecovery));
+  }
+
+  @override
+  Future<SyncRecoveryInspection> inspectRecovery(String homeId) =>
+      _recover(homeId, (recovery) => recovery.inspectRecovery(homeId));
+
+  @override
+  Future<SyncRecoveryOutcome> rebuildSavedHome(String homeId) =>
+      _recover(homeId, (recovery) => recovery.rebuildSavedHome(homeId));
+
+  @override
+  Future<SyncRecoveryOutcome> revalidateSavedOperations(String homeId) =>
+      _recover(
+        homeId,
+        (recovery) => recovery.revalidateSavedOperations(homeId),
+      );
 
   void _requireBoundHome(String homeId) {
     if (homeId != _homeId) {

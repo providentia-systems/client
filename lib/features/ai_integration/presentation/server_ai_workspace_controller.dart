@@ -87,6 +87,8 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
   String? _safeMessage;
   int _accessEpoch = 0;
   bool _disposed = false;
+  bool _homeAccessRevoked = false;
+  bool get homeAccessRevoked => _homeAccessRevoked;
 
   AiHomeCapabilities get capabilities => _capabilities;
   ServerAiWorkspaceStatus get status => _status;
@@ -107,6 +109,7 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
 
   Future<void> updateCapabilities(AiHomeCapabilities capabilities) async {
     final scopeChanged = capabilities.homeId != _capabilities.homeId;
+    if (scopeChanged) _homeAccessRevoked = false;
     final lostRead = _capabilities.mayRead && !capabilities.mayRead;
     final lostUse = _capabilities.mayUse && !capabilities.mayUse;
     _capabilities = capabilities;
@@ -945,6 +948,7 @@ final class ServerAiWorkspaceController extends ChangeNotifier {
     String safeMessage,
   ) async {
     if (!_stillAuthorized(epoch, homeId)) return;
+    _homeAccessRevoked = true;
     _accessEpoch++;
     final discard = _discardPrepared();
     _clearExtractionState();

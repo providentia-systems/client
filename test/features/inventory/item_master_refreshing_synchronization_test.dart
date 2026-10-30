@@ -20,6 +20,27 @@ const String _globalCategoryId = '0198a0b1-c2d3-7e4f-a678-9abcdef01234';
 const String _homeCategoryId = '0198a0b1-c2d3-7e4f-b789-abcdef012345';
 
 void main() {
+  test(
+    'domain ArgumentError preserves verified cache with actionable failure',
+    () async {
+      var replacements = 0;
+      final synchronization = ItemMasterRefreshingSynchronization(
+        delegate: _Synchronization(
+          const SyncRunOutcome(status: SyncRunStatus.completed),
+        ),
+        source: _Source.failure(ArgumentError('invalid projected quantity')),
+        replaceCache: ({required homeId, required items, categories}) async {
+          replacements++;
+        },
+        homeId: _homeId,
+      );
+      final result = await synchronization.synchronize(_homeId);
+      expect(result.status, SyncRunStatus.retryableFailure);
+      expect(result.safeMessage, contains('last verified catalog'));
+      expect(replacements, 0);
+    },
+  );
+
   test('refreshes the verified cache after every completed sync run', () async {
     final item = InventoryItem(
       id: '0198a0b1-c2d3-7e4f-9234-56789abcdef0',

@@ -19,6 +19,9 @@ void validateReceiptProjection(RemoteChange change) {
   if (change.kind != RemoteChangeKind.upsert) return;
   if (change.entityType == 'purchasing-receipt') {
     _oneOf(value, 'status', {'draft', 'committed', 'cancelled'});
+    if (value['lineCorrectionState'] != null) {
+      _oneOf(value, 'lineCorrectionState', {'draft', 'available', 'immutable'});
+    }
     final date = _text(value, 'purchaseDate');
     final parsed = DateTime.tryParse(date);
     if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(date) ||

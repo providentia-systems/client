@@ -9,6 +9,30 @@ import 'package:providentia/features/ai_integration/infrastructure/generated_ser
 import 'package:providentia_api_client/providentia_api_client.dart';
 
 void main() {
+  test('only an explicit membership problem proves home revocation', () async {
+    final repository = GeneratedServerAiRepository(
+      _client(
+        (_) async => _json({
+          'type':
+              'https://providentia.invalid/problems/sync_home_access_denied',
+          'title': 'Unavailable',
+          'requestId': 'synthetic-ai-denial',
+          'status': 403,
+        }, statusCode: 403),
+      ),
+    );
+    await expectLater(
+      repository.loadWorkspace(homeId: 'home-1'),
+      throwsA(
+        isA<AiServerException>().having(
+          (error) => error.kind,
+          'kind',
+          AiServerFailureKind.authorizationDenied,
+        ),
+      ),
+    );
+  });
+
   test(
     'resolved recipients are verified against one settings and profile snapshot',
     () async {
@@ -633,7 +657,9 @@ void main() {
             .having(
               (error) => error.kind,
               'kind',
-              AiServerFailureKind.authorizationDenied,
+              statusCode == 403
+                  ? AiServerFailureKind.forbidden
+                  : AiServerFailureKind.unavailable,
             )
             .having(
               (error) => error.safeMessage,
@@ -757,7 +783,9 @@ void main() {
               .having(
                 (error) => error.kind,
                 'kind',
-                AiServerFailureKind.authorizationDenied,
+                statusCode == 403
+                    ? AiServerFailureKind.forbidden
+                    : AiServerFailureKind.unavailable,
               )
               .having(
                 (error) => error.safeMessage,

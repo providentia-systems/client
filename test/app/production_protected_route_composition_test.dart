@@ -42,6 +42,7 @@ void main() {
         home: ProductionHouseholdReportsRoute(
           repository: repository,
           homeId: _homeId,
+          homeName: 'Synthetic household',
           protectedRouteRegistry: registry,
         ),
       ),
@@ -49,6 +50,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(repository.homeIds, <String>[_homeId]);
+    expect(find.text('Home: Synthetic household'), findsOneWidget);
     expect(find.text('Balances by location'), findsOneWidget);
 
     registry.clearSensitiveState();

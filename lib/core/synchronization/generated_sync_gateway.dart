@@ -40,6 +40,10 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
     'purchasing.receipt-line.approve': 'purchasing-receipt-line',
     'purchasing.receipt-line.unresolve': 'purchasing-receipt-line',
     'purchasing.receipt.commit': 'purchasing-receipt',
+    'purchasing.receipt.correct-date': 'purchasing-receipt',
+    'purchasing.receipt-line.correct': 'purchasing-receipt-line',
+    'inventory.count-session.review': 'inventory-count-session',
+    'shopping.list-line.relink': 'shopping-list-line',
     'shopping.preference.put': 'shopping-stock-preference',
     'shopping.list.create': 'shopping-list',
     'shopping.suggestion-feedback.create': 'shopping-suggestion-feedback',
@@ -67,6 +71,10 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
     'purchasing.receipt-line.update',
     'purchasing.receipt-line.remove',
     'purchasing.receipt.commit',
+    'purchasing.receipt.correct-date',
+    'purchasing.receipt-line.correct',
+    'inventory.count-session.review',
+    'shopping.list-line.relink',
     'shopping.preference.put',
     'shopping.list.update',
     'shopping.list-line.update',
@@ -333,13 +341,16 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
         );
       }
       if (error.statusCode == 400 || error.statusCode == 422) {
+        final code = _validationFailureCode(error);
         return PushResponse(
           results: operations
               .map(
                 (operation) => PushOperationResult(
                   operationId: operation.operationId,
                   kind: PushResultKind.validationError,
-                  safeMessage: _safeProblem(error),
+                  code: code,
+                  requestId: error.problem.requestId,
+                  safeMessage: syncRecoveryInstruction(code),
                 ),
               )
               .toList(growable: false),
@@ -566,6 +577,7 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
     generated.SyncOperationResult result,
     String requestId,
   ) {
+    final code = sanitizedSyncFailureCode(result.code);
     return PushOperationResult(
       operationId: result.operationId,
       kind: switch (result.status) {
@@ -580,10 +592,13 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
       },
       acceptedRevision:
           result.revision ?? _commandRevision(result.commandResult),
-      code: sanitizedSyncFailureCode(result.code),
+      code: code,
       requestId: requestId,
       changeCursor: result.changeCursor,
-      safeMessage: result.detail,
+      safeMessage:
+          isUnsupportedBackendFailureCode(code) || code == 'invalid_command'
+          ? syncRecoveryInstruction(code)
+          : result.detail,
       remotePayload:
           result.representation ?? result.conflict ?? result.commandResult,
     );
@@ -651,6 +666,7 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
         'Operation status command result revision must be an integer.',
       );
     }
+    final code = sanitizedSyncFailureCode(json['code'] as String?);
     return PushOperationResult(
       operationId: operationId,
       kind: switch (status) {
@@ -668,10 +684,25 @@ final class GeneratedSyncGateway implements SyncRemoteGateway {
       entityType: json['entityType'] as String?,
       commandType: json['commandType'] as String?,
       changeCursor: json['changeCursor'] as String?,
-      safeMessage: json['detail'] as String?,
-      code: sanitizedSyncFailureCode(json['code'] as String?),
+      safeMessage:
+          isUnsupportedBackendFailureCode(code) || code == 'invalid_command'
+          ? syncRecoveryInstruction(code)
+          : json['detail'] as String?,
+      code: code,
       remotePayload: representation ?? conflict ?? commandResult,
     );
+  }
+
+  String _validationFailureCode(generated.ProvidentiaApiException error) {
+    final extension = error.problem.extensions['code'];
+    if (extension is String && isUnsupportedBackendFailureCode(extension)) {
+      return extension;
+    }
+    final typeCode = Uri.tryParse(error.problem.type)?.pathSegments.lastOrNull;
+    if (isUnsupportedBackendFailureCode(typeCode)) return typeCode!;
+    // Older servers use an undifferentiated 422 for unknown commands and
+    // invalid data. Preserve a validation block without guessing from prose.
+    return 'invalid_command';
   }
 
   void _validatePushResults(

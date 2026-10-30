@@ -2,17 +2,19 @@ import 'dart:async';
 
 import 'package:providentia/core/synchronization/sync_models.dart';
 import 'package:providentia/core/synchronization/sync_ports.dart';
+import 'package:providentia/core/synchronization/synchronization_recovery.dart';
 
 /// Foreground synchronization orchestrator.
 ///
 /// Mobile background execution remains best effort. The composition root calls
 /// this coordinator on start, resume, home switch, manual refresh, and after
 /// foreground mutations.
-final class SyncCoordinator implements AppSynchronization {
+final class SyncCoordinator implements AppSynchronization, AppSyncRecovery {
   factory SyncCoordinator({
     required LocalSyncStore local,
     required SyncRemoteGateway remote,
     required ConnectivityProbe connectivity,
+    SyncRecoveryGateway? recoveryGateway,
     SyncMetrics metrics = const NoopSyncMetrics(),
     AuthenticationRecovery authenticationRecovery =
         const NoAuthenticationRecovery(),
@@ -36,6 +38,7 @@ final class SyncCoordinator implements AppSynchronization {
       retryPolicy ?? RetryPolicy(),
       clock ?? DateTime.now,
       maximumPullPages,
+      recoveryGateway,
     );
   }
 
@@ -48,6 +51,7 @@ final class SyncCoordinator implements AppSynchronization {
     this._retryPolicy,
     this._clock,
     this._maximumPullPages,
+    this._recoveryGateway,
   );
 
   final LocalSyncStore _local;
@@ -58,8 +62,152 @@ final class SyncCoordinator implements AppSynchronization {
   final RetryPolicy _retryPolicy;
   final DateTime Function() _clock;
   final int _maximumPullPages;
+  final SyncRecoveryGateway? _recoveryGateway;
 
   bool _running = false;
+
+  Future<T> _recover<T>(
+    String homeId,
+    Future<T> Function(SyncRecoveryStore, SyncRecoveryGateway) action,
+  ) async {
+    if (_running) {
+      throw const RetryableSyncException(
+        'Wait for synchronization to finish before recovery.',
+      );
+    }
+    final local = _local;
+    final remote = _recoveryGateway;
+    if (local is! SyncRecoveryStore || remote == null) {
+      throw const RetryableSyncException(
+        'This installation does not support protected recovery. Update the Client before continuing.',
+      );
+    }
+    _running = true;
+    try {
+      final connection = await _connectivity.check();
+      if (connection.availability == SyncAvailability.authenticationRequired) {
+        throw const AuthenticationSyncException(
+          'Sign in with the original account before recovery.',
+        );
+      }
+      if (connection.availability != SyncAvailability.online) {
+        throw const RetryableSyncException(
+          'Recovery needs a connection. Saved work is preserved on this device.',
+        );
+      }
+      // Verify current server authorization and the unchanged original binding
+      // before inspecting or replacing any household projection.
+      final diagnostics = await remote.diagnostics(homeId: homeId);
+      await (local as SyncRecoveryStore).requireOriginalRecoveryBinding(
+        homeId: homeId,
+        accountId: diagnostics.accountId,
+        deviceId: diagnostics.deviceId,
+      );
+      return await action(local as SyncRecoveryStore, remote);
+    } finally {
+      _running = false;
+    }
+  }
+
+  @override
+  Future<SyncRecoveryInspection> inspectRecovery(String homeId) => _recover(
+    homeId,
+    (local, remote) async => SyncRecoveryInspection(
+      diagnostics: await remote.diagnostics(homeId: homeId),
+      saved: await _local.watchSummary(homeId: homeId).first,
+    ),
+  );
+
+  @override
+  Future<SyncRecoveryOutcome> rebuildSavedHome(
+    String homeId,
+  ) => _recover(homeId, (local, remote) async {
+    final bootstrap = await _remote.bootstrap(homeId: homeId);
+    await local.replaceWithRecoveryBootstrap(homeId: homeId, page: bootstrap);
+    final saved = await _local.watchSummary(homeId: homeId).first;
+    return SyncRecoveryOutcome(
+      recovered: bootstrap.changes.length,
+      needsReview: saved.blocked,
+      message:
+          'Server-saved records refreshed. All saved operation identities, order and conflict state remain preserved. ${saved.unresolved} operation(s) still need synchronization or review. Previously deleted local-only work cannot be reconstructed.',
+    );
+  });
+
+  @override
+  Future<SyncRecoveryOutcome> revalidateSavedOperations(
+    String homeId,
+  ) => _recover(homeId, (local, remote) async {
+    final operations = await local.recoveryOperations(homeId: homeId);
+    if (operations.isEmpty) {
+      return const SyncRecoveryOutcome(
+        message:
+            'No saved operations need revalidation. Refresh server-saved records to rebuild the current home.',
+      );
+    }
+    final decisions = await remote.revalidate(
+      homeId: homeId,
+      operations: operations,
+    );
+    if (decisions.length != operations.length) {
+      throw const FormatException(
+        'Incomplete saved-operation recovery evidence.',
+      );
+    }
+    final accepted = <PushOperationResult>[];
+    var review = 0;
+    var recovered = 0;
+    for (var index = 0; index < decisions.length; index++) {
+      final decision = decisions[index];
+      final operation = operations[index];
+      if (decision.operationId != operation.operation.operationId) {
+        throw const FormatException('Recovery changed saved-operation order.');
+      }
+      if (decision.action == SyncRecoveryAction.readback) {
+        final status = await _remote.operationStatuses(
+          homeId: homeId,
+          deviceId: operation.operation.deviceId,
+          operationIds: [decision.operationId],
+        );
+        if (status.operations.length != 1 ||
+            status.operations.single.operationId != decision.operationId ||
+            status.operations.single.result?.kind !=
+                PushResultKind.acknowledged) {
+          throw const RetryableSyncException(
+            'Accepted execution evidence could not be confirmed. Saved work remains preserved.',
+          );
+        }
+        final result = status.operations.single.result!;
+        _validateResultBinding(operation.operation, result);
+        accepted.add(result);
+      } else if (decision.action == SyncRecoveryAction.retrySameOperation) {
+        // Backend permits only the first unknown eligible predecessor. Do not
+        // skip a review block, mutate its payload, or send later dependencies.
+        await local.requeueRevalidatedOperation(
+          operation: operation,
+          now: _clock().toUtc(),
+        );
+        recovered++;
+      } else {
+        review++;
+      }
+    }
+    if (accepted.isNotEmpty) {
+      await _local.applyPushResults(
+        results: accepted,
+        now: _clock().toUtc(),
+        retryPolicy: _retryPolicy,
+      );
+      final bootstrap = await _remote.bootstrap(homeId: homeId);
+      await local.replaceWithRecoveryBootstrap(homeId: homeId, page: bootstrap);
+      recovered += accepted.length;
+    }
+    return SyncRecoveryOutcome(
+      recovered: recovered,
+      needsReview: review,
+      message:
+          'Original-binding evidence reviewed. Accepted operations were read back; eligible work retains its original identity for the next Sync now. $review operation(s) still require review or their predecessor.',
+    );
+  });
 
   @override
   Stream<SyncSummary> watchSummary({required String homeId}) {

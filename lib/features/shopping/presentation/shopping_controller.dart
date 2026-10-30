@@ -79,7 +79,126 @@ final class ShoppingController extends ChangeNotifier {
   final InventoryRepository? _itemMasterRepository;
   StreamSubscription<List<InventoryItem>>? _itemsSubscription;
   List<InventoryItem> _items = const <InventoryItem>[];
+  List<InventoryItem> _catalogItems = const <InventoryItem>[];
   List<InventoryItem> get items => _items;
+  bool get canRelinkLines => _repository is ShoppingLineRelinkRepository;
+
+  List<ShoppingPackChoice> packChoices(String homeProductId) {
+    final product = _items
+        .where((item) => item.id == homeProductId)
+        .firstOrNull;
+    if (product == null || product.productId == null) return const [];
+    final candidates = <String, InventoryItem>{};
+    for (final item in _catalogItems) {
+      if (item.productId == product.productId &&
+          item.packId != null &&
+          item.packStatus == 'published') {
+        candidates[item.packId!] = item;
+      }
+    }
+    // The home row also carries the selected published pack's normalized fields.
+    if (product.packId != null && product.packStatus == 'published') {
+      candidates.putIfAbsent(product.packId!, () => product);
+    }
+    final base = candidates[product.packId];
+    final choices = <ShoppingPackChoice>[];
+    for (final pack in candidates.values) {
+      if (shoppingPackIsCompatible(
+        stockUnit: product.unit,
+        selectedAmount: pack.normalizedBaseAmount,
+        selectedUnit: pack.normalizedBaseUnit,
+        hasBasePack: product.packId != null,
+        selectedIsBasePack: pack.packId == product.packId,
+        baseAmount: base?.normalizedBaseAmount,
+        baseUnit: base?.normalizedBaseUnit,
+      )) {
+        choices.add(ShoppingPackChoice(id: pack.packId!, label: pack.packSize));
+      }
+    }
+    choices.sort((a, b) => a.label.compareTo(b.label));
+    return List.unmodifiable(choices);
+  }
+
+  String linkedProductLabel(ShoppingListLine line) =>
+      _items
+          .where((item) => item.id == line.homeProductId)
+          .firstOrNull
+          ?.canonicalName ??
+      (line.homeProductId == null
+          ? 'Custom item'
+          : 'Linked product unavailable');
+
+  String quantityLabel(ShoppingListLine line) {
+    if (line.quantityBasis == 'pack-count' ||
+        (line.origin == ShoppingLineOrigin.manual &&
+            line.selectedPackId != null)) {
+      final pack = line.homeProductId == null
+          ? null
+          : packChoices(
+              line.homeProductId!,
+            ).where((entry) => entry.id == line.selectedPackId).firstOrNull;
+      return 'pack(s)${pack == null ? ' (pack details unavailable)' : ' · ${pack.label}'}';
+    }
+    return line.stockUnit ??
+        _items
+            .where((item) => item.id == line.homeProductId)
+            .firstOrNull
+            ?.unit ??
+        (line.homeProductId == null
+            ? 'custom quantity'
+            : 'stock measurement unavailable');
+  }
+
+  Future<bool> relinkLine(
+    ShoppingListLine line, {
+    required String? homeProductId,
+    required String? selectedPackId,
+    required String reason,
+  }) async {
+    final repository = _repository;
+    final list = _requireList();
+    if (repository is! ShoppingLineRelinkRepository ||
+        list.archived ||
+        line.archived ||
+        line.homeId != homeId ||
+        !list.lines.any((entry) => entry.id == line.id)) {
+      return false;
+    }
+    final product = _items
+        .where((item) => item.id == homeProductId)
+        .firstOrNull;
+    if ((homeProductId != null && product == null) ||
+        (selectedPackId != null &&
+            (homeProductId == null ||
+                !packChoices(
+                  homeProductId,
+                ).any((pack) => pack.id == selectedPackId))) ||
+        reason.trim().isEmpty ||
+        reason.trim().length > 500) {
+      _setError(
+        'Choose an available home product and compatible pack, and give a reason of 1 to 500 characters.',
+      );
+      return false;
+    }
+    try {
+      await (repository as ShoppingLineRelinkRepository).relinkShoppingLine(
+        homeId: homeId,
+        listId: list.id,
+        lineId: line.id,
+        expectedRevision: line.revision,
+        homeProductId: homeProductId,
+        selectedPackId: selectedPackId,
+        reason: reason.trim(),
+      );
+      return true;
+    } catch (_) {
+      _setError(
+        'This item could not be relinked. Your selection is retained; review the current saved product and revision before retrying.',
+      );
+      return false;
+    }
+  }
+
   bool _manualBusy = false;
   bool get manualBusy => _manualBusy;
   final String homeId;
@@ -115,6 +234,7 @@ final class ShoppingController extends ChangeNotifier {
           _setError('Product lookup access was rejected.');
           return;
         }
+        _catalogItems = List<InventoryItem>.unmodifiable(items);
         _items = List<InventoryItem>.unmodifiable(
           items.where((item) => item.isHomeProduct),
         );
@@ -271,7 +391,10 @@ final class ShoppingController extends ChangeNotifier {
   }
 
   /// Duplicates are scoped to the currently selected list, never old lists.
-  ShoppingListLine? duplicateForProduct(String homeProductId) {
+  ShoppingListLine? duplicateForProduct(
+    String homeProductId, {
+    String? selectedPackId,
+  }) {
     final product = _items
         .where((item) => item.id == homeProductId)
         .firstOrNull;
@@ -280,8 +403,10 @@ final class ShoppingController extends ChangeNotifier {
         .where(
           (line) =>
               line.homeProductId == homeProductId &&
-              (line.selectedPackId == null ||
-                  line.selectedPackId == product.packId),
+              line.selectedPackId == selectedPackId &&
+              (selectedPackId == null ||
+                  line.origin == ShoppingLineOrigin.manual ||
+                  line.quantityBasis == 'pack-count'),
         )
         .firstOrNull;
   }
@@ -291,6 +416,8 @@ final class ShoppingController extends ChangeNotifier {
     double quantity = 1,
     String? homeProductId,
     bool allowDuplicate = false,
+    String? selectedPackId,
+    String? instructions,
   }) async {
     if (_manualBusy || _disposed) return false;
     final trimmed = name.trim();
@@ -310,12 +437,31 @@ final class ShoppingController extends ChangeNotifier {
         _setError('Choose the product again or add the text as a custom item.');
         return false;
       }
-      if (!allowDuplicate && duplicateForProduct(homeProductId) != null) {
+      if (selectedPackId != null &&
+          !packChoices(
+            homeProductId,
+          ).any((pack) => pack.id == selectedPackId)) {
+        _setError(
+          'Choose a compatible published pack or use the stock measurement.',
+        );
+        return false;
+      }
+      if (!allowDuplicate &&
+          duplicateForProduct(homeProductId, selectedPackId: selectedPackId) !=
+              null) {
         _setError(
           'This product is already on the selected list. Review its quantity or keep a separate line.',
         );
         return false;
       }
+    }
+    if (homeProductId == null && selectedPackId != null) return false;
+    final description = instructions?.trim().isNotEmpty == true
+        ? instructions!.trim()
+        : trimmed;
+    if (description.length > 191) {
+      _setError('Purchasing instructions must contain at most 191 characters.');
+      return false;
     }
     final list = _state.list;
     if (list == null || list.archived) {
@@ -330,11 +476,21 @@ final class ShoppingController extends ChangeNotifier {
         ShoppingListLine(
           id: _idGenerator(),
           homeId: homeId,
-          name: trimmed,
+          name: description,
           quantity: quantity,
           origin: ShoppingLineOrigin.manual,
           createdAt: _clock().toUtc(),
           homeProductId: homeProductId,
+          selectedPackId: selectedPackId,
+          productId: _items
+              .where((item) => item.id == homeProductId)
+              .firstOrNull
+              ?.productId,
+          stockUnit: _items
+              .where((item) => item.id == homeProductId)
+              .firstOrNull
+              ?.unit,
+          quantityBasis: selectedPackId == null ? 'stock-unit' : 'pack-count',
         ),
       );
       await _repository.saveList(next);

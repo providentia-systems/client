@@ -1,6 +1,8 @@
 /// Reserved Drift record types that are local-only and must never be accepted
 /// from, or removed by, a synchronization bootstrap.
 abstract final class ClientLocalRecordTypes {
+  static const String inventoryCreation = 'client.inventory.creation-v1';
+  static const String receiptHistory = 'client.purchasing.receipt-history-v1';
   static const String aiReviewResume = 'client.ai-review.resume-v1';
   static const String publishedCategoryCache =
       'client.catalog.published-category-v1';
@@ -15,7 +17,9 @@ abstract final class ClientLocalRecordTypes {
       'client.local-ai-provider.selection-v1';
 
   static const Set<String> synchronizationProtected = <String>{
+    receiptHistory,
     aiReviewResume,
+    inventoryCreation,
     itemMasterCache,
     publishedCategoryCache,
     catalogProductBase,
